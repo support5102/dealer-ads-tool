@@ -1199,13 +1199,12 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
     });
 
-    // List all accessible customers using the access token
-    const { data } = await axios.get(
-      'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
-      { headers: { Authorization: `Bearer ${req.session.tokens.access_token}`, 'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN } }
+    // Use the library's built-in method — handles all headers automatically
+    const accessibleCustomers = await client.listAccessibleCustomers(
+      req.session.tokens.refresh_token
     );
 
-    const resourceNames = data.resourceNames || [];
+    const resourceNames = accessibleCustomers.resource_names || [];
     const accounts = [];
 
     for (const resourceName of resourceNames) {
