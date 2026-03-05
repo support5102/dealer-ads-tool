@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────
+# DEALER ADS TOOL — Environment Variables
+# ─────────────────────────────────────────────────────────────
+# Copy this file to .env for local development
+# On Railway: enter these in the Variables tab (never commit real values)
+
+# Google Ads API
+GOOGLE_ADS_DEVELOPER_TOKEN=your_developer_token_here
+GOOGLE_ADS_CLIENT_ID=your_client_id_here.apps.googleusercontent.com
+GOOGLE_ADS_CLIENT_SECRET=your_client_secret_here
+
+# App Settings
+SESSION_SECRET=any_long_random_string_you_make_up
+PORT=3000
+
+# This is the URL your app lives at.
+# Local dev:  http://localhost:3000
+# Production: https://your-app-name.up.railway.app  (Railway gives you this after deploy)
+APP_URL=http://localhost:3000
+
+# Anthropic (Claude AI) - for parsing Freshdesk tasks
+# Get at: https://console.anthropic.com/settings/api-keys
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
