@@ -1264,28 +1264,29 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
   const { customerId } = req.params;
+  const { mccId } = req.query; // optional MCC login customer id
 
   try {
+    const customerConfig = {
+      customer_id:   customerId,
+      refresh_token: req.session.tokens.refresh_token,
+    };
+    if (mccId) customerConfig.login_customer_id = mccId;
+
     const client = new GoogleAdsApi({
       client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
       client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-    }).Customer({
-      customer_id:   customerId,
-      refresh_token: req.session.tokens.refresh_token,
-    });
+    }).Customer(customerConfig);
 
-    // Fetch campaigns
+    // Fetch campaigns (simplified — no budget join to avoid permission issues)
     const campaigns = await client.query(`
       SELECT
         campaign.id,
         campaign.name,
         campaign.status,
         campaign.advertising_channel_type,
-        campaign.bidding_strategy_type,
-        campaign_budget.amount_micros,
-        campaign_budget.name,
-        campaign_budget.shared_set
+        campaign.bidding_strategy_type
       FROM campaign
       WHERE campaign.status != 'REMOVED'
       ORDER BY campaign.name
@@ -1341,15 +1342,13 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     const campMap = {};
     campaigns.forEach(row => {
       const c = row.campaign;
-      const b = row.campaign_budget;
       campMap[c.name] = {
         id:       String(c.id),
         name:     c.name,
         status:   c.status,
         type:     c.advertising_channel_type,
         bidding:  c.bidding_strategy_type,
-        budget:   b ? (b.amount_micros / 1_000_000).toFixed(2) : '?',
-        budgetName: b?.name || '',
+        budget:   '?',
         adGroups: [],
         locations: [],
       };
@@ -1404,9 +1403,10 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Structure error FULL:', JSON.stringify(err.response?.data || err.message || String(err)));
-    console.error('Structure stack:', err.stack);
-    res.status(500).json({ error: 'Failed to load account structure: ' + (err.message || String(err)) });
+    const errMsg = err?.errors?.[0]?.message || err?.message || JSON.stringify(err) || String(err);
+    console.error('Structure error:', errMsg);
+    console.error('Structure error details:', JSON.stringify(err?.errors || err?.details || []));
+    res.status(500).json({ error: 'Failed to load account structure: ' + errMsg });
   }
 });
 
