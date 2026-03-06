@@ -1213,20 +1213,32 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     const results = await Promise.allSettled(
       resourceNames.map(async (resourceName) => {
         const customerId = resourceName.replace('customers/', '');
-        const customer = client.Customer({
-          customer_id:   customerId,
-          refresh_token: req.session.tokens.refresh_token,
-        });
-        const [info] = await customer.query(`
-          SELECT
-            customer.id,
-            customer.descriptive_name,
-            customer.currency_code,
-            customer.time_zone,
-            customer.manager
-          FROM customer
-          LIMIT 1
-        `);
+        // Try querying with login_customer_id set to the account itself
+        // This works for standalone accounts; MCC child accounts need MCC id
+        let info = null;
+        for (const loginId of [customerId, req.session.mccId].filter(Boolean)) {
+          try {
+            const customer = client.Customer({
+              customer_id:       customerId,
+              refresh_token:     req.session.tokens.refresh_token,
+              login_customer_id: loginId,
+            });
+            const rows = await customer.query(`
+              SELECT
+                customer.id,
+                customer.descriptive_name,
+                customer.currency_code,
+                customer.time_zone,
+                customer.manager
+              FROM customer
+              LIMIT 1
+            `);
+            if (rows[0]) { info = rows[0]; break; }
+          } catch(e) { /* try next loginId */ }
+        }
+        if (info?.customer?.manager && !req.session.mccId) {
+          req.session.mccId = String(info.customer.id);
+        }
         return info ? {
           id:        String(info.customer.id),
           name:      info.customer.descriptive_name || `Account ${info.customer.id}`,
