@@ -1209,14 +1209,14 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     console.log('Resource names found:', resourceNames.length);
     const accounts = [];
 
-    for (const resourceName of resourceNames) {
-      const customerId = resourceName.replace('customers/', '');
-      try {
+    // Query all accounts in parallel for speed
+    const results = await Promise.allSettled(
+      resourceNames.map(async (resourceName) => {
+        const customerId = resourceName.replace('customers/', '');
         const customer = client.Customer({
           customer_id:   customerId,
           refresh_token: req.session.tokens.refresh_token,
         });
-
         const [info] = await customer.query(`
           SELECT
             customer.id,
@@ -1227,21 +1227,23 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
           FROM customer
           LIMIT 1
         `);
+        return info ? {
+          id:        String(info.customer.id),
+          name:      info.customer.descriptive_name || `Account ${info.customer.id}`,
+          currency:  info.customer.currency_code,
+          timezone:  info.customer.time_zone,
+          isManager: info.customer.manager,
+        } : null;
+      })
+    );
 
-        if (info) {
-          accounts.push({
-            id:       String(info.customer.id),
-            name:     info.customer.descriptive_name || `Account ${info.customer.id}`,
-            currency: info.customer.currency_code,
-            timezone: info.customer.time_zone,
-            isManager: info.customer.manager,
-          });
-        }
-      } catch (e) {
-        // Skip accounts we can't read (permission issues etc)
-        console.warn(`Skipping account ${customerId}:`, e.message);
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value) {
+        accounts.push(r.value);
+      } else if (r.status === 'rejected') {
+        console.warn('Skipping account:', resourceNames[i], r.reason?.message);
       }
-    }
+    });
 
     // Sort: manager accounts first, then alphabetically
     accounts.sort((a, b) => {
