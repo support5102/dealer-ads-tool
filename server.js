@@ -1204,7 +1204,9 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
       req.session.tokens.refresh_token
     );
 
-    const resourceNames = accessibleCustomers.resource_names || [];
+    console.log('listAccessibleCustomers response:', JSON.stringify(accessibleCustomers));
+    const resourceNames = accessibleCustomers.resource_names || accessibleCustomers.resourceNames || [];
+    console.log('Resource names found:', resourceNames.length);
     const accounts = [];
 
     for (const resourceName of resourceNames) {
@@ -1249,7 +1251,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
 
     res.json({ accounts });
   } catch (err) {
-    console.error('Accounts error:', err.response?.data || err.message);
+    console.error('Accounts error:', JSON.stringify(err.response?.data || err.message || String(err)));
     res.status(500).json({ error: 'Failed to load accounts: ' + (err.message || 'Unknown error') });
   }
 });
