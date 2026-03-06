@@ -1273,7 +1273,6 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     }).Customer({
       customer_id:   customerId,
       refresh_token: req.session.tokens.refresh_token,
-      login_customer_id: customerId,
     });
 
     // Fetch campaigns
@@ -1405,8 +1404,9 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Structure error:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Failed to load account structure: ' + err.message });
+    console.error('Structure error FULL:', JSON.stringify(err.response?.data || err.message || String(err)));
+    console.error('Structure stack:', err.stack);
+    res.status(500).json({ error: 'Failed to load account structure: ' + (err.message || String(err)) });
   }
 });
 
@@ -1466,7 +1466,7 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
     }).Customer({
       customer_id:       customerId,
       refresh_token:     req.session.tokens.refresh_token,
-      login_customer_id: customerId,
+
     });
 
     for (const change of changes) {
