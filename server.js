@@ -830,7 +830,7 @@ function renderTree(campaigns) {
     const campDiv = document.createElement('div');
     campDiv.className = 'tree-campaign';
 
-    const statusClass = camp.status.toLowerCase();
+    const statusClass = (String(camp.status || "")).toLowerCase().replace("campaign_status_","");
     campDiv.innerHTML = \`
       <div class="tree-camp-header" onclick="toggleCampaign(this)" data-camp="\${camp.name}">
         <span class="tree-arrow">▶</span>
@@ -849,7 +849,7 @@ function renderTree(campaigns) {
             </div>
             <div class="tree-keywords" style="display:none">
               \${ag.keywords.slice(0,30).map(kw => {
-                const match = kw.match.toLowerCase().replace('_', '');
+                const match = String(kw.match||"").toLowerCase().replace("keyword_match_type_","").replace(/_/g,"");
                 const matchShort = match === 'exact' ? 'Exact' : match === 'phrase' ? 'Phrase' : 'Broad';
                 return \`<div class="tree-kw">
                   <span class="match-badge \${match}">\${matchShort}</span>
