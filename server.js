@@ -1238,10 +1238,21 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     );
 
     results.forEach((r, i) => {
+      const customerId = resourceNames[i].replace('customers/', '');
       if (r.status === 'fulfilled' && r.value) {
         accounts.push(r.value);
-      } else if (r.status === 'rejected') {
-        console.warn('Skipping account:', resourceNames[i], r.reason?.message);
+      } else {
+        // Name query failed — still show the account using its ID
+        const reason = r.reason?.errors?.[0]?.message || r.reason?.message || 'unknown';
+        console.warn('Account name query failed for', customerId, ':', reason);
+        // Add it anyway with ID as name so user can still select it
+        accounts.push({
+          id:        customerId,
+          name:      'Account ' + customerId,
+          currency:  '',
+          timezone:  '',
+          isManager: false,
+        });
       }
     });
 
