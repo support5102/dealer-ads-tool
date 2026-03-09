@@ -1221,14 +1221,16 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     const token = await getFreshAccessToken(req);
     const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-    // Step 1: Use the library to list accessible customers (this works reliably)
-    const api = new GoogleAdsApi({
-      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
-      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
-      developer_token: devToken,
-    });
-    const accessible = await api.listAccessibleCustomers(req.session.tokens.refresh_token);
-    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
+    // Step 1: List accessible customers via REST (fast, no hanging)
+    console.log('Calling listAccessibleCustomers...');
+    const listResp = await axios.get(
+      'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
+      { 
+        headers: { 'Authorization': 'Bearer ' + token, 'developer-token': devToken },
+        timeout: 10000
+      }
+    );
+    const resourceNames = listResp.data.resourceNames || [];
     console.log('Accessible accounts:', resourceNames.length);
 
     // Step 2: Use REST to query each account in parallel (fast, no hanging)
