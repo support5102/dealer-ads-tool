@@ -1192,6 +1192,7 @@ function requireAuth(req, res, next) {
 // Returns the full list of accessible accounts for the dropdown
 // ─────────────────────────────────────────────────────────────
 app.get('/api/accounts', requireAuth, async (req, res) => {
+  console.log('--- /api/accounts called ---');
   try {
     const api = new GoogleAdsApi({
       client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
@@ -1202,81 +1203,105 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     // Get all accessible customer IDs
     const accessible = await api.listAccessibleCustomers(req.session.tokens.refresh_token);
     const resourceNames = accessible.resource_names || accessible.resourceNames || [];
-    console.log('Accessible accounts:', resourceNames.length);
+    console.log('Accessible accounts:', resourceNames.length, resourceNames);
 
-    // Try each accessible account as a potential MCC
-    // The real MCC will return multiple child accounts from customer_client
+    // Helper: query with timeout
+    const queryWithTimeout = (customer, gaql, ms = 8000) =>
+      Promise.race([
+        customer.query(gaql),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+      ]);
+
+    // Step 1: Find the MCC by querying all accounts in parallel
+    // The MCC has customer.manager = true
+    const infoResults = await Promise.allSettled(
+      resourceNames.map(async rn => {
+        const id = rn.replace('customers/', '');
+        const cust = api.Customer({ customer_id: id, refresh_token: req.session.tokens.refresh_token });
+        const rows = await queryWithTimeout(cust, `SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1`);
+        return { id, info: rows[0]?.customer };
+      })
+    );
+
+    let mccId = null;
+    infoResults.forEach(r => {
+      if (r.status === 'fulfilled' && r.value?.info?.manager) {
+        mccId = String(r.value.id);
+        console.log('Found MCC:', mccId, r.value.info.descriptive_name);
+      }
+    });
+
+    // Step 2: Query MCC for all child accounts
     let accounts = [];
-
-    for (const rn of resourceNames) {
-      const tryId = rn.replace('customers/', '');
+    if (mccId) {
+      req.session.mccId = mccId;
       try {
-        const customer = api.Customer({
-          customer_id:       tryId,
-          login_customer_id: tryId,
+        const mcc = api.Customer({
+          customer_id:       mccId,
+          login_customer_id: mccId,
           refresh_token:     req.session.tokens.refresh_token,
         });
-        const rows = await customer.query(`
+        const rows = await queryWithTimeout(mcc, `
           SELECT
             customer_client.id,
             customer_client.descriptive_name,
             customer_client.currency_code,
-            customer_client.time_zone,
             customer_client.manager,
-            customer_client.level
+            customer_client.status
           FROM customer_client
-          WHERE customer_client.level <= 1
-        `);
+          WHERE customer_client.level = 1
+        `, 15000);
 
-        console.log('Account', tryId, 'returned', rows.length, 'customer_client rows');
-
-        if (rows.length > 1) {
-          // This is the MCC — collect all non-manager child accounts
-          req.session.mccId = tryId;
-          rows.forEach(row => {
-            const c = row.customer_client;
-            if (!c.manager && String(c.id) !== tryId) {
-              accounts.push({
-                id:        String(c.id),
-                name:      c.descriptive_name || 'Account ' + c.id,
-                currency:  c.currency_code || '',
-                timezone:  c.time_zone || '',
-                isManager: false,
-                mccId:     tryId,
-              });
-            }
-          });
-          console.log('Found MCC:', tryId, '- child accounts:', accounts.length);
-          break;
-        }
+        console.log('customer_client rows:', rows.length);
+        rows.forEach(row => {
+          const c = row.customer_client;
+          if (!c.manager) {
+            accounts.push({
+              id:        String(c.id),
+              name:      c.descriptive_name || 'Account ' + c.id,
+              currency:  c.currency_code || '',
+              isManager: false,
+              mccId,
+            });
+          }
+        });
+        console.log('Client accounts found:', accounts.length);
       } catch(e) {
-        console.log('Skipping', tryId, ':', e.message?.substring(0,80));
+        console.error('MCC customer_client query failed:', e.message);
       }
     }
 
-    // Fallback: show all accessible accounts by ID
+    // Fallback: show all accessible accounts
     if (accounts.length === 0) {
-      console.log('MCC detection failed, showing all accessible accounts');
-      resourceNames.forEach(rn => {
-        const id = rn.replace('customers/', '');
-        accounts.push({ id, name: 'Account ' + id, currency: '', timezone: '', isManager: false });
+      console.log('Fallback: showing all accessible accounts');
+      infoResults.forEach(r => {
+        if (r.status === 'fulfilled' && r.value) {
+          const { id, info } = r.value;
+          accounts.push({
+            id,
+            name: info?.descriptive_name || 'Account ' + id,
+            currency: '',
+            isManager: info?.manager || false,
+            mccId: mccId || null,
+          });
+        } else {
+          const id = resourceNames[infoResults.indexOf(r)]?.replace('customers/', '') || 'unknown';
+          accounts.push({ id, name: 'Account ' + id, currency: '', isManager: false, mccId: null });
+        }
       });
     }
 
     accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    console.log('Returning', accounts.length, 'accounts');
     res.json({ accounts });
 
   } catch (err) {
-    console.error('Accounts error:', err.message);
+    console.error('Accounts error:', err.message, err.stack);
     res.status(500).json({ error: 'Failed to load accounts: ' + err.message });
   }
 });
 
 
-// ─────────────────────────────────────────────────────────────
-// GET ACCOUNT STRUCTURE (campaigns, ad groups, keywords etc)
-// Called when user selects an account — builds the context for Claude
-// ─────────────────────────────────────────────────────────────
 app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
   const { customerId } = req.params;
   const { mccId } = req.query; // optional MCC login customer id
