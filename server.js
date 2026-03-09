@@ -1188,13 +1188,37 @@ function requireAuth(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// TOKEN REFRESH HELPER
+// Access tokens expire after 1 hour — refresh automatically
+// ─────────────────────────────────────────────────────────────
+async function getFreshAccessToken(req) {
+  const tokens = req.session.tokens;
+  // Refresh the token every time to be safe
+  try {
+    const { data } = await axios.post('https://oauth2.googleapis.com/token', {
+      client_id:     process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET,
+      refresh_token: tokens.refresh_token,
+      grant_type:    'refresh_token',
+    });
+    req.session.tokens.access_token = data.access_token;
+    console.log('Token refreshed successfully');
+    return data.access_token;
+  } catch(e) {
+    console.error('Token refresh failed:', e.response?.data || e.message);
+    // Fall back to existing token
+    return tokens.access_token;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // GET ALL ACCOUNTS (MCC + client accounts)
 // Returns the full list of accessible accounts for the dropdown
 // ─────────────────────────────────────────────────────────────
 app.get('/api/accounts', requireAuth, async (req, res) => {
   console.log('--- /api/accounts called ---');
   try {
-    const token = req.session.tokens.access_token;
+    const token = await getFreshAccessToken(req);
     const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
     // Helper: make a Google Ads API REST call
