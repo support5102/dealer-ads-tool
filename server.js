@@ -1193,93 +1193,85 @@ function requireAuth(req, res, next) {
 // ─────────────────────────────────────────────────────────────
 app.get('/api/accounts', requireAuth, async (req, res) => {
   try {
-    const client = new GoogleAdsApi({
+    const api = new GoogleAdsApi({
       client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
       client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
     });
 
-    // Use the library's built-in method — handles all headers automatically
-    const accessibleCustomers = await client.listAccessibleCustomers(
-      req.session.tokens.refresh_token
-    );
+    // Get all accessible customer IDs
+    const accessible = await api.listAccessibleCustomers(req.session.tokens.refresh_token);
+    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
+    console.log('Accessible accounts:', resourceNames.length);
 
-    console.log('listAccessibleCustomers response:', JSON.stringify(accessibleCustomers));
-    const resourceNames = accessibleCustomers.resource_names || accessibleCustomers.resourceNames || [];
-    console.log('Resource names found:', resourceNames.length);
-    const accounts = [];
+    // Try each accessible account as a potential MCC
+    // The real MCC will return multiple child accounts from customer_client
+    let accounts = [];
 
-    // Query all accounts in parallel for speed
-    const results = await Promise.allSettled(
-      resourceNames.map(async (resourceName) => {
-        const customerId = resourceName.replace('customers/', '');
-        // Try querying with login_customer_id set to the account itself
-        // This works for standalone accounts; MCC child accounts need MCC id
-        let info = null;
-        for (const loginId of [customerId, req.session.mccId].filter(Boolean)) {
-          try {
-            const customer = client.Customer({
-              customer_id:       customerId,
-              refresh_token:     req.session.tokens.refresh_token,
-              login_customer_id: loginId,
-            });
-            const rows = await customer.query(`
-              SELECT
-                customer.id,
-                customer.descriptive_name,
-                customer.currency_code,
-                customer.time_zone,
-                customer.manager
-              FROM customer
-              LIMIT 1
-            `);
-            if (rows[0]) { info = rows[0]; break; }
-          } catch(e) { /* try next loginId */ }
-        }
-        if (info?.customer?.manager && !req.session.mccId) {
-          req.session.mccId = String(info.customer.id);
-        }
-        return info ? {
-          id:        String(info.customer.id),
-          name:      info.customer.descriptive_name || `Account ${info.customer.id}`,
-          currency:  info.customer.currency_code,
-          timezone:  info.customer.time_zone,
-          isManager: info.customer.manager,
-        } : null;
-      })
-    );
-
-    results.forEach((r, i) => {
-      const customerId = resourceNames[i].replace('customers/', '');
-      if (r.status === 'fulfilled' && r.value) {
-        accounts.push(r.value);
-      } else {
-        // Name query failed — still show the account using its ID
-        const reason = r.reason?.errors?.[0]?.message || r.reason?.message || 'unknown';
-        console.warn('Account name query failed for', customerId, ':', reason);
-        // Add it anyway with ID as name so user can still select it
-        accounts.push({
-          id:        customerId,
-          name:      'Account ' + customerId,
-          currency:  '',
-          timezone:  '',
-          isManager: false,
+    for (const rn of resourceNames) {
+      const tryId = rn.replace('customers/', '');
+      try {
+        const customer = api.Customer({
+          customer_id:       tryId,
+          login_customer_id: tryId,
+          refresh_token:     req.session.tokens.refresh_token,
         });
+        const rows = await customer.query(`
+          SELECT
+            customer_client.id,
+            customer_client.descriptive_name,
+            customer_client.currency_code,
+            customer_client.time_zone,
+            customer_client.manager,
+            customer_client.level
+          FROM customer_client
+          WHERE customer_client.level <= 1
+        `);
+
+        console.log('Account', tryId, 'returned', rows.length, 'customer_client rows');
+
+        if (rows.length > 1) {
+          // This is the MCC — collect all non-manager child accounts
+          req.session.mccId = tryId;
+          rows.forEach(row => {
+            const c = row.customer_client;
+            if (!c.manager && String(c.id) !== tryId) {
+              accounts.push({
+                id:        String(c.id),
+                name:      c.descriptive_name || 'Account ' + c.id,
+                currency:  c.currency_code || '',
+                timezone:  c.time_zone || '',
+                isManager: false,
+                mccId:     tryId,
+              });
+            }
+          });
+          console.log('Found MCC:', tryId, '- child accounts:', accounts.length);
+          break;
+        }
+      } catch(e) {
+        console.log('Skipping', tryId, ':', e.message?.substring(0,80));
       }
-    });
+    }
 
-    // Sort: manager accounts first, then alphabetically
-    accounts.sort((a, b) => {
-      if (a.isManager !== b.isManager) return a.isManager ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    // Fallback: show all accessible accounts by ID
+    if (accounts.length === 0) {
+      console.log('MCC detection failed, showing all accessible accounts');
+      resourceNames.forEach(rn => {
+        const id = rn.replace('customers/', '');
+        accounts.push({ id, name: 'Account ' + id, currency: '', timezone: '', isManager: false });
+      });
+    }
 
+    accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     res.json({ accounts });
+
   } catch (err) {
-    console.error('Accounts error:', JSON.stringify(err.response?.data || err.message || String(err)));
-    res.status(500).json({ error: 'Failed to load accounts: ' + (err.message || 'Unknown error') });
+    console.error('Accounts error:', err.message);
+    res.status(500).json({ error: 'Failed to load accounts: ' + err.message });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────
 // GET ACCOUNT STRUCTURE (campaigns, ad groups, keywords etc)
