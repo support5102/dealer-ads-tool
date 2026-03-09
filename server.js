@@ -1221,21 +1221,6 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     const token = await getFreshAccessToken(req);
     const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-    // Step 1: List accessible customers using the library (most reliable method)
-    console.log('Calling listAccessibleCustomers via library...');
-    const api = new GoogleAdsApi({
-      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
-      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
-      developer_token: devToken,
-    });
-    const accessible = await Promise.race([
-      api.listAccessibleCustomers(req.session.tokens.refresh_token),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('listAccessibleCustomers timed out after 15s')), 15000))
-    ]);
-    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
-    console.log('Accessible accounts:', resourceNames.length);
-
-    // Step 2: Use REST to query each account in parallel (fast, no hanging)
     const gadsSearch = async (customerId, query, loginId) => {
       const headers = {
         'Authorization': 'Bearer ' + token,
@@ -1243,78 +1228,105 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
         'Content-Type': 'application/json',
       };
       if (loginId) headers['login-customer-id'] = String(loginId);
-      try {
-        const resp = await axios.post(
-          'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
-          { query },
-          { headers, timeout: 10000 }
-        );
-        // searchStream returns an array of response objects
-        const results = [];
-        const data = Array.isArray(resp.data) ? resp.data : [resp.data];
-        data.forEach(chunk => { if (chunk.results) results.push(...chunk.results); });
-        return results;
-      } catch(e) {
-        console.log('gadsSearch failed for', customerId, ':', e.response?.data?.error?.message || e.message);
-        throw e;
-      }
+      const resp = await axios.post(
+        'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
+        { query },
+        { headers, timeout: 10000 }
+      );
+      const results = [];
+      const data = Array.isArray(resp.data) ? resp.data : [resp.data];
+      data.forEach(chunk => { if (chunk.results) results.push(...chunk.results); });
+      return results;
     };
 
-    // Step 3: Find MCC by querying all in parallel
+    // Step 1: Get accessible customer IDs via library
+    const api = new GoogleAdsApi({
+      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developer_token: devToken,
+    });
+    const accessible = await Promise.race([
+      api.listAccessibleCustomers(req.session.tokens.refresh_token),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+    ]);
+    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
+    console.log('Accessible accounts:', resourceNames.length);
+
+    // Step 2: Try each account as login-customer-id for itself
+    // For MCC accounts this works; for child accounts we need MCC id
+    // Try all in parallel with login-customer-id = their own id
     const infoResults = await Promise.allSettled(
       resourceNames.map(async rn => {
         const id = rn.replace('customers/', '');
-        const rows = await gadsSearch(id, 'SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1');
+        const rows = await gadsSearch(id,
+          'SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1',
+          id  // use own id as login id - works for top-level accounts
+        );
         const c = rows[0]?.customer;
-        return { id, name: c?.descriptiveName || c?.descriptive_name || null, isManager: c?.manager || false };
+        return { id, name: c?.descriptiveName || null, isManager: c?.manager || false };
       })
     );
 
-    console.log('Info results:', infoResults.map(r => r.status === 'fulfilled' ? r.value?.id + ':' + r.value?.isManager : 'rejected').join(', '));
+    console.log('Results:', infoResults.map(r => 
+      r.status === 'fulfilled' ? (r.value.id + ':' + (r.value.isManager ? 'MCC' : 'client')) : 'failed'
+    ).join(', '));
 
-    let mccId = null;
+    // Find the MCC
+    let mccId = req.session.mccId;
     infoResults.forEach(r => {
       if (r.status === 'fulfilled' && r.value?.isManager) {
         mccId = r.value.id;
+        req.session.mccId = mccId;
         console.log('Found MCC:', mccId);
       }
     });
 
-    // Step 4: Get client accounts from MCC
+    // Step 3: Get all client accounts using MCC as login id
     let accounts = [];
     if (mccId) {
-      req.session.mccId = mccId;
-      const rows = await gadsSearch(mccId,
-        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager FROM customer_client WHERE customer_client.level = 1',
-        mccId
-      );
-      console.log('customer_client rows:', rows.length);
-      rows.forEach(row => {
-        const c = row.customerClient;
-        if (c && !c.manager) {
-          accounts.push({
-            id:       String(c.id),
-            name:     c.descriptiveName || 'Account ' + c.id,
-            currency: c.currencyCode || '',
-            isManager: false,
-            mccId,
-          });
-        }
-      });
+      try {
+        const rows = await gadsSearch(mccId,
+          'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.level = 1',
+          mccId
+        );
+        console.log('customer_client rows:', rows.length);
+        rows.forEach(row => {
+          const c = row.customerClient;
+          if (c && !c.manager) {
+            accounts.push({
+              id:       String(c.id),
+              name:     c.descriptiveName || 'Account ' + c.id,
+              currency: c.currencyCode || '',
+              isManager: false,
+              mccId,
+            });
+          }
+        });
+        console.log('Client accounts found:', accounts.length);
+      } catch(e) {
+        console.error('customer_client query failed:', e.response?.data?.error?.message || e.message);
+      }
     }
 
-    // Fallback: use the info we already fetched
+    // Fallback: use whatever info we got
     if (accounts.length === 0) {
-      console.log('Using fallback account list');
+      console.log('Using fallback');
       infoResults.forEach(r => {
         if (r.status === 'fulfilled' && r.value) {
           accounts.push({
-            id:       r.value.id,
-            name:     r.value.name || 'Account ' + r.value.id,
+            id: r.value.id,
+            name: r.value.name || 'Account ' + r.value.id,
             currency: '',
             isManager: r.value.isManager,
             mccId: mccId || null,
           });
+        } else {
+          // Still add the account even if query failed
+          const rn = resourceNames[infoResults.indexOf(r)];
+          if (rn) {
+            const id = rn.replace('customers/', '');
+            accounts.push({ id, name: 'Account ' + id, currency: '', isManager: false, mccId: null });
+          }
         }
       });
     }
@@ -1324,7 +1336,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     res.json({ accounts });
 
   } catch (err) {
-    console.error('Accounts error:', err.response?.data || err.message);
+    console.error('Accounts error:', err.response?.data?.error || err.message);
     res.status(500).json({ error: 'Failed to load accounts: ' + err.message });
   }
 });
