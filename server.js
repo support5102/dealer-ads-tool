@@ -1243,12 +1243,21 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
         'Content-Type': 'application/json',
       };
       if (loginId) headers['login-customer-id'] = String(loginId);
-      const resp = await axios.post(
-        'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:search',
-        { query },
-        { headers, timeout: 8000 }
-      );
-      return resp.data.results || [];
+      try {
+        const resp = await axios.post(
+          'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
+          { query },
+          { headers, timeout: 10000 }
+        );
+        // searchStream returns an array of response objects
+        const results = [];
+        const data = Array.isArray(resp.data) ? resp.data : [resp.data];
+        data.forEach(chunk => { if (chunk.results) results.push(...chunk.results); });
+        return results;
+      } catch(e) {
+        console.log('gadsSearch failed for', customerId, ':', e.response?.data?.error?.message || e.message);
+        throw e;
+      }
     };
 
     // Step 3: Find MCC by querying all in parallel
