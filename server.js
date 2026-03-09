@@ -1194,31 +1194,38 @@ function requireAuth(req, res, next) {
 app.get('/api/accounts', requireAuth, async (req, res) => {
   console.log('--- /api/accounts called ---');
   try {
-    const api = new GoogleAdsApi({
-      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
-      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
-      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-    });
+    const token = req.session.tokens.access_token;
+    const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-    // Get all accessible customer IDs
-    const accessible = await api.listAccessibleCustomers(req.session.tokens.refresh_token);
-    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
-    console.log('Accessible accounts:', resourceNames.length, resourceNames);
+    // Helper: make a Google Ads API REST call
+    const gadsPost = async (customerId, query, loginId) => {
+      const headers = {
+        'Authorization': 'Bearer ' + token,
+        'developer-token': devToken,
+        'Content-Type': 'application/json',
+      };
+      if (loginId) headers['login-customer-id'] = loginId;
+      const resp = await axios.post(
+        `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
+        { query },
+        { headers, timeout: 10000 }
+      );
+      return resp.data.results || [];
+    };
 
-    // Helper: query with timeout
-    const queryWithTimeout = (customer, gaql, ms = 8000) =>
-      Promise.race([
-        customer.query(gaql),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
-      ]);
+    // Step 1: Get accessible customer IDs
+    const listResp = await axios.get(
+      'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
+      { headers: { 'Authorization': 'Bearer ' + token, 'developer-token': devToken }, timeout: 10000 }
+    );
+    const resourceNames = listResp.data.resourceNames || [];
+    console.log('Accessible:', resourceNames.length);
 
-    // Step 1: Find the MCC by querying all accounts in parallel
-    // The MCC has customer.manager = true
+    // Step 2: Find MCC — query all in parallel
     const infoResults = await Promise.allSettled(
       resourceNames.map(async rn => {
         const id = rn.replace('customers/', '');
-        const cust = api.Customer({ customer_id: id, refresh_token: req.session.tokens.refresh_token });
-        const rows = await queryWithTimeout(cust, `SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1`);
+        const rows = await gadsPost(id, 'SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1');
         return { id, info: rows[0]?.customer };
       })
     );
@@ -1231,72 +1238,47 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
       }
     });
 
-    // Step 2: Query MCC for all child accounts
+    // Step 3: Get all client accounts from MCC
     let accounts = [];
     if (mccId) {
       req.session.mccId = mccId;
-      try {
-        const mcc = api.Customer({
-          customer_id:       mccId,
-          login_customer_id: mccId,
-          refresh_token:     req.session.tokens.refresh_token,
-        });
-        const rows = await queryWithTimeout(mcc, `
-          SELECT
-            customer_client.id,
-            customer_client.descriptive_name,
-            customer_client.currency_code,
-            customer_client.manager,
-            customer_client.status
-          FROM customer_client
-          WHERE customer_client.level = 1
-        `, 15000);
-
-        console.log('customer_client rows:', rows.length);
-        rows.forEach(row => {
-          const c = row.customer_client;
-          if (!c.manager) {
-            accounts.push({
-              id:        String(c.id),
-              name:      c.descriptive_name || 'Account ' + c.id,
-              currency:  c.currency_code || '',
-              isManager: false,
-              mccId,
-            });
-          }
-        });
-        console.log('Client accounts found:', accounts.length);
-      } catch(e) {
-        console.error('MCC customer_client query failed:', e.message);
-      }
+      const rows = await gadsPost(mccId,
+        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.status FROM customer_client WHERE customer_client.level = 1',
+        mccId
+      );
+      console.log('customer_client rows:', rows.length);
+      rows.forEach(row => {
+        const c = row.customerClient;
+        if (c && !c.manager) {
+          accounts.push({
+            id:       String(c.id),
+            name:     c.descriptiveName || 'Account ' + c.id,
+            currency: c.currencyCode || '',
+            isManager: false,
+            mccId,
+          });
+        }
+      });
+      console.log('Client accounts:', accounts.length);
     }
 
-    // Fallback: show all accessible accounts
+    // Fallback
     if (accounts.length === 0) {
-      console.log('Fallback: showing all accessible accounts');
+      console.log('Fallback mode');
       infoResults.forEach(r => {
         if (r.status === 'fulfilled' && r.value) {
           const { id, info } = r.value;
-          accounts.push({
-            id,
-            name: info?.descriptive_name || 'Account ' + id,
-            currency: '',
-            isManager: info?.manager || false,
-            mccId: mccId || null,
-          });
-        } else {
-          const id = resourceNames[infoResults.indexOf(r)]?.replace('customers/', '') || 'unknown';
-          accounts.push({ id, name: 'Account ' + id, currency: '', isManager: false, mccId: null });
+          accounts.push({ id, name: info?.descriptive_name || 'Account ' + id, currency: '', isManager: info?.manager || false });
         }
       });
     }
 
-    accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    accounts.sort((a, b) => (a.name||'').localeCompare(b.name||''));
     console.log('Returning', accounts.length, 'accounts');
     res.json({ accounts });
 
   } catch (err) {
-    console.error('Accounts error:', err.message, err.stack);
+    console.error('Accounts error:', err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to load accounts: ' + err.message });
   }
 });
