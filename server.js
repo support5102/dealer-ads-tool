@@ -1221,53 +1221,58 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     const token = await getFreshAccessToken(req);
     const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-    // Helper: make a Google Ads API REST call
-    const gadsPost = async (customerId, query, loginId) => {
+    // Step 1: Use the library to list accessible customers (this works reliably)
+    const api = new GoogleAdsApi({
+      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developer_token: devToken,
+    });
+    const accessible = await api.listAccessibleCustomers(req.session.tokens.refresh_token);
+    const resourceNames = accessible.resource_names || accessible.resourceNames || [];
+    console.log('Accessible accounts:', resourceNames.length);
+
+    // Step 2: Use REST to query each account in parallel (fast, no hanging)
+    const gadsSearch = async (customerId, query, loginId) => {
       const headers = {
         'Authorization': 'Bearer ' + token,
         'developer-token': devToken,
         'Content-Type': 'application/json',
       };
-      if (loginId) headers['login-customer-id'] = loginId;
+      if (loginId) headers['login-customer-id'] = String(loginId);
       const resp = await axios.post(
-        `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
+        'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:search',
         { query },
-        { headers, timeout: 10000 }
+        { headers, timeout: 8000 }
       );
       return resp.data.results || [];
     };
 
-    // Step 1: Get accessible customer IDs
-    const listResp = await axios.get(
-      'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
-      { headers: { 'Authorization': 'Bearer ' + token, 'developer-token': devToken }, timeout: 10000 }
-    );
-    const resourceNames = listResp.data.resourceNames || [];
-    console.log('Accessible:', resourceNames.length);
-
-    // Step 2: Find MCC — query all in parallel
+    // Step 3: Find MCC by querying all in parallel
     const infoResults = await Promise.allSettled(
       resourceNames.map(async rn => {
         const id = rn.replace('customers/', '');
-        const rows = await gadsPost(id, 'SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1');
-        return { id, info: rows[0]?.customer };
+        const rows = await gadsSearch(id, 'SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1');
+        const c = rows[0]?.customer;
+        return { id, name: c?.descriptiveName || c?.descriptive_name || null, isManager: c?.manager || false };
       })
     );
 
+    console.log('Info results:', infoResults.map(r => r.status === 'fulfilled' ? r.value?.id + ':' + r.value?.isManager : 'rejected').join(', '));
+
     let mccId = null;
     infoResults.forEach(r => {
-      if (r.status === 'fulfilled' && r.value?.info?.manager) {
-        mccId = String(r.value.id);
-        console.log('Found MCC:', mccId, r.value.info.descriptive_name);
+      if (r.status === 'fulfilled' && r.value?.isManager) {
+        mccId = r.value.id;
+        console.log('Found MCC:', mccId);
       }
     });
 
-    // Step 3: Get all client accounts from MCC
+    // Step 4: Get client accounts from MCC
     let accounts = [];
     if (mccId) {
       req.session.mccId = mccId;
-      const rows = await gadsPost(mccId,
-        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.status FROM customer_client WHERE customer_client.level = 1',
+      const rows = await gadsSearch(mccId,
+        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager FROM customer_client WHERE customer_client.level = 1',
         mccId
       );
       console.log('customer_client rows:', rows.length);
@@ -1283,16 +1288,20 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
           });
         }
       });
-      console.log('Client accounts:', accounts.length);
     }
 
-    // Fallback
+    // Fallback: use the info we already fetched
     if (accounts.length === 0) {
-      console.log('Fallback mode');
+      console.log('Using fallback account list');
       infoResults.forEach(r => {
         if (r.status === 'fulfilled' && r.value) {
-          const { id, info } = r.value;
-          accounts.push({ id, name: info?.descriptive_name || 'Account ' + id, currency: '', isManager: info?.manager || false });
+          accounts.push({
+            id:       r.value.id,
+            name:     r.value.name || 'Account ' + r.value.id,
+            currency: '',
+            isManager: r.value.isManager,
+            mccId: mccId || null,
+          });
         }
       });
     }
