@@ -81,9 +81,15 @@ if (require.main === module) {
   const config = validateEnv();
   const PORT = config.app.port;
 
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction && (!config.app.url || config.app.url.includes('localhost'))) {
+    console.warn('⚠️  WARNING: APP_URL is not set or contains localhost. OAuth will fail in production.');
+  }
+
   createApp(config).listen(PORT, () => {
     console.log(`\n⚡ Dealer Ads Tool running on port ${PORT}`);
-    console.log(`   Open: http://localhost:${PORT}\n`);
+    console.log(`   URL: ${config.app.url}\n`);
   });
 }
 
