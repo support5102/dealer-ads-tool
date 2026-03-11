@@ -213,6 +213,13 @@ async function getAccountStructure(client) {
  * @param {Object[]} locations - Location query results
  * @returns {Object} Nested structure with campaigns array and stats
  */
+// Google Ads API enum → string mapping (library returns integers)
+const STATUS_MAP = { 0: 'UNSPECIFIED', 1: 'UNKNOWN', 2: 'ENABLED', 3: 'PAUSED', 4: 'REMOVED' };
+function normalizeStatus(val) {
+  if (typeof val === 'string') return val;
+  return STATUS_MAP[val] || String(val);
+}
+
 function buildStructureTree(campaigns, adGroups, keywords, locations) {
   const campMap = {};
 
@@ -222,9 +229,9 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
     campMap[c.name] = {
       id:        String(c.id),
       name:      c.name,
-      status:    c.status,
-      type:      c.advertising_channel_type,
-      bidding:   c.bidding_strategy_type,
+      status:    normalizeStatus(c.status),
+      type:      String(c.advertising_channel_type),
+      bidding:   String(c.bidding_strategy_type),
       budget:    budgetMicros != null ? (budgetMicros / 1_000_000).toFixed(2) : '?',
       adGroups:  [],
       locations: [],
@@ -237,7 +244,7 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
     camp.adGroups.push({
       id:         String(row.ad_group.id),
       name:       row.ad_group.name,
-      status:     row.ad_group.status,
+      status:     normalizeStatus(row.ad_group.status),
       defaultBid: row.ad_group.cpc_bid_micros
         ? (row.ad_group.cpc_bid_micros / 1_000_000).toFixed(2) : '?',
       keywords:   [],
@@ -252,8 +259,8 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
     const kw = row.ad_group_criterion;
     ag.keywords.push({
       text:     kw.keyword.text,
-      match:    kw.keyword.match_type,
-      status:   kw.status,
+      match:    String(kw.keyword.match_type),
+      status:   normalizeStatus(kw.status),
       bid:      kw.cpc_bid_micros ? (kw.cpc_bid_micros / 1_000_000).toFixed(2) : null,
       negative: kw.negative,
     });
