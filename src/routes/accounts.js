@@ -13,8 +13,6 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 
-const router = express.Router();
-
 /**
  * Creates account routes with the given config.
  *
@@ -22,6 +20,7 @@ const router = express.Router();
  * @returns {express.Router} Configured accounts router
  */
 function createAccountsRouter(config) {
+  const router = express.Router();
 
   // List all accessible accounts (MCC + children)
   router.get('/api/accounts', requireAuth, async (req, res, next) => {

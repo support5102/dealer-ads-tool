@@ -14,8 +14,6 @@
 const express = require('express');
 const axios   = require('axios');
 
-const router = express.Router();
-
 /**
  * Creates auth routes with the given config.
  *
@@ -25,13 +23,14 @@ const router = express.Router();
  * @returns {express.Router} Configured auth router
  */
 function createAuthRouter(config) {
+  const router = express.Router();
   // Step 1: Redirect user to Google consent screen
   router.get('/auth/google', (req, res) => {
     const params = new URLSearchParams({
       client_id:     config.googleAds.clientId,
       redirect_uri:  `${config.app.url}/auth/callback`,
       response_type: 'code',
-      scope:         'https://www.googleapis.com/auth/adwords',
+      scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email',
       access_type:   'offline',
       prompt:        'consent',
     });
@@ -57,6 +56,16 @@ function createAuthRouter(config) {
         refresh_token: data.refresh_token,
       };
 
+      // Fetch user identity for audit logging
+      try {
+        const userInfo = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${data.access_token}` },
+        });
+        req.session.userEmail = userInfo.data.email;
+      } catch (_) {
+        // Non-fatal — audit log will show 'unknown' if this fails
+      }
+
       res.redirect('/?connected=true');
     } catch (err) {
       console.error('OAuth error:', err.response?.data || err.message);
@@ -72,7 +81,11 @@ function createAuthRouter(config) {
 
   // Check auth status
   router.get('/api/auth/status', (req, res) => {
-    res.json({ connected: !!req.session.tokens?.refresh_token });
+    const connected = !!req.session.tokens?.refresh_token;
+    res.json({
+      connected,
+      email: connected ? (req.session.userEmail || null) : null,
+    });
   });
 
   return router;

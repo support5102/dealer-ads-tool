@@ -8,7 +8,20 @@
  * Returns a frozen config object used by all other modules.
  */
 
-require('dotenv').config();
+/**
+ * Recursively freezes an object and all nested objects.
+ * @param {Object} obj - Object to deep freeze
+ * @returns {Object} The same object, deeply frozen
+ */
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
+}
 
 const REQUIRED_VARS = [
   'GOOGLE_ADS_DEVELOPER_TOKEN',
@@ -35,7 +48,7 @@ function validateEnv(env = process.env) {
     );
   }
 
-  return Object.freeze({
+  const config = {
     googleAds: {
       developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN,
       clientId:       env.GOOGLE_ADS_CLIENT_ID,
@@ -52,7 +65,9 @@ function validateEnv(env = process.env) {
       apiKey: env.ANTHROPIC_API_KEY,
       model:  env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
     },
-  });
+  };
+
+  return deepFreeze(config);
 }
 
 module.exports = { validateEnv, REQUIRED_VARS };

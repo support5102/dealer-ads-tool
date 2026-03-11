@@ -57,12 +57,10 @@ async function listAccessibleCustomers(config, refreshToken) {
     developer_token: config.developerToken,
   });
 
-  const result = await Promise.race([
+  const result = await queryWithTimeout(
     api.listAccessibleCustomers(refreshToken),
-    new Promise((_, rej) => setTimeout(() => rej(new Error(
-      'Timed out listing accessible customers. Try again or check your Google Ads permissions.'
-    )), 15000)),
-  ]);
+    'accessible customers'
+  );
 
   return result.resource_names || result.resourceNames || [];
 }
@@ -118,27 +116,47 @@ async function refreshAccessToken(config, refreshToken) {
 }
 
 /**
+ * Wraps a query promise with a timeout.
+ *
+ * @param {Promise} queryPromise - The query to execute
+ * @param {string} label - Human-readable label for error messages
+ * @param {number} [ms=15000] - Timeout in milliseconds
+ * @returns {Promise} Query result or timeout rejection
+ */
+function queryWithTimeout(queryPromise, label, ms = 15000) {
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error(
+      `Timed out fetching ${label}. Try again or check your Google Ads permissions.`
+    )), ms);
+  });
+  return Promise.race([queryPromise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Fetches full account structure: campaigns, ad groups, keywords, locations.
  *
  * @param {Object} client - Google Ads API customer client
  * @returns {Promise<Object>} Account structure tree with campaigns, stats
  */
 async function getAccountStructure(client) {
-  // Fetch campaigns (no budget join — permission issues in V2)
-  const campaigns = await client.query(`
+  // Fetch campaigns with budget (V2 omitted budget due to REST permission issues;
+  // library client handles auth correctly so the join works here)
+  const campaigns = await queryWithTimeout(client.query(`
     SELECT
       campaign.id,
       campaign.name,
       campaign.status,
       campaign.advertising_channel_type,
-      campaign.bidding_strategy_type
+      campaign.bidding_strategy_type,
+      campaign_budget.amount_micros
     FROM campaign
     WHERE campaign.status != 'REMOVED'
     ORDER BY campaign.name
-  `);
+  `), 'campaigns');
 
   // Fetch ad groups
-  const adGroups = await client.query(`
+  const adGroups = await queryWithTimeout(client.query(`
     SELECT
       ad_group.id,
       ad_group.name,
@@ -149,10 +167,10 @@ async function getAccountStructure(client) {
     WHERE campaign.status != 'REMOVED'
       AND ad_group.status != 'REMOVED'
     ORDER BY campaign.name, ad_group.name
-  `);
+  `), 'ad groups');
 
-  // Fetch keywords (limit 500 per account for speed)
-  const keywords = await client.query(`
+  // Fetch keywords (limit 2000 — balances completeness vs memory/latency)
+  const keywords = await queryWithTimeout(client.query(`
     SELECT
       ad_group_criterion.keyword.text,
       ad_group_criterion.keyword.match_type,
@@ -167,11 +185,11 @@ async function getAccountStructure(client) {
       AND ad_group.status != 'REMOVED'
       AND ad_group_criterion.status != 'REMOVED'
     ORDER BY campaign.name, ad_group.name
-    LIMIT 500
-  `);
+    LIMIT 2000
+  `), 'keywords', 20000);
 
-  // Fetch location targets
-  const locations = await client.query(`
+  // Fetch location targets (non-fatal — empty array on failure)
+  const locations = await queryWithTimeout(client.query(`
     SELECT
       campaign_criterion.location.geo_target_constant,
       campaign_criterion.bid_modifier,
@@ -181,7 +199,7 @@ async function getAccountStructure(client) {
     WHERE campaign_criterion.type = 'LOCATION'
       AND campaign.status != 'REMOVED'
     LIMIT 200
-  `).catch(() => []);
+  `), 'locations').catch(() => []);
 
   return buildStructureTree(campaigns, adGroups, keywords, locations);
 }
@@ -200,13 +218,14 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
 
   campaigns.forEach(row => {
     const c = row.campaign;
+    const budgetMicros = row.campaign_budget?.amount_micros;
     campMap[c.name] = {
       id:        String(c.id),
       name:      c.name,
       status:    c.status,
       type:      c.advertising_channel_type,
       bidding:   c.bidding_strategy_type,
-      budget:    '?', // TODO: fix budget display (V2 bug)
+      budget:    budgetMicros != null ? (budgetMicros / 1_000_000).toFixed(2) : '?',
       adGroups:  [],
       locations: [],
     };
@@ -257,6 +276,7 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
       campaigns: campaigns.length,
       adGroups:  adGroups.length,
       keywords:  keywords.length,
+      keywordsTruncated: keywords.length >= 2000,
     },
   };
 }
@@ -268,4 +288,5 @@ module.exports = {
   refreshAccessToken,
   getAccountStructure,
   buildStructureTree,
+  queryWithTimeout,
 };

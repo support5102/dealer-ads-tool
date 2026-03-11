@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-10
-**Current Phase:** Phase 0: Planning - COMPLETE
+**Last Updated:** 2026-03-11
+**Current Phase:** Phase 4: Deploy + Production Readiness (IN PROGRESS — code complete, deploy pending)
 
 ---
 
@@ -10,27 +10,35 @@
 | Phase | Name | Status | Summary |
 |-------|------|--------|---------|
 | 0 | Planning | ✅ COMPLETE | V2 audited, tech debt documented, architecture decided |
-| 1 | Foundation — Split Monolith | 📋 PLANNED | Break server.js into modules, move frontend, add config tests |
-| 2 | Unit Tests — Business Logic | 📋 PLANNED | TDD coverage on parser, executor, account structure |
-| 3 | Integration + Hardening | 📋 PLANNED | Route tests, error handling, token optimization, deploy |
+| 1 | Foundation — Split Monolith | ✅ COMPLETE | Modular architecture, 44 Tier 1 tests, config/sanitize hardened |
+| 2 | Unit Tests — Business Logic | ✅ COMPLETE | 88 Tier 2 tests across parser, executor, structure builder |
+| 3 | Integration + Hardening | ✅ COMPLETE | 48 Tier 3 tests, server factory refactor, all P0/P1 fixed |
+| 4 | Deploy + Production Readiness | 🔨 IN PROGRESS | Production hardening, budget fix, deploy pending |
+| 5 | Operational Reliability | 📋 PLANNED | Persistent sessions, REST→library refactor, rate limiting, audit log |
+| 6 | Feature Expansion | 📋 PLANNED | Change history UI, email notifications, Facebook Ads |
 
 ---
 
 ## Current Phase Detail
 
-### Phase 1: Foundation — Split Monolith + Config Tests
+### Phase 4: Deploy + Production Readiness (IN PROGRESS — code complete)
 
-**Goal:** Same functionality as V2, but in modular files with Tier 1 tests passing.
+**Goal:** Get V3 live on Railway, safe and functional.
 
 **Deliverables:**
-- [ ] Split server.js into route/service/middleware modules (see architecture in planning-intake.md)
-- [ ] Move ~1,090 lines of frontend HTML/CSS/JS to `public/` directory
-- [ ] Environment variable validation utility (`src/utils/config.js`) with Tier 1 tests
-- [ ] GAQL query sanitization utility (`src/utils/sanitize.js`) with Tier 1 tests
-- [ ] Jest configured with tier-based test scripts
-- [ ] All 7 API endpoints work identically to V2
+- [x] Production hardening: trust proxy, secure cookies, CORS restriction, httpOnly, sameSite
+- [x] Budget display fix (defensive — fallback to "?" on failure)
+- [x] Staff engineer review — all P0/P1 items fixed
+- [ ] Commit and push to V3 branch
+- [ ] Configure Railway env vars (APP_URL, NODE_ENV=production, etc.)
+- [ ] Add Railway callback URL to Google Cloud Console OAuth redirect URIs
+- [ ] Deploy V3 to Railway, verify health check
+- [ ] Manual smoke test: OAuth flow, account listing, parse task, dry run
+- [ ] Update PR #1
 
-**Blockers:** None
+**Blockers:** None — code is complete, remaining steps are deploy + config
+
+**Note:** Token refresh optimization was removed from Phase 4 after review found the explicit `refreshAccessToken` call is load-bearing (REST API calls need raw access tokens). Deferred to Phase 5 as "refactor REST calls to use library client."
 
 ---
 
@@ -62,6 +70,167 @@
 
 **Next Session Focus:**
 - Begin Phase 1: Initialize new directory structure, configure Jest, create first config tests
+
+---
+
+### 2026-03-11 - CLEAN HANDOFF
+
+**Completed:**
+- Committed all V3 scaffold files (23 files, 3,454 lines) as initial commit on V3 branch
+- Configured git identity (bprev / support@savvydealer.com) at repo level
+- Added GitHub remote (origin → support5102/dealer-ads-tool)
+- Merged origin/main into V3 to create shared history (resolved package.json conflict, kept V3 version)
+- Pushed V3 branch to GitHub
+- Installed GitHub CLI (`gh`) via winget
+- Authenticated `gh` with GitHub
+- Created PR #1: "V3: Modular architecture rewrite" (V3 → main)
+
+**Environment Notes:**
+- Node.js/npm not found in bash PATH — needs install or PATH config before tests can run
+- GitHub CLI installed and authenticated
+
+**Files Changed:**
+- No source changes — session focused on git/GitHub setup and PR creation
+
+**Next Session Focus:**
+- Install Node.js or fix PATH so `npm test` works
+- Begin writing Tier 1 tests (config validation, sanitize rules)
+- Verify local server starts with `npm run dev`
+
+---
+
+### 2026-03-11 (session 2) - CLEAN HANDOFF
+
+**Completed:**
+- Installed Node.js v24.14.0 via winget, ran `npm install`
+- Wrote 44 Tier 1 tests across 2 files — all passing
+  - `tests/config/test_env_validation.js` (14 tests): env validation, defaults, deep freeze
+  - `tests/config/test_sanitize.js` (30 tests): GAQL string/number sanitization, injection prevention
+- Found and fixed 4 bugs via staff engineer review:
+  1. `sanitizeGaqlNumber` silently converted null→0, boolean→0/1 (data corruption risk)
+  2. `sanitizeGaqlString` returned empty string when input was all-dangerous characters
+  3. `dotenv` loaded inside config.js utility (production override risk) — moved to server.js
+  4. `Object.freeze` was shallow on config (mutation risk) — added deepFreeze
+- Verified server boots and health check returns 200
+- Created `.env` with placeholder values for local dev
+
+**Files Changed:**
+- Created `tests/config/test_env_validation.js`
+- Created `tests/config/test_sanitize.js`
+- Modified `src/utils/config.js`: removed dotenv, added deepFreeze
+- Modified `src/utils/sanitize.js`: null/boolean guard, post-strip empty check
+- Modified `src/server.js`: added dotenv loading at entry point
+- Created `.env` (gitignored)
+
+**Next Session Focus:**
+- Phase 2: Write Tier 2 unit tests (claude-parser, change-executor, structure builder)
+- Create fakes (google-ads-fake.js, claude-api-fake.js)
+
+---
+
+### 2026-03-11 (session 3) - CLEAN HANDOFF
+
+**Completed:**
+- Created test fakes for both external services:
+  - `tests/fakes/google-ads-fake.js`: FakeGoogleAdsClient with GAQL pattern matching, mutation tracking, configurable test data
+  - `tests/fakes/claude-api-fake.js`: Response helpers (valid JSON, markdown-wrapped, invalid, empty) + sample change plan
+- Wrote 88 Tier 2 unit tests across 3 files using agent team (3 parallel agents):
+  - `tests/unit/test_claude_parser.js` (20 tests): prompt builder, message formatter, API caller
+  - `tests/unit/test_change_executor.js` (42 tests): all 10 change types, lookup helpers, dry run, error paths
+  - `tests/unit/test_structure_builder.js` (26 tests): tree assembly, data transforms, edge cases, locations
+- Staff engineer review found and we fixed 3 issues:
+  1. **P0 production bug**: System prompt listed `enable_keyword` and `update_bid` as valid types but executor doesn't handle them — removed from prompt
+  2. Budget-to-campaign binding in fake was wrong (always returned same budget) — now filters by campaign ID
+  3. `enable_ad_group` was under-tested (only happy path) — added error-path tests
+
+**Files Created:**
+- `tests/fakes/google-ads-fake.js`
+- `tests/fakes/claude-api-fake.js`
+- `tests/unit/test_claude_parser.js`
+- `tests/unit/test_change_executor.js`
+- `tests/unit/test_structure_builder.js`
+
+**Files Modified:**
+- `src/services/claude-parser.js`: Removed unsupported `enable_keyword|update_bid` from system prompt type list
+
+**Next Session Focus:**
+- Phase 3: Integration tests for Express routes (auth, accounts, changes)
+- Error handler and auth middleware tests
+
+---
+
+### 2026-03-11 (session 4) - CLEAN HANDOFF
+
+**Completed:**
+- Refactored `src/server.js` into `createApp(config)` factory with `require.main === module` guard for testability
+- Installed supertest for HTTP-level integration testing
+- Created test infrastructure: `tests/integration/test-helpers.js` (TEST_CONFIG, createTestApp, authenticatedAgent)
+- Wrote 48 Tier 3 integration tests across 4 files:
+  - `tests/integration/test_middleware.js` (8 tests): requireAuth blocks, error handler formatting
+  - `tests/integration/test_auth_routes.js` (12 tests): OAuth redirect, token exchange, logout, status
+  - `tests/integration/test_account_routes.js` (8 tests): account listing, structure loading, MCC passthrough
+  - `tests/integration/test_change_routes.js` (20 tests): parse-task, apply-changes, dry run, mixed results, health check
+- Staff engineer review found and we fixed 6 issues:
+  1. **P0**: Module-level router instances shared across createApp calls — moved inside factory functions
+  2. **P0**: authenticatedAgent stacked duplicate route handlers — rewrote to use query params
+  3. **P1**: dotenv loaded at import time overriding test env — moved inside require.main guard
+  4. **P1**: Missing redirect_uri assertion in auth callback test — added
+  5. **P1**: Whitespace-only task bypassed validation — added trim check in changes.js route
+  6. **P1**: No test for empty changes array — added
+
+**Files Created:**
+- `tests/integration/test-helpers.js`
+- `tests/integration/test_middleware.js`
+- `tests/integration/test_auth_routes.js`
+- `tests/integration/test_account_routes.js`
+- `tests/integration/test_change_routes.js`
+
+**Files Modified:**
+- `src/server.js`: Extracted createApp factory, moved dotenv inside require.main guard
+- `src/routes/auth.js`: Moved router inside createAuthRouter factory
+- `src/routes/accounts.js`: Moved router inside createAccountsRouter factory
+- `src/routes/changes.js`: Moved router inside factory + whitespace task validation
+
+**Next Session Focus:**
+- Token refresh optimization
+- Deploy V3 to Railway
+- Verify production functionality matches V2
+
+---
+
+### 2026-03-11 (session 5) - CLEAN HANDOFF
+
+**Completed:**
+- Reviewed Phase 4 plan with 3 specialist subagents (feasibility, dependency, risk)
+  - Found token refresh is NOT redundant (REST API calls need raw access tokens) — deferred to Phase 5
+  - Found 3 critical deployment blockers: missing trust proxy, insecure cookies, wide-open CORS
+  - Found budget fix is likely feasible (change-executor already reads budgets via library client)
+- Production hardening in `server.js`:
+  - Added `trust proxy` in production for Railway's reverse proxy
+  - Restricted CORS to `config.app.url` with `credentials: true`
+  - Session cookie: `secure` (production), `httpOnly: true`, `sameSite: 'lax'`
+- Budget display fix in `google-ads.js`:
+  - Added `campaign_budget.amount_micros` to campaign GAQL query
+  - Defensive parsing with `!= null` check (handles zero budgets correctly)
+  - Fallback to `'?'` when budget data unavailable
+- Staff engineer review found and we fixed 4 issues:
+  1. **P0**: Session cookie missing explicit `httpOnly: true` — added
+  2. **P1**: Session cookie missing `sameSite` attribute — added `'lax'`
+  3. **P1**: Budget `0` micros displayed as `'?'` due to falsy check — fixed with `!= null`
+  4. **P1**: No CORS preflight rejection test — added
+- Defined Phases 5-6 roadmap (operational reliability + feature expansion)
+
+**Files Modified:**
+- `src/server.js`: Trust proxy, CORS restriction, secure cookie config
+- `src/services/google-ads.js`: Budget GAQL join + defensive tree builder parsing
+- `tests/integration/test_middleware.js`: 7 production hardening tests
+- `tests/unit/test_structure_builder.js`: 5 budget display tests (replaced 1 old test)
+- `tests/fakes/google-ads-fake.js`: Added budget data to campaign rows
+
+**Next Session Focus:**
+- Commit and push all changes to V3 branch
+- Configure Railway env vars + Google Cloud Console OAuth redirect URI
+- Deploy V3 to Railway and smoke test
 
 ---
 
@@ -110,39 +279,37 @@
 ## Next Steps
 
 ### Immediate (Next Session)
-1. [ ] Create new directory structure (`src/`, `public/`, `tests/`)
-2. [ ] Configure Jest with tier-based test scripts
-3. [ ] Extract `src/utils/config.js` with environment validation
-4. [ ] Write Tier 1 tests for config validation
-5. [ ] Extract `src/utils/sanitize.js` for GAQL query safety
+1. [ ] Commit and push all changes to V3 branch
+2. [ ] Configure Railway env vars (APP_URL, NODE_ENV=production)
+3. [ ] Add Railway URL to Google Cloud Console OAuth redirect URIs
+4. [ ] Deploy V3 to Railway, verify health check
+5. [ ] Manual smoke test: OAuth → account listing → parse task → dry run
 
-### Short Term (This Week)
-1. [ ] Extract all routes from server.js into `src/routes/`
-2. [ ] Extract all services into `src/services/`
-3. [ ] Move frontend to `public/`
-4. [ ] Verify all API endpoints still work
+### Short Term (Phase 5)
+1. [ ] Persistent sessions (connect-redis or connect-pg-simple)
+2. [ ] Refactor REST calls to use library client (eliminates manual token refresh)
+3. [ ] Rate limiting
+4. [ ] Keyword 500 limit fix
+5. [ ] Audit log (file-based or SQLite)
 
-### Backlog
-- [ ] Add audit log database (Phase 3)
-- [ ] Fix budget display bug (Phase 2)
-- [ ] Fix keyword 500 limit (Phase 3)
-- [ ] Token refresh optimization (Phase 3)
-- [ ] Rate limiting (Phase 3)
-- [ ] Facebook Ads integration (Future)
-- [ ] Lead attribution tracking (Future)
+### Backlog (Phase 6+)
+- [ ] Change history UI
+- [ ] Email notifications on apply
+- [ ] Facebook Ads integration
+- [ ] Lead attribution tracking
 
 ---
 
 ## Test Status
 
-**Last Run:** N/A (no tests exist yet)
+**Last Run:** 2026-03-11 — 190 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
-| Config | - | - | - |
-| Unit | - | - | - |
-| Integration | - | - | - |
+| Config | 44 | 0 | 0 |
+| Unit | 89 | 0 | 0 |
+| Integration | 57 | 0 | 0 |
 
 ---
 
@@ -164,7 +331,7 @@
 | Issue | Severity | Status | Notes |
 |-------|----------|--------|-------|
 | Budget always shows "?" | Medium | Open | Budget join removed in V2 due to permission issues (line 1362) |
-| GAQL injection risk | High | Open | String interpolation in queries — fix in Phase 2 with sanitize.js |
+| GAQL injection risk | High | Mitigated | sanitize.js guards all query inputs; 30 tests cover edge cases |
 | Session-only auth | Medium | Open | In-memory sessions lost on restart, won't scale |
 | Token refresh every request | Low | Open | Unnecessary API calls — optimize in Phase 3 |
 | 500 keyword limit | Low | Open | Large accounts may show incomplete data |

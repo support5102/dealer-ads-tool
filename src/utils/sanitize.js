@@ -40,12 +40,21 @@ function sanitizeGaqlString(value) {
   // - Newlines and carriage returns
   // - Null bytes
   // - Semicolons (statement separator)
-  return value
+  const sanitized = value
     .replace(/\\/g, '')
     .replace(/'/g, '')
     .replace(/"/g, '')
     .replace(/[\n\r\0]/g, '')
     .replace(/;/g, '');
+
+  if (sanitized.trim() === '') {
+    throw new Error(
+      'GAQL value is empty after removing dangerous characters. ' +
+      'The original value contained only special characters.'
+    );
+  }
+
+  return sanitized;
 }
 
 /**
@@ -56,6 +65,18 @@ function sanitizeGaqlString(value) {
  * @throws {Error} If value is not a finite number
  */
 function sanitizeGaqlNumber(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') {
+    throw new Error(
+      `GAQL numeric value must be a finite number, got ${String(value)} (${typeof value}). ` +
+      'Check that budget amounts and IDs are valid numbers.'
+    );
+  }
+  if (value === '' || (typeof value === 'string' && value.trim() === '')) {
+    throw new Error(
+      'GAQL numeric value must be a finite number, got "". ' +
+      'Check that budget amounts and IDs are valid numbers.'
+    );
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) {
     throw new Error(

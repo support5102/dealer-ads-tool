@@ -25,7 +25,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "summary": "Plain English summary of all changes",
   "changes": [
     {
-      "type": "pause_campaign|enable_campaign|update_budget|pause_ad_group|enable_ad_group|pause_keyword|enable_keyword|add_keyword|add_negative_keyword|exclude_radius|add_radius|update_bid",
+      "type": "pause_campaign|enable_campaign|update_budget|pause_ad_group|enable_ad_group|pause_keyword|add_keyword|add_negative_keyword|exclude_radius|add_radius",
       "campaignName": "exact campaign name from account",
       "adGroupName": "exact ad group name if applicable",
       "details": {
