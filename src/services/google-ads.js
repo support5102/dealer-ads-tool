@@ -288,6 +288,136 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
   };
 }
 
+// ===========================================================================
+// Pacing Dashboard Queries (Phase 7.3)
+// ===========================================================================
+
+/**
+ * Fetches month-to-date spend per campaign.
+ *
+ * @param {Object} client - Google Ads API customer client
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, status, spend }
+ */
+async function getMonthSpend(client) {
+  const rows = await queryWithTimeout(client.query(`
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.status,
+      metrics.cost_micros
+    FROM campaign
+    WHERE segments.date DURING THIS_MONTH
+      AND campaign.status != 'REMOVED'
+  `), 'month spend');
+
+  return rows.map(row => ({
+    campaignId: String(row.campaign.id),
+    campaignName: row.campaign.name,
+    status: normalizeStatus(row.campaign.status),
+    spend: (row.metrics.cost_micros ?? 0) / 1_000_000,
+  }));
+}
+
+/**
+ * Fetches all explicitly shared budgets with their linked campaigns.
+ * Returns one entry per shared budget, with an array of campaign names.
+ *
+ * @param {Object} client - Google Ads API customer client
+ * @returns {Promise<Object[]>} Array of { resourceName, name, dailyBudget, campaigns }
+ */
+async function getSharedBudgets(client) {
+  const rows = await queryWithTimeout(client.query(`
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign_budget.resource_name,
+      campaign_budget.name,
+      campaign_budget.amount_micros
+    FROM campaign
+    WHERE campaign_budget.explicitly_shared = TRUE
+      AND campaign.status != 'REMOVED'
+    ORDER BY campaign_budget.name, campaign.name
+  `), 'shared budgets');
+
+  // Deduplicate by budget resource_name, collecting linked campaigns
+  const budgetMap = new Map();
+  for (const row of rows) {
+    const key = row.campaign_budget.resource_name;
+    if (!budgetMap.has(key)) {
+      budgetMap.set(key, {
+        resourceName: key,
+        name: row.campaign_budget.name,
+        dailyBudget: (row.campaign_budget.amount_micros ?? 0) / 1_000_000,
+        campaigns: [],
+      });
+    }
+    budgetMap.get(key).campaigns.push({
+      campaignId: String(row.campaign.id),
+      campaignName: row.campaign.name,
+    });
+  }
+
+  return Array.from(budgetMap.values());
+}
+
+/**
+ * Fetches search impression share metrics per campaign for current month.
+ * Only includes ENABLED campaigns — paused campaigns don't generate impression data.
+ *
+ * @param {Object} client - Google Ads API customer client
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, impressionShare, budgetLostShare }
+ */
+async function getImpressionShare(client) {
+  const rows = await queryWithTimeout(client.query(`
+    SELECT
+      campaign.id,
+      campaign.name,
+      metrics.search_impression_share,
+      metrics.search_budget_lost_impression_share
+    FROM campaign
+    WHERE segments.date DURING THIS_MONTH
+      AND campaign.status = 'ENABLED'
+  `), 'impression share');
+
+  return rows.map(row => ({
+    campaignId: String(row.campaign.id),
+    campaignName: row.campaign.name,
+    impressionShare: row.metrics.search_impression_share ?? null,
+    budgetLostShare: row.metrics.search_budget_lost_impression_share ?? null,
+  }));
+}
+
+/**
+ * Fetches vehicle inventory from shopping product feed.
+ * Note: shopping_product resource requires google-ads-api v23+ / API v17+.
+ * If the npm package doesn't support it, fall back to queryViaRest.
+ *
+ * @param {Object} client - Google Ads API customer client
+ * @returns {Promise<Object>} { items: [{ itemId, condition, brand, model }], truncated: boolean }
+ */
+async function getInventory(client) {
+  const rows = await queryWithTimeout(client.query(`
+    SELECT
+      shopping_product.item_id,
+      shopping_product.condition,
+      shopping_product.brand,
+      shopping_product.custom_label1
+    FROM shopping_product
+    WHERE shopping_product.status = 'ELIGIBLE'
+    LIMIT 5000
+  `), 'inventory', 20000);
+
+  return {
+    items: rows.map(row => ({
+      itemId: row.shopping_product.item_id,
+      condition: row.shopping_product.condition,
+      brand: row.shopping_product.brand || null,
+      model: row.shopping_product.custom_label1 || null,
+    })),
+    truncated: rows.length >= 5000,
+  };
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -296,4 +426,8 @@ module.exports = {
   getAccountStructure,
   buildStructureTree,
   queryWithTimeout,
+  getMonthSpend,
+  getSharedBudgets,
+  getImpressionShare,
+  getInventory,
 };

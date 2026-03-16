@@ -42,6 +42,29 @@ class FakeGoogleAdsClient {
       { campaign_budget: { resource_name: 'customers/1234567890/campaignBudgets/9002', amount_micros: 100000000 }, campaign: { id: '200' } },
     ];
 
+    // Pacing dashboard data (Phase 7.3)
+    this._monthSpend = options.monthSpend || [
+      { campaign: { id: '100', name: 'Honda Civic - Search', status: 'ENABLED' }, metrics: { cost_micros: 5000000 } },
+      { campaign: { id: '200', name: 'Toyota Trucks', status: 'PAUSED' }, metrics: { cost_micros: 3200000 } },
+    ];
+
+    this._sharedBudgets = options.sharedBudgets || [
+      { campaign: { id: '100', name: 'Honda Civic - Search' }, campaign_budget: { resource_name: 'customers/1234567890/campaignBudgets/8001', name: 'Shared Budget - Honda', amount_micros: 50000000 } },
+      { campaign: { id: '101', name: 'Honda Accord - Search' }, campaign_budget: { resource_name: 'customers/1234567890/campaignBudgets/8001', name: 'Shared Budget - Honda', amount_micros: 50000000 } },
+      { campaign: { id: '200', name: 'Toyota Trucks' }, campaign_budget: { resource_name: 'customers/1234567890/campaignBudgets/8002', name: 'Shared Budget - Toyota', amount_micros: 75000000 } },
+    ];
+
+    this._impressionShare = options.impressionShare || [
+      { campaign: { id: '100', name: 'Honda Civic - Search' }, metrics: { search_impression_share: 0.85, search_budget_lost_impression_share: 0.10 } },
+      { campaign: { id: '200', name: 'Toyota Trucks' }, metrics: { search_impression_share: 0.62, search_budget_lost_impression_share: 0.25 } },
+    ];
+
+    this._shoppingProducts = options.shoppingProducts || [
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/1', item_id: 'VIN001', condition: 'NEW', brand: 'Honda', custom_label1: 'Civic' } },
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/2', item_id: 'VIN002', condition: 'NEW', brand: 'Honda', custom_label1: 'Accord' } },
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/3', item_id: 'VIN003', condition: 'USED', brand: 'Toyota', custom_label1: 'Camry' } },
+    ];
+
     // Track all mutations for assertions
     this.mutations = [];
 
@@ -61,6 +84,23 @@ class FakeGoogleAdsClient {
    */
   async query(gaql) {
     const q = gaql.toLowerCase().trim();
+
+    // Pacing queries (Phase 7.3) — must be checked before generic 'from campaign'
+    if (q.includes('from campaign') && q.includes('cost_micros') && q.includes('this_month')) {
+      return this._monthSpend;
+    }
+
+    if (q.includes('from campaign') && q.includes('explicitly_shared')) {
+      return this._sharedBudgets;
+    }
+
+    if (q.includes('from campaign') && q.includes('search_impression_share')) {
+      return this._impressionShare;
+    }
+
+    if (q.includes('from shopping_product')) {
+      return this._shoppingProducts;
+    }
 
     // Campaign lookup by name
     if (q.includes('from campaign') && q.includes('campaign.name =')) {

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Budget Pacing Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <link rel="stylesheet" href="/pacing-styles.css"/>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">$</div>
+    <div>
+      <div class="logo-text">Budget Pacing Dashboard</div>
+      <div class="logo-sub">Advisory Only &middot; No Auto-Apply</div>
+    </div>
+  </div>
+  <div class="header-right" id="headerRight">
+    <a href="/" class="nav-link">Task Manager</a>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="pacing-main">
+
+  <!-- CONTROLS -->
+  <div class="pacing-controls">
+    <div class="control-group">
+      <label class="sidebar-label">Account</label>
+      <select class="account-select" id="accountSelect" onchange="loadPacing(this.value)" disabled>
+        <option value="">-- Connect Google Ads first --</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <button class="btn-primary" id="refreshBtn" onclick="refreshCurrent()" disabled>Refresh</button>
+    </div>
+  </div>
+
+  <!-- NOT CONNECTED -->
+  <div class="not-connected" id="notConnected">
+    <div class="not-connected-icon">$</div>
+    <h2>Connect Your Google Ads Account</h2>
+    <p>Sign in to load dealer accounts and view budget pacing across your MCC.</p>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+  </div>
+
+  <!-- SELECT PROMPT -->
+  <div id="selectPrompt" style="display:none">
+    <div class="not-connected">
+      <div class="not-connected-icon">&#x1F4CA;</div>
+      <h2>Select a Dealer Account</h2>
+      <p>Choose an account above to see pacing status, spend data, and budget recommendations.</p>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div id="loadingState" style="display:none">
+    <div class="not-connected">
+      <div class="spinner" style="width:28px;height:28px;border-width:3px"></div>
+      <p style="color:var(--text3);margin-top:12px">Loading pacing data...</p>
+    </div>
+  </div>
+
+  <!-- ERROR -->
+  <div id="errorState" style="display:none">
+    <div class="not-connected">
+      <div class="not-connected-icon" style="border-color:#991b1b">!</div>
+      <h2 id="errorTitle">Error</h2>
+      <p id="errorMessage" style="color:#f87171"></p>
+      <button class="btn-secondary" onclick="refreshCurrent()">Retry</button>
+    </div>
+  </div>
+
+  <!-- PACING DASHBOARD -->
+  <div id="dashboard" style="display:none">
+
+    <!-- STATUS HEADER -->
+    <div class="dash-header" id="dashHeader"></div>
+
+    <!-- METRICS ROW -->
+    <div class="metrics-row" id="metricsRow"></div>
+
+    <!-- BUDGET RECOMMENDATIONS -->
+    <div id="recommendationsSection"></div>
+
+    <!-- IMPRESSION SHARE -->
+    <div id="impressionSection"></div>
+
+    <!-- INVENTORY -->
+    <div id="inventorySection"></div>
+
+  </div>
+
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast" style="display:none"></div>
+
+<script src="/pacing-app.js"></script>
+</body>
+</html>

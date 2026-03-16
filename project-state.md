@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-11
-**Current Phase:** Phase 5: Operational Reliability — COMPLETE (deploy pending)
+**Last Updated:** 2026-03-16
+**Current Phase:** Phase 7: Budget Pacing Dashboard — COMPLETE (Phase 7.1-7.5 done)
 
 ---
 
@@ -16,6 +16,7 @@
 | 4 | Deploy + Production Readiness | ✅ CODE COMPLETE | Production hardening, budget fix — deploy pending |
 | 5 | Operational Reliability | ✅ COMPLETE | Audit logging, query timeouts, user identity, keyword limit |
 | 6 | Feature Expansion | 📋 PLANNED | Change history UI, email notifications, Facebook Ads |
+| 7 | Budget Pacing Dashboard | ✅ COMPLETE | Advisory pacing tool for multi-account budget management |
 
 ---
 
@@ -282,6 +283,110 @@
 
 ---
 
+### 2026-03-16 - CLEAN HANDOFF
+
+**Completed:**
+- Explored and planned Budget Pacing Dashboard feature with 4 specialist subagents (integration, architecture, domain/PPC, security/reliability)
+- Scoped to advisory-only mode: dashboard shows pacing + recommended adjustments, user manually applies in Google Ads
+- Built Phase 7.1: Pacing Calculator service + 73 unit tests
+  - Day-of-week weighted pacing (auto dealer traffic patterns)
+  - Inventory modifier (adjusts effective budget based on lot inventory vs baseline)
+  - Pacing status classification (on_pace/over/under/critical at ±5%/±15% thresholds)
+  - Weighted projected month-end spend
+  - Required daily rate calculation for remaining days
+- Staff engineer review found and we fixed 1 bug + added 8 tests:
+  1. **P0**: `projectedSpend` used flat daily average instead of weighted projection — fixed to use `spendToDate * (totalWeight / elapsedWeight)`
+  2. Added tests for: floating-point boundaries, day 0, negative spend (refund), large budgets, out-of-bounds todayIndex, projection weighting
+
+**Key decisions made:**
+- Advisory-only (no auto-apply) — user manually implements recommendations
+- Vehicle inventory from Google Ads `shopping_product` resource (no Merchant Center API needed)
+- Feed mapping: `condition` = new/used, `brand` = make, `custom_label1` = model
+- Goals from Google Sheets API (existing single source of truth)
+- No scheduler/cron needed — user triggers pacing check when logged in
+
+- Built Phase 7.2: Goal Reader service + 50 unit tests
+  - Reads dealer monthly goals from Google Sheets API (injected client for testability)
+  - Parses messy Sheet data: strips $, commas, whitespace from numbers; normalizes customer IDs
+  - Validates minimum viable row (customer ID + name + budget > 0), skips invalid rows
+  - Staff engineer review: added error context wrapping on Sheets API failures, tests for duplicates/extra columns/raw numbers
+
+**Files Created:**
+- `src/services/pacing-calculator.js` — Pure pacing calculation service
+- `tests/unit/test_pacing_calculator.js` — 73 unit tests
+- `src/services/goal-reader.js` — Google Sheets goal reader service
+- `tests/unit/test_goal_reader.js` — 50 unit tests
+- `tests/fakes/google-sheets-fake.js` — Fake Sheets API with 4 data sets
+
+**Test Count:** 206 → 329 (+123 tests)
+
+- Built Phase 7.3: Pacing GAQL query functions + 24 unit tests
+  - `getMonthSpend(client)` — MTD spend per campaign, micros→dollars, status normalized
+  - `getSharedBudgets(client)` — Shared budgets deduplicated with linked campaign arrays
+  - `getImpressionShare(client)` — Search IS + budget lost IS per enabled campaign
+  - `getInventory(client)` — Vehicle inventory from shopping_product feed (LIMIT 5000 + truncated flag)
+  - Extended FakeGoogleAdsClient with 4 new data stores + query routing patterns
+  - Staff engineer review: fixed `||`→`??` for micros (same class as Phase 4 bug), restructured getSharedBudgets to include campaign linkage, added numeric status test, LIMIT + truncated on inventory, documented ENABLED-only filter
+
+**Files Created:**
+- `tests/unit/test_pacing_queries.js` — 24 unit tests for pacing queries
+
+**Files Modified:**
+- `src/services/google-ads.js` — Added 4 pacing query functions (getMonthSpend, getSharedBudgets, getImpressionShare, getInventory)
+- `tests/fakes/google-ads-fake.js` — Extended with pacing data stores + query routing
+
+**Test Count:** 329 → 353 (+24 tests)
+
+- Built Phase 7.4: Budget Recommender service + 38 unit tests
+  - `generateRecommendation(params)` — main entry producing full dealer recommendation
+  - `calculateBudgetAdjustments(pacing, sharedBudgets)` — proportional daily budget adjustments using flat remaining rate
+  - `summarizeImpressionShare(data)` — averages + budget-limited campaign detection
+  - `statusToColor(status)` — pacing status → dashboard color mapping (green/yellow/red)
+  - Staff engineer review: fixed weighted-for-today rate → flat remaining rate (Google Ads budgets apply daily), null guard on campaignSpend, direction label derived from actual change not status
+
+**Files Created:**
+- `src/services/budget-recommender.js` — Budget recommendation engine
+- `tests/unit/test_budget_recommender.js` — 38 unit tests
+
+**Test Count:** 353 → 391 (+38 tests)
+
+- Built Phase 7.5: Pacing API route + dashboard frontend + 14 integration tests
+  - `GET /api/pacing?customerId=X` — fetches spend, budgets, impression share, inventory, goals in parallel; returns full recommendation
+  - Route mounted in server.js via `createPacingRouter(config)` factory
+  - Dashboard frontend: `pacing.html` + `pacing-app.js` + `pacing-styles.css`
+    - Account selector, pacing status badge (green/yellow/red), metric cards (budget, spend, pacing %, required rate)
+    - Budget recommendation cards with current → recommended daily budget and dollar change amounts
+    - Impression share bars with budget-limited campaign detection
+    - Inventory status with modifier display
+    - Race condition guard (request ID) for rapid account switching
+  - Nav links added between Task Manager and Pacing Dashboard (both directions)
+  - Staff engineer review found and we fixed 4 issues:
+    1. **P0**: Crash on missing `inventoryResult.items` — added defensive `|| []` fallback
+    2. **P1**: Pacing bar `NaN%` width when `pacingPercent` is null — separated numeric vs display values
+    3. **P1**: Stale response race condition on rapid account switching — added `_requestId` counter
+    4. **Test gap**: Added tests for missing inventory items + readGoals rejection
+
+**Files Created:**
+- `src/routes/pacing.js` — Pacing API route
+- `tests/integration/test_pacing_routes.js` — 14 integration tests
+- `public/pacing.html` — Dashboard page
+- `public/pacing-app.js` — Dashboard frontend logic
+- `public/pacing-styles.css` — Dashboard styles
+
+**Files Modified:**
+- `src/server.js` — Mounted pacing router
+- `public/index.html` — Added nav link to pacing dashboard
+- `public/app.js` — Added nav link to pacing dashboard (connected state)
+- `public/styles.css` — Added `.nav-link` style
+
+**Test Count:** 391 → 405 (+14 tests)
+
+**Next Session Focus:**
+- Deploy V3 to Railway (commit ready, push + configure + smoke test)
+- Or Phase 6 feature expansion (change history UI, email notifications)
+
+---
+
 ## Design Decisions
 
 ### Architecture: Modular Express over Framework Migration
@@ -327,12 +432,18 @@
 ## Next Steps
 
 ### Immediate (Next Session)
+1. [x] Phase 7.1: Pacing Calculator — pure math service
+2. [x] Phase 7.2: Goal Reader — read dealer goals from Google Sheets API
+3. [x] Phase 7.3: Spend + inventory GAQL queries in google-ads.js
+4. [x] Phase 7.4: Budget Recommender — generate recommendations from pacing state
+5. [x] Phase 7.5: Pacing API routes + dashboard UI
+
+### Deploy (blocked until Phase 7 complete or V3 base deployed)
 1. [ ] Push commit `0408b45` to origin (`git push origin V3`)
 2. [ ] Configure Railway env vars (APP_URL, NODE_ENV=production)
 3. [ ] Add Railway URL to Google Cloud Console OAuth redirect URIs
 4. [ ] Deploy V3 to Railway, verify health check
 5. [ ] Manual smoke test: OAuth → account listing → parse task → dry run
-6. [ ] Update PR #1
 
 ### Backlog (Phase 6+)
 - [ ] Change history UI
@@ -344,14 +455,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-11 — 206 passed, 0 failed
+**Last Run:** 2026-03-16 — 405 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 95 | 0 | 0 |
-| Integration | 67 | 0 | 0 |
+| Unit | 280 | 0 | 0 |
+| Integration | 81 | 0 | 0 |
 
 ---
 

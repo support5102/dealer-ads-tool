@@ -123,6 +123,17 @@ body {
   transition: all .15s;
 }
 .logout-btn:hover { color: var(--text2); border-color: #2d4a6e; }
+.nav-link {
+  color: var(--text3);
+  text-decoration: none;
+  font-size: 12px;
+  font-family: 'DM Mono', monospace;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: all .15s;
+}
+.nav-link:hover { color: var(--text2); border-color: #2d4a6e; }
 
 /* ── MAIN LAYOUT ── */
 .main {
