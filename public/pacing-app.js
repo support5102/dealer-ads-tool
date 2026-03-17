@@ -255,7 +255,7 @@ function renderRecommendations(recs, budgetSummary) {
           <span class="budget-summary-value">$${requiredDailyRate.toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">
-          <span class="budget-summary-label">Current Budgets Total</span>
+          <span class="budget-summary-label">Current Daily Spend</span>
           <span class="budget-summary-value">$${currentDailyTotal.toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">

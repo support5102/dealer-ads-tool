@@ -138,8 +138,8 @@ describe('isVlaCampaign', () => {
 
 describe('distributeAccountBudget', () => {
   // Helper: pacing object with remaining budget and days
-  function makePacing({ remainingBudget, daysRemaining }) {
-    return { remainingBudget, daysRemaining };
+  function makePacing({ remainingBudget, daysRemaining, daysElapsed }) {
+    return { remainingBudget, daysRemaining, daysElapsed: daysElapsed || 0 };
   }
 
   test('distributes required daily rate: VLA first (IS-driven), shared gets remainder', () => {
@@ -534,6 +534,60 @@ describe('distributeAccountBudget', () => {
     expect(budgetSummary.currentDailyTotal).toBe(80); // 30 + 50
     // Recommended should be closer to 100
     expect(budgetSummary.recommendedDailyTotal).toBeGreaterThan(budgetSummary.currentDailyTotal);
+  });
+
+  test('uses actual spend rates instead of budget settings when campaignSpend provided', () => {
+    // VLA budget is $200/day but only actually spending $50/day
+    // Shared budget is $100/day but only spending $30/day
+    // Account needs $60/day → should use actual $80/day spend as baseline (over-pacing)
+    const pacing = makePacing({ remainingBudget: 600, daysRemaining: 10, daysElapsed: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 200,
+        campaigns: [{ campaignId: '1', campaignName: 'Honda VLA' }] },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 100,
+        campaigns: [{ campaignId: '2', campaignName: 'Honda Search' }] },
+    ];
+    const campaignSpend = [
+      { campaignId: '1', campaignName: 'Honda VLA', spend: 500 },    // $500 / 10 days = $50/day actual
+      { campaignId: '2', campaignName: 'Honda Search', spend: 300 }, // $300 / 10 days = $30/day actual
+    ];
+
+    const { recommendations, budgetSummary } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared,
+      impressionShareData: [], campaignSpend,
+    });
+
+    // Current daily total should reflect actual spend ($80/day), NOT budget settings ($300/day)
+    expect(budgetSummary.currentDailyTotal).toBe(80);
+
+    // VLA current should show actual spend rate ($50), not budget ($200)
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.currentDailyBudget).toBe(50);
+
+    // Shared current should show actual spend rate ($30), not budget ($100)
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+    expect(sharedRec.currentDailyBudget).toBe(30);
+  });
+
+  test('falls back to budget settings when no campaignSpend provided', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 30 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
+    ];
+
+    // No campaignSpend provided — should fall back to dailyBudget values
+    const { budgetSummary } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: [],
+    });
+
+    expect(budgetSummary.currentDailyTotal).toBe(80); // 30 + 50 from budget settings
   });
 });
 

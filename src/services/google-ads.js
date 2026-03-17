@@ -324,7 +324,7 @@ async function getSharedBudgets(restCtx) {
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT campaign.id, campaign.name, campaign_budget.resource_name, campaign_budget.name, campaign_budget.amount_micros
      FROM campaign
-     WHERE campaign_budget.explicitly_shared = TRUE AND campaign.status != 'REMOVED'
+     WHERE campaign_budget.explicitly_shared = TRUE AND campaign.status = 'ENABLED'
      ORDER BY campaign_budget.name, campaign.name`,
     restCtx.loginCustomerId
   );
@@ -424,7 +424,7 @@ async function getDedicatedBudgets(restCtx) {
             campaign_budget.resource_name, campaign_budget.amount_micros
      FROM campaign
      WHERE campaign_budget.explicitly_shared = FALSE
-       AND campaign.status != 'REMOVED'
+       AND campaign.status = 'ENABLED'
      ORDER BY campaign.name`,
     restCtx.loginCustomerId
   );
