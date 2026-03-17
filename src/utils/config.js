@@ -53,6 +53,7 @@ function validateEnv(env = process.env) {
       developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN,
       clientId:       env.GOOGLE_ADS_CLIENT_ID,
       clientSecret:   env.GOOGLE_ADS_CLIENT_SECRET,
+      mccId:          env.GOOGLE_ADS_MCC_ID || '',
     },
     session: {
       secret: env.SESSION_SECRET,

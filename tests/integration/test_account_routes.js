@@ -28,16 +28,10 @@ describe('GET /api/accounts', () => {
 
   test('returns list of accounts from MCC', async () => {
     googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
-    googleAds.listAccessibleCustomers.mockResolvedValue(['customers/111', 'customers/222']);
-    googleAds.queryViaRest
-      // First call: account info queries (returns MCC)
-      .mockResolvedValueOnce([{ customer: { id: '111', descriptiveName: 'MCC Account', manager: true } }])
-      .mockResolvedValueOnce([{ customer: { id: '222', descriptiveName: 'Dealer Account', manager: false } }])
-      // Second call: customer_client query via MCC
-      .mockResolvedValueOnce([
-        { customerClient: { id: '333', descriptiveName: 'Honda Dealer', currencyCode: 'USD', manager: false, level: 1 } },
-        { customerClient: { id: '444', descriptiveName: 'Toyota Dealer', currencyCode: 'USD', manager: false, level: 1 } },
-      ]);
+    googleAds.queryViaRest.mockResolvedValueOnce([
+      { customerClient: { id: '333', descriptiveName: 'Honda Dealer', currencyCode: 'USD', manager: false, level: 1 } },
+      { customerClient: { id: '444', descriptiveName: 'Toyota Dealer', currencyCode: 'USD', manager: false, level: 1 } },
+    ]);
 
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/accounts').expect(200);
@@ -49,13 +43,10 @@ describe('GET /api/accounts', () => {
 
   test('accounts are sorted alphabetically by name', async () => {
     googleAds.refreshAccessToken.mockResolvedValue('token');
-    googleAds.listAccessibleCustomers.mockResolvedValue(['customers/111']);
-    googleAds.queryViaRest
-      .mockResolvedValueOnce([{ customer: { id: '111', descriptiveName: 'MCC', manager: true } }])
-      .mockResolvedValueOnce([
-        { customerClient: { id: '2', descriptiveName: 'Zebra Motors', currencyCode: 'USD', manager: false, level: 1 } },
-        { customerClient: { id: '1', descriptiveName: 'Alpha Auto', currencyCode: 'USD', manager: false, level: 1 } },
-      ]);
+    googleAds.queryViaRest.mockResolvedValueOnce([
+      { customerClient: { id: '2', descriptiveName: 'Zebra Motors', currencyCode: 'USD', manager: false, level: 1 } },
+      { customerClient: { id: '1', descriptiveName: 'Alpha Auto', currencyCode: 'USD', manager: false, level: 1 } },
+    ]);
 
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/accounts').expect(200);
@@ -64,18 +55,18 @@ describe('GET /api/accounts', () => {
     expect(res.body.accounts[1].name).toBe('Zebra Motors');
   });
 
-  test('falls back to direct account info when MCC query fails', async () => {
+  test('excludes manager accounts from list', async () => {
     googleAds.refreshAccessToken.mockResolvedValue('token');
-    googleAds.listAccessibleCustomers.mockResolvedValue(['customers/555']);
-    googleAds.queryViaRest
-      .mockResolvedValueOnce([{ customer: { id: '555', descriptiveName: 'Direct Account', manager: false } }]);
+    googleAds.queryViaRest.mockResolvedValueOnce([
+      { customerClient: { id: '1', descriptiveName: 'Client Account', currencyCode: 'USD', manager: false, level: 1 } },
+      { customerClient: { id: '2', descriptiveName: 'Sub-MCC', currencyCode: 'USD', manager: true, level: 1 } },
+    ]);
 
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/accounts').expect(200);
 
     expect(res.body.accounts).toHaveLength(1);
-    expect(res.body.accounts[0].name).toBe('Direct Account');
-    expect(res.body.accounts[0].id).toBe('555');
+    expect(res.body.accounts[0].name).toBe('Client Account');
   });
 
   test('passes error to error handler when service throws', async () => {

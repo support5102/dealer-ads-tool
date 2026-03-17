@@ -60,7 +60,7 @@ function createPacingRouter(config, deps = {}) {
     }
 
     try {
-      const mccId = req.session.mccId;
+      const mccId = req.session.mccId || config.googleAds.mccId;
 
       // Refresh access token for REST calls
       const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);

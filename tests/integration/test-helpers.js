@@ -19,6 +19,7 @@ const TEST_CONFIG = {
     clientId:       'test-client-id',
     clientSecret:   'test-client-secret',
     developerToken: 'test-developer-token',
+    mccId:          'test-mcc-id',
   },
   claude: {
     apiKey: 'test-anthropic-key',
