@@ -409,6 +409,35 @@ async function getInventory(restCtx) {
   }
 }
 
+/**
+ * Fetches campaigns with dedicated (non-shared) budgets via REST.
+ * Used to find VLA and other campaigns with their own budget line.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, channelType, resourceName, dailyBudget }
+ */
+async function getDedicatedBudgets(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, campaign.advertising_channel_type,
+            campaign_budget.resource_name, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign_budget.explicitly_shared = FALSE
+       AND campaign.status != 'REMOVED'
+     ORDER BY campaign.name`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => ({
+    campaignId: String(row.campaign.id),
+    campaignName: row.campaign.name,
+    channelType: String(row.campaign.advertisingChannelType ?? row.campaign.advertising_channel_type ?? ''),
+    resourceName: row.campaignBudget?.resourceName ?? row.campaign_budget?.resource_name ?? '',
+    dailyBudget: ((row.campaignBudget?.amountMicros ?? row.campaign_budget?.amount_micros ?? 0)) / 1_000_000,
+  }));
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -419,6 +448,7 @@ module.exports = {
   queryWithTimeout,
   getMonthSpend,
   getSharedBudgets,
+  getDedicatedBudgets,
   getImpressionShare,
   getInventory,
 };

@@ -28,8 +28,19 @@ const SAMPLE_SHARED_BUDGETS = [
   },
 ];
 
+const SAMPLE_DEDICATED_BUDGETS = [
+  {
+    campaignId: '200',
+    campaignName: 'Honda VLA',
+    channelType: 'SHOPPING',
+    resourceName: 'customers/1234567890/campaignBudgets/9001',
+    dailyBudget: 100,
+  },
+];
+
 const SAMPLE_IMPRESSION_SHARE = [
   { campaignId: '100', campaignName: 'Honda Civic - Search', impressionShare: 0.85, budgetLostShare: 0.10 },
+  { campaignId: '200', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.20 },
 ];
 
 const SAMPLE_INVENTORY = {
@@ -56,6 +67,7 @@ function setupMocks() {
   googleAds.refreshAccessToken.mockResolvedValue('fresh-access-token');
   googleAds.getMonthSpend.mockResolvedValue(SAMPLE_SPEND);
   googleAds.getSharedBudgets.mockResolvedValue(SAMPLE_SHARED_BUDGETS);
+  googleAds.getDedicatedBudgets.mockResolvedValue(SAMPLE_DEDICATED_BUDGETS);
   googleAds.getImpressionShare.mockResolvedValue(SAMPLE_IMPRESSION_SHARE);
   googleAds.getInventory.mockResolvedValue(SAMPLE_INVENTORY);
   goalReader.readGoals.mockResolvedValue(SAMPLE_GOALS);
@@ -125,6 +137,7 @@ describe('GET /api/pacing', () => {
 
     expect(googleAds.getMonthSpend).toHaveBeenCalledTimes(1);
     expect(googleAds.getSharedBudgets).toHaveBeenCalledTimes(1);
+    expect(googleAds.getDedicatedBudgets).toHaveBeenCalledTimes(1);
     expect(googleAds.getImpressionShare).toHaveBeenCalledTimes(1);
     expect(googleAds.getInventory).toHaveBeenCalledTimes(1);
   });
@@ -173,11 +186,23 @@ describe('GET /api/pacing', () => {
     );
   });
 
+  test('includes VLA campaign recommendations when IS is out of range', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
+
+    // Honda VLA has 55% IS (below 75% target) — should get a VLA recommendation
+    const vlaRecs = res.body.recommendations.filter(r => r.isVla);
+    expect(vlaRecs.length).toBeGreaterThan(0);
+    expect(vlaRecs[0].target).toBe('Honda VLA');
+    expect(vlaRecs[0].type).toBe('campaign_budget');
+  });
+
   test('returns impression share summary', async () => {
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
-    expect(res.body.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.85, 2);
+    // Average of Honda Search (0.85) + Honda VLA (0.55) = 0.70
+    expect(res.body.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.70, 2);
   });
 
   test('handles empty goal list gracefully', async () => {

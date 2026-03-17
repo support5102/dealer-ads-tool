@@ -84,11 +84,15 @@ function createPacingRouter(config, deps = {}) {
       // Use injected sheets client (tests) or create one from OAuth token (production)
       const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
-      // Fetch all data in parallel — inventory and sheets are non-fatal
-      const [campaignSpend, sharedBudgets, impressionShare, inventoryResult, goals] =
+      // Fetch all data in parallel — inventory, dedicated budgets, and sheets are non-fatal
+      const [campaignSpend, sharedBudgets, dedicatedBudgets, impressionShare, inventoryResult, goals] =
         await Promise.all([
           googleAds.getMonthSpend(restCtx),
           googleAds.getSharedBudgets(restCtx),
+          googleAds.getDedicatedBudgets(restCtx).catch(err => {
+            console.warn('Dedicated budgets fetch failed (non-fatal):', err.message);
+            return [];
+          }),
           googleAds.getImpressionShare(restCtx),
           googleAds.getInventory(restCtx).catch(err => {
             console.warn('Inventory fetch failed (non-fatal):', err.message);
@@ -122,6 +126,7 @@ function createPacingRouter(config, deps = {}) {
         goal,
         campaignSpend,
         sharedBudgets,
+        dedicatedBudgets,
         impressionShare,
         inventoryCount: newVehicleCount,
         year: now.getFullYear(),

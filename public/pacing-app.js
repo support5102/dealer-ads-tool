@@ -243,10 +243,11 @@ function renderRecommendations(recs) {
   recs.forEach(r => {
     const dir = r.change >= 0 ? 'increase' : 'decrease';
     const sign = r.change >= 0 ? '+' : '';
+    const vlaBadge = r.isVla ? '<span class="vla-badge">VLA</span>' : '';
     rows += `
       <div class="rec-item">
         <div>
-          <div class="rec-target">${esc(r.target)}</div>
+          <div class="rec-target">${vlaBadge}${esc(r.target)}</div>
           <div class="rec-budget-row">
             <span class="rec-current">$${r.currentDailyBudget.toFixed(2)}/day</span>
             <span class="rec-arrow">&rarr;</span>
@@ -259,11 +260,17 @@ function renderRecommendations(recs) {
     `;
   });
 
+  const vlaCount = recs.filter(r => r.isVla).length;
+  const sharedCount = recs.length - vlaCount;
+  const countParts = [];
+  if (vlaCount > 0) countParts.push(`${vlaCount} VLA`);
+  if (sharedCount > 0) countParts.push(`${sharedCount} shared`);
+
   section.innerHTML = `
     <div class="dash-section">
       <div class="dash-section-header">
         <div class="dash-section-title">Budget Recommendations</div>
-        <div class="dash-section-count">${recs.length} shared budget${recs.length !== 1 ? 's' : ''}</div>
+        <div class="dash-section-count">${countParts.join(' + ')} budget${recs.length !== 1 ? 's' : ''}</div>
       </div>
       ${rows}
     </div>

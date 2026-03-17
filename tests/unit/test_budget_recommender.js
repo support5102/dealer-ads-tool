@@ -8,8 +8,10 @@
 const {
   generateRecommendation,
   calculateBudgetAdjustments,
+  calculateVlaAdjustments,
   summarizeImpressionShare,
   statusToColor,
+  isVlaCampaign,
 } = require('../../src/services/budget-recommender');
 
 // Flat weights for predictable math in tests
@@ -355,6 +357,186 @@ describe('calculateBudgetAdjustments', () => {
 });
 
 // ===========================================================================
+// isVlaCampaign
+// ===========================================================================
+
+describe('isVlaCampaign', () => {
+  test('matches campaign with "VLA" in name', () => {
+    expect(isVlaCampaign({ campaignName: 'Honda VLA', channelType: 'SEARCH' })).toBe(true);
+  });
+
+  test('matches campaign with "vla" in name (case-insensitive)', () => {
+    expect(isVlaCampaign({ campaignName: 'Alan Jay - vla - new', channelType: '' })).toBe(true);
+  });
+
+  test('matches SHOPPING channel type', () => {
+    expect(isVlaCampaign({ campaignName: 'Honda Shopping', channelType: 'SHOPPING' })).toBe(true);
+  });
+
+  test('matches LOCAL channel type', () => {
+    expect(isVlaCampaign({ campaignName: 'Local Campaign', channelType: 'LOCAL' })).toBe(true);
+  });
+
+  test('does not match search campaign without VLA in name', () => {
+    expect(isVlaCampaign({ campaignName: 'Honda Brand Search', channelType: 'SEARCH' })).toBe(false);
+  });
+
+  test('handles missing fields gracefully', () => {
+    expect(isVlaCampaign({})).toBe(false);
+    expect(isVlaCampaign({ campaignName: null, channelType: null })).toBe(false);
+  });
+});
+
+// ===========================================================================
+// calculateVlaAdjustments
+// ===========================================================================
+
+describe('calculateVlaAdjustments', () => {
+  const basePacing = {
+    paceStatus: 'under',
+    daysRemaining: 14,
+    remainingBudget: 5000,
+    dailyAvgSpend: 300,
+  };
+
+  test('recommends increase when VLA impression share below 75%', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.20 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThan(100);
+    expect(adjustments[0].change).toBeGreaterThan(0);
+    expect(adjustments[0].isVla).toBe(true);
+    expect(adjustments[0].type).toBe('campaign_budget');
+    expect(adjustments[0].reason).toMatch(/below 75%/);
+    expect(adjustments[0].reason).toMatch(/lost to budget/);
+  });
+
+  test('recommends decrease when VLA impression share above 90%', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 200 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.95, budgetLostShare: 0.01 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(200);
+    expect(adjustments[0].change).toBeLessThan(0);
+    expect(adjustments[0].reason).toMatch(/exceeds 90%/);
+    expect(adjustments[0].reason).toMatch(/CPC inflation/);
+  });
+
+  test('returns no adjustment when VLA impression share in 75-90% target range', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 150 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.82, budgetLostShare: 0.03 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    expect(adjustments).toHaveLength(0);
+  });
+
+  test('caps boost at 2x to avoid over-correction', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 50 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.10, budgetLostShare: 0.50 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+
+    // 0.75 / 0.10 = 7.5x but capped at 2x
+    expect(adjustments[0].recommendedDailyBudget).toBe(100); // 50 * 2.0
+  });
+
+  test('skips non-VLA dedicated budget campaigns', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda Brand Search', channelType: 'SEARCH', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda Brand Search', impressionShare: 0.50, budgetLostShare: 0.20 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    expect(adjustments).toHaveLength(0);
+  });
+
+  test('skips VLA campaigns with no impression share data', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, []);
+    expect(adjustments).toHaveLength(0);
+  });
+
+  test('enforces minimum $1/day', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 5 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.98, budgetLostShare: 0.00 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThanOrEqual(1);
+  });
+
+  test('returns empty when no dedicated budgets', () => {
+    expect(calculateVlaAdjustments(basePacing, [], [])).toHaveLength(0);
+    expect(calculateVlaAdjustments(basePacing, null, [])).toHaveLength(0);
+  });
+
+  test('returns empty when zero days remaining', () => {
+    const pacing = { ...basePacing, daysRemaining: 0 };
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.50, budgetLostShare: 0.20 },
+    ];
+
+    expect(calculateVlaAdjustments(pacing, budgets, isData)).toHaveLength(0);
+  });
+
+  test('includes budget lost share in reason when high', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.60, budgetLostShare: 0.15 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    expect(adjustments[0].reason).toMatch(/15\.0% lost to budget/);
+  });
+
+  test('omits budget lost share from reason when low', () => {
+    const budgets = [
+      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+    ];
+    const isData = [
+      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.60, budgetLostShare: 0.03 },
+    ];
+
+    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    expect(adjustments[0].reason).not.toMatch(/lost to budget/);
+  });
+});
+
+// ===========================================================================
 // generateRecommendation
 // ===========================================================================
 
@@ -512,6 +694,38 @@ describe('generateRecommendation', () => {
     };
     const rec = generateRecommendation(params);
     expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
+  });
+
+  test('includes VLA recommendations before shared budget recommendations', () => {
+    const params = {
+      ...baseParams,
+      dedicatedBudgets: [
+        { campaignId: '200', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/v1', dailyBudget: 100 },
+      ],
+      impressionShare: [
+        { campaignId: '100', campaignName: 'Honda Civic - Search', impressionShare: 0.85, budgetLostShare: 0.10 },
+        { campaignId: '200', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.25 },
+      ],
+      // Make it under-pacing so shared budget recs also appear
+      campaignSpend: [
+        { campaignId: '100', campaignName: 'Honda Civic - Search', status: 'ENABLED', spend: 2000 },
+      ],
+    };
+    const rec = generateRecommendation(params);
+
+    // Should have VLA rec first, then shared budget rec
+    const vlaRecs = rec.recommendations.filter(r => r.isVla);
+    const sharedRecs = rec.recommendations.filter(r => !r.isVla);
+    expect(vlaRecs.length).toBeGreaterThan(0);
+    expect(sharedRecs.length).toBeGreaterThan(0);
+    // VLA should come first
+    expect(rec.recommendations[0].isVla).toBe(true);
+  });
+
+  test('handles null dedicatedBudgets gracefully', () => {
+    const params = { ...baseParams, dedicatedBudgets: null };
+    const rec = generateRecommendation(params);
+    expect(rec.recommendations).toBeDefined();
   });
 
   test('budget fully spent recommends $1 minimum', () => {
