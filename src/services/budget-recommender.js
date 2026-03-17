@@ -101,6 +101,13 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // Budget available for VLA + shared (subtract non-VLA dedicated which we don't adjust)
   const targetForAdjustable = Math.max(requiredDailyRate - nonVlaDedicatedTotal, 0);
 
+  // Detect over-pacing: current budgets exceed what's needed.
+  // When over-pacing, NEVER recommend increasing any budget.
+  const currentVlaTotal = vlaCampaigns.reduce((s, c) => s + c.dailyBudget, 0);
+  const currentSharedTotal = (sharedBudgets || []).reduce((s, b) => s + b.dailyBudget, 0);
+  const currentAdjustableTotal = currentVlaTotal + currentSharedTotal;
+  const accountOverPacing = requiredDailyRate < currentAdjustableTotal + nonVlaDedicatedTotal;
+
   // --- Step 1: VLA budgets — impression share driven (priority) ---
   const isMap = new Map();
   (impressionShareData || []).forEach(d => isMap.set(d.campaignId, d));
@@ -114,14 +121,19 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     let reason;
 
     if (is != null && is < VLA_IS_TARGET.min) {
-      // Under 75% IS — boost to capture more traffic
       const boost = Math.min(VLA_IS_TARGET.min / Math.max(is, 0.01), 2.0);
       recommended = campaign.dailyBudget * boost;
       reason = `IS ${(is * 100).toFixed(1)}% below 75% target`
-        + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')
-        + ` — increase to capture more VLA traffic`;
+        + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '');
+      if (accountOverPacing) {
+        // Over-pacing: can't increase any budget. Keep current, note IS issue.
+        recommended = campaign.dailyBudget;
+        reason += ` — but account is over-pacing, hold budget`;
+      } else {
+        reason += ` — increase to capture more VLA traffic`;
+      }
     } else if (is != null && is > VLA_IS_TARGET.max) {
-      // Over 90% IS — scale back to avoid CPC inflation
+      // Over 90% IS — scale back to avoid CPC inflation (always allowed)
       const scale = VLA_IS_TARGET.max / is;
       recommended = campaign.dailyBudget * scale;
       reason = `IS ${(is * 100).toFixed(1)}% exceeds 90% — reduce to avoid CPC inflation`;
@@ -133,7 +145,13 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       reason = null;
     }
 
-    recommended = Math.max(recommended, 1);
+    // Floor at $1 only if it wouldn't be an increase when over-pacing
+    if (!accountOverPacing) {
+      recommended = Math.max(recommended, 1);
+    } else {
+      recommended = Math.min(recommended, campaign.dailyBudget);
+      recommended = Math.max(recommended, 0.01); // absolute floor
+    }
     recommended = Math.round(recommended * 100) / 100;
 
     return { campaign, recommended, reason, currentBudget: campaign.dailyBudget };
@@ -144,7 +162,6 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // --- Step 2: Shared budgets get the remainder ---
   const budgets = sharedBudgets || [];
   const remainingForShared = Math.max(targetForAdjustable - totalVlaRecommended, 0);
-  const currentSharedTotal = budgets.reduce((s, b) => s + b.dailyBudget, 0);
 
   // Build final recommendations
   const recommendations = [];
@@ -178,7 +195,13 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         recommended = remainingForShared / budgets.length;
       }
 
-      recommended = Math.max(recommended, 1);
+      // When over-pacing: never increase, allow going below $1
+      if (accountOverPacing) {
+        recommended = Math.min(recommended, budget.dailyBudget);
+        recommended = Math.max(recommended, 0.01); // absolute floor
+      } else {
+        recommended = Math.max(recommended, 1);
+      }
       recommended = Math.round(recommended * 100) / 100;
       const change = Math.round((recommended - budget.dailyBudget) * 100) / 100;
 
@@ -204,7 +227,13 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         let rec;
         if (currentSharedTotal > 0) rec = remainingForShared * (b.dailyBudget / currentSharedTotal);
         else rec = remainingForShared / budgets.length;
-        return s + Math.max(Math.round(rec * 100) / 100, 1);
+        if (accountOverPacing) {
+          rec = Math.min(rec, b.dailyBudget);
+          rec = Math.max(rec, 0.01);
+        } else {
+          rec = Math.max(rec, 1);
+        }
+        return s + Math.round(rec * 100) / 100;
       }, 0)
     : 0;
   const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedTotal;

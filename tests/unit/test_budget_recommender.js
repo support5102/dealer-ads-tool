@@ -201,6 +201,73 @@ describe('distributeAccountBudget', () => {
     expect(sharedRec.reason).toMatch(/Account needs/);
   });
 
+  test('over-pacing account: NEVER recommends increasing any budget', () => {
+    // Account over-pacing. Vinfast at $0.01/day — should NOT get bumped to $1 minimum.
+    const pacing = makePacing({ remainingBudget: 280, daysRemaining: 14 }); // $20/day needed
+    const shared = [
+      { resourceName: 'r/1', name: 'Main', dailyBudget: 71, campaigns: [] },
+      { resourceName: 'r/2', name: 'Vinfast', dailyBudget: 0.01, campaigns: [] },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: [],
+    });
+
+    // Every recommendation must be a decrease
+    recommendations.forEach(r => {
+      expect(r.change).toBeLessThanOrEqual(0);
+      expect(r.recommendedDailyBudget).toBeLessThanOrEqual(r.currentDailyBudget);
+    });
+  });
+
+  test('over-pacing account: VLA with low IS does NOT get boosted', () => {
+    const pacing = makePacing({ remainingBudget: 200, daysRemaining: 10 }); // $20/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 15 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
+    ];
+    const isData = [
+      { campaignId: '1', impressionShare: 0.40, budgetLostShare: 0.30 },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // VLA should NOT increase when account is over-pacing
+    recommendations.filter(r => r.isVla).forEach(r => {
+      expect(r.change).toBeLessThanOrEqual(0);
+    });
+    // But shared must decrease
+    recommendations.filter(r => !r.isVla).forEach(r => {
+      expect(r.change).toBeLessThan(0);
+    });
+  });
+
+  test('over-pacing account: VLA with high IS still gets reduced', () => {
+    const pacing = makePacing({ remainingBudget: 200, daysRemaining: 10 }); // $20/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 30 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
+    ];
+    const isData = [
+      { campaignId: '1', impressionShare: 0.95, budgetLostShare: 0.00 },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // VLA should decrease (IS > 90%, and account is over-pacing)
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.change).toBeLessThan(0);
+  });
+
   test('under-pacing account: shared budgets increase to fill gap', () => {
     const pacing = makePacing({ remainingBudget: 10000, daysRemaining: 10 }); // $1000/day needed
     const shared = [
@@ -222,9 +289,9 @@ describe('distributeAccountBudget', () => {
     expect(recommendations[1].recommendedDailyBudget).toBe(250);
   });
 
-  test('VLA with low IS gets boost even when account is over-pacing', () => {
-    // Account over-pacing but VLA IS is terrible — still recommend increasing VLA
-    const pacing = makePacing({ remainingBudget: 200, daysRemaining: 10 }); // $20/day needed
+  test('under-pacing account: VLA with low IS gets boost, shared absorbs remainder', () => {
+    // Account under-pacing AND VLA IS is low — VLA gets IS-based boost
+    const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 }); // $500/day needed
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 15 },
     ];
@@ -239,15 +306,15 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // VLA increases (IS 40% → boost toward 75%)
+    // VLA increases (IS 40% → boost toward 75%, account is under-pacing so allowed)
     const vlaRec = recommendations.find(r => r.isVla);
     expect(vlaRec).toBeDefined();
     expect(vlaRec.recommendedDailyBudget).toBeGreaterThan(15);
 
-    // Shared absorbs the hit — must decrease heavily
+    // Shared also increases (under-pacing, needs to fill the gap)
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
-    expect(sharedRec.recommendedDailyBudget).toBeLessThan(50);
+    expect(sharedRec.recommendedDailyBudget).toBeGreaterThan(50);
   });
 
   test('VLA with high IS gets reduced, freeing budget for shared', () => {
@@ -605,7 +672,7 @@ describe('generateRecommendation', () => {
     expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
   });
 
-  test('budget fully spent: shared budgets at minimum, VLA still IS-driven', () => {
+  test('budget fully spent: all recommendations are decreases', () => {
     const params = {
       ...baseParams,
       campaignSpend: [
@@ -614,8 +681,9 @@ describe('generateRecommendation', () => {
     };
     const rec = generateRecommendation(params);
     expect(rec.status).toMatch(/over/);
-    rec.recommendations.filter(r => !r.isVla).forEach(r => {
-      expect(r.recommendedDailyBudget).toBeGreaterThanOrEqual(1);
+    // When over-pacing, every recommendation must be a decrease (never an increase)
+    rec.recommendations.forEach(r => {
+      expect(r.change).toBeLessThanOrEqual(0);
     });
   });
 });
