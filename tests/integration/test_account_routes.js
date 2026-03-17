@@ -108,7 +108,7 @@ describe('GET /api/account/:customerId/structure', () => {
       campaigns: [{ id: '100', name: 'Test Campaign', status: 'ENABLED' }],
       stats: { campaigns: 1, adGroups: 0, keywords: 0 },
     };
-    googleAds.createClient.mockReturnValue({});
+    googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
     googleAds.getAccountStructure.mockResolvedValue(fakeStructure);
 
     const agent = await authenticatedAgent(app);
@@ -119,8 +119,8 @@ describe('GET /api/account/:customerId/structure', () => {
     expect(res.body.stats.campaigns).toBe(1);
   });
 
-  test('creates client with correct customerId and mccId from session', async () => {
-    googleAds.createClient.mockReturnValue({});
+  test('passes REST context with correct customerId and mccId from session', async () => {
+    googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
     googleAds.getAccountStructure.mockResolvedValue({ campaigns: [], stats: {} });
 
     const agent = await authenticatedAgent(app, {
@@ -129,16 +129,18 @@ describe('GET /api/account/:customerId/structure', () => {
     });
     await agent.get('/api/account/54321/structure').expect(200);
 
-    expect(googleAds.createClient).toHaveBeenCalledWith(
-      expect.any(Object),
-      'rt',
-      '54321',
-      '999'
+    expect(googleAds.refreshAccessToken).toHaveBeenCalledWith(expect.any(Object), 'rt');
+    expect(googleAds.getAccountStructure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'fresh-token',
+        customerId: '54321',
+        loginCustomerId: '999',
+      })
     );
   });
 
   test('passes error to error handler when structure query fails', async () => {
-    googleAds.createClient.mockReturnValue({});
+    googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
     googleAds.getAccountStructure.mockRejectedValue(new Error('GAQL timeout'));
 
     const agent = await authenticatedAgent(app);

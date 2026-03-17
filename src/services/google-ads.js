@@ -44,33 +44,24 @@ function createClient(config, refreshToken, customerId, loginCustomerId) {
 }
 
 /**
- * Lists all accessible customer IDs for the authenticated user.
+ * Lists all accessible customer IDs for the authenticated user via REST.
  *
- * @param {Object} config - Google Ads credentials
- * @param {string} refreshToken - User's OAuth refresh token
+ * @param {string} accessToken - Fresh OAuth access token
+ * @param {string} developerToken - Google Ads developer token
  * @returns {Promise<string[]>} Array of customer resource names
  */
-async function listAccessibleCustomers(config, refreshToken) {
-  const api = new GoogleAdsApi({
-    client_id:       config.clientId,
-    client_secret:   config.clientSecret,
-    developer_token: config.developerToken,
-  });
-
-  // Retry once on timeout — Railway cold starts can be slow
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const result = await queryWithTimeout(
-        api.listAccessibleCustomers(refreshToken),
-        'accessible customers',
-        30000 // 30s — Railway can be slow on first call
-      );
-      return result.resource_names || result.resourceNames || [];
-    } catch (err) {
-      if (attempt === 2 || !err.message.includes('Timed out')) throw err;
-      console.warn('listAccessibleCustomers attempt 1 timed out, retrying...');
+async function listAccessibleCustomers(accessToken, developerToken) {
+  const resp = await axios.get(
+    'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'developer-token': developerToken,
+      },
+      timeout: 15000,
     }
-  }
+  );
+  return resp.data.resourceNames || [];
 }
 
 /**
@@ -96,7 +87,7 @@ async function queryViaRest(accessToken, developerToken, customerId, query, logi
   const resp = await axios.post(
     `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:searchStream`,
     { query },
-    { headers, timeout: 10000 }
+    { headers, timeout: 20000 }
   );
 
   const results = [];
@@ -142,72 +133,46 @@ function queryWithTimeout(queryPromise, label, ms = 15000) {
 }
 
 /**
- * Fetches full account structure: campaigns, ad groups, keywords, locations.
+ * Fetches full account structure via REST: campaigns, ad groups, keywords, locations.
  *
- * @param {Object} client - Google Ads API customer client
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object>} Account structure tree with campaigns, stats
  */
-async function getAccountStructure(client) {
-  // Fetch campaigns with budget (V2 omitted budget due to REST permission issues;
-  // library client handles auth correctly so the join works here)
-  const campaigns = await queryWithTimeout(client.query(`
-    SELECT
-      campaign.id,
-      campaign.name,
-      campaign.status,
-      campaign.advertising_channel_type,
-      campaign.bidding_strategy_type,
-      campaign_budget.amount_micros
-    FROM campaign
-    WHERE campaign.status != 'REMOVED'
-    ORDER BY campaign.name
-  `), 'campaigns');
+async function getAccountStructure(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const { accessToken, developerToken, customerId, loginCustomerId } = restCtx;
 
-  // Fetch ad groups
-  const adGroups = await queryWithTimeout(client.query(`
-    SELECT
-      ad_group.id,
-      ad_group.name,
-      ad_group.status,
-      ad_group.cpc_bid_micros,
-      campaign.name
-    FROM ad_group
-    WHERE campaign.status != 'REMOVED'
-      AND ad_group.status != 'REMOVED'
-    ORDER BY campaign.name, ad_group.name
-  `), 'ad groups');
+  const campaigns = await doQuery(accessToken, developerToken, customerId,
+    `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
+            campaign.bidding_strategy_type, campaign_budget.amount_micros
+     FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name`,
+    loginCustomerId);
 
-  // Fetch keywords (limit 2000 — balances completeness vs memory/latency)
-  const keywords = await queryWithTimeout(client.query(`
-    SELECT
-      ad_group_criterion.keyword.text,
-      ad_group_criterion.keyword.match_type,
-      ad_group_criterion.status,
-      ad_group_criterion.cpc_bid_micros,
-      ad_group_criterion.negative,
-      ad_group.name,
-      campaign.name
-    FROM ad_group_criterion
-    WHERE ad_group_criterion.type = 'KEYWORD'
-      AND campaign.status != 'REMOVED'
-      AND ad_group.status != 'REMOVED'
-      AND ad_group_criterion.status != 'REMOVED'
-    ORDER BY campaign.name, ad_group.name
-    LIMIT 2000
-  `), 'keywords', 20000);
+  const adGroups = await doQuery(accessToken, developerToken, customerId,
+    `SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros, campaign.name
+     FROM ad_group WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'
+     ORDER BY campaign.name, ad_group.name`,
+    loginCustomerId);
 
-  // Fetch location targets (non-fatal — empty array on failure)
-  const locations = await queryWithTimeout(client.query(`
-    SELECT
-      campaign_criterion.location.geo_target_constant,
-      campaign_criterion.bid_modifier,
-      campaign_criterion.negative,
-      campaign.name
-    FROM campaign_criterion
-    WHERE campaign_criterion.type = 'LOCATION'
-      AND campaign.status != 'REMOVED'
-    LIMIT 200
-  `), 'locations').catch(() => []);
+  const keywords = await doQuery(accessToken, developerToken, customerId,
+    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+            ad_group_criterion.status, ad_group_criterion.cpc_bid_micros,
+            ad_group_criterion.negative, ad_group.name, campaign.name
+     FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD'
+       AND campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'
+       AND ad_group_criterion.status != 'REMOVED'
+     ORDER BY campaign.name, ad_group.name LIMIT 2000`,
+    loginCustomerId);
+
+  let locations = [];
+  try {
+    locations = await doQuery(accessToken, developerToken, customerId,
+      `SELECT campaign_criterion.location.geo_target_constant, campaign_criterion.bid_modifier,
+              campaign_criterion.negative, campaign.name
+       FROM campaign_criterion WHERE campaign_criterion.type = 'LOCATION'
+         AND campaign.status != 'REMOVED' LIMIT 200`,
+      loginCustomerId);
+  } catch (_) { /* non-fatal */ }
 
   return buildStructureTree(campaigns, adGroups, keywords, locations);
 }
@@ -231,15 +196,20 @@ function normalizeStatus(val) {
 function buildStructureTree(campaigns, adGroups, keywords, locations) {
   const campMap = {};
 
+  // Helper: REST returns camelCase, gRPC library returns snake_case
+  // Support both for backward compat with tests
+  const get = (obj, camel, snake) => obj[camel] !== undefined ? obj[camel] : obj[snake];
+
   campaigns.forEach(row => {
     const c = row.campaign;
-    const budgetMicros = row.campaign_budget?.amount_micros;
+    const budget = row.campaignBudget || row.campaign_budget;
+    const budgetMicros = budget ? (get(budget, 'amountMicros', 'amount_micros')) : undefined;
     campMap[c.name] = {
       id:        String(c.id),
       name:      c.name,
       status:    normalizeStatus(c.status),
-      type:      String(c.advertising_channel_type),
-      bidding:   String(c.bidding_strategy_type),
+      type:      String(get(c, 'advertisingChannelType', 'advertising_channel_type')),
+      bidding:   String(get(c, 'biddingStrategyType', 'bidding_strategy_type')),
       budget:    budgetMicros != null ? (budgetMicros / 1_000_000).toFixed(2) : '?',
       adGroups:  [],
       locations: [],
@@ -249,12 +219,13 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
   adGroups.forEach(row => {
     const camp = campMap[row.campaign.name];
     if (!camp) return;
+    const ag = row.adGroup || row.ad_group;
     camp.adGroups.push({
-      id:         String(row.ad_group.id),
-      name:       row.ad_group.name,
-      status:     normalizeStatus(row.ad_group.status),
-      defaultBid: row.ad_group.cpc_bid_micros
-        ? (row.ad_group.cpc_bid_micros / 1_000_000).toFixed(2) : '?',
+      id:         String(ag.id),
+      name:       ag.name,
+      status:     normalizeStatus(ag.status),
+      defaultBid: get(ag, 'cpcBidMicros', 'cpc_bid_micros')
+        ? (get(ag, 'cpcBidMicros', 'cpc_bid_micros') / 1_000_000).toFixed(2) : '?',
       keywords:   [],
     });
   });
@@ -262,14 +233,16 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
   keywords.forEach(row => {
     const camp = campMap[row.campaign.name];
     if (!camp) return;
-    const ag = camp.adGroups.find(a => a.name === row.ad_group.name);
-    if (!ag) return;
-    const kw = row.ad_group_criterion;
-    ag.keywords.push({
+    const ag = row.adGroup || row.ad_group;
+    const agEntry = camp.adGroups.find(a => a.name === ag.name);
+    if (!agEntry) return;
+    const kw = row.adGroupCriterion || row.ad_group_criterion;
+    agEntry.keywords.push({
       text:     kw.keyword.text,
-      match:    String(kw.keyword.match_type),
+      match:    String(get(kw.keyword, 'matchType', 'match_type')),
       status:   normalizeStatus(kw.status),
-      bid:      kw.cpc_bid_micros ? (kw.cpc_bid_micros / 1_000_000).toFixed(2) : null,
+      bid:      get(kw, 'cpcBidMicros', 'cpc_bid_micros')
+        ? (get(kw, 'cpcBidMicros', 'cpc_bid_micros') / 1_000_000).toFixed(2) : null,
       negative: kw.negative,
     });
   });
@@ -277,10 +250,11 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
   locations.forEach(row => {
     const camp = campMap[row.campaign.name];
     if (!camp) return;
+    const cc = row.campaignCriterion || row.campaign_criterion;
     camp.locations.push({
-      geoTarget: row.campaign_criterion.location?.geo_target_constant || '',
-      negative:  row.campaign_criterion.negative,
-      bidMod:    row.campaign_criterion.bid_modifier,
+      geoTarget: cc.location?.geoTargetConstant || cc.location?.geo_target_constant || '',
+      negative:  cc.negative,
+      bidMod:    get(cc, 'bidModifier', 'bid_modifier'),
     });
   });
 

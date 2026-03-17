@@ -29,8 +29,8 @@ function createAccountsRouter(config) {
       const accessToken  = await googleAds.refreshAccessToken(config.googleAds, refreshToken);
       req.session.tokens.access_token = accessToken;
 
-      // Step 1: Get accessible customer IDs
-      const resourceNames = await googleAds.listAccessibleCustomers(config.googleAds, refreshToken);
+      // Step 1: Get accessible customer IDs (REST — avoids gRPC issues on Railway)
+      const resourceNames = await googleAds.listAccessibleCustomers(accessToken, config.googleAds.developerToken);
 
       // Step 2: Query each account for info (find MCC)
       const infoResults = await Promise.allSettled(
@@ -114,14 +114,17 @@ function createAccountsRouter(config) {
     const mccId = req.session.mccId;
 
     try {
-      const client = googleAds.createClient(
-        config.googleAds,
-        req.session.tokens.refresh_token,
-        customerId,
-        mccId
-      );
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      req.session.tokens.access_token = accessToken;
 
-      const structure = await googleAds.getAccountStructure(client);
+      const restCtx = {
+        accessToken,
+        developerToken: config.googleAds.developerToken,
+        customerId: customerId.replace(/-/g, ''),
+        loginCustomerId: mccId,
+      };
+
+      const structure = await googleAds.getAccountStructure(restCtx);
       res.json({ customerId, ...structure });
 
     } catch (err) {
