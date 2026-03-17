@@ -191,8 +191,12 @@ function renderHeader(data) {
 
 function renderMetrics(data) {
   const p = data.pacing || {};
-  const pctNum = p.pacePercent != null ? p.pacePercent : 0;
-  const pct = p.pacePercent != null ? p.pacePercent.toFixed(1) : '--';
+  // pacePercent is a variance (e.g. +49 means 49% above expected).
+  // Convert to pace ratio for display: 100 + variance = 149% of expected pace.
+  const paceRatio = p.pacePercent != null ? (100 + p.pacePercent) : null;
+  const pct = paceRatio != null ? paceRatio.toFixed(1) : '--';
+  // Progress bar shows budget utilization (spend / budget)
+  const spendProgress = p.monthlyBudget > 0 ? (data.totalSpend / p.monthlyBudget) * 100 : 0;
   const color = data.statusColor || 'gray';
 
   document.getElementById('metricsRow').innerHTML = `
@@ -209,7 +213,7 @@ function renderMetrics(data) {
       <div class="metric-label">Pacing</div>
       <div class="metric-value">${pct}%</div>
       <div class="pace-bar-container">
-        <div class="pace-bar ${color}" style="width:${Math.min(pctNum, 100)}%"></div>
+        <div class="pace-bar ${color}" style="width:${Math.min(spendProgress, 100)}%"></div>
       </div>
       <div class="metric-sub">Day ${p.daysElapsed} of ${p.daysInMonth}</div>
     </div>
