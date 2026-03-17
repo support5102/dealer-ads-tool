@@ -191,7 +191,7 @@ describe('GET /api/pacing', () => {
 
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/pacing?customerId=1234567890').expect(404);
-    expect(res.body.error).toMatch(/No goal found/);
+    expect(res.body.error).toMatch(/Could not load goals|No goal found/);
   });
 
   test('handles inventory with missing items array', async () => {
@@ -202,11 +202,12 @@ describe('GET /api/pacing', () => {
     expect(res.body.inventory.count).toBe(0);
   });
 
-  test('passes error to error handler when readGoals fails', async () => {
+  test('returns 404 when readGoals fails (non-fatal, returns empty goals)', async () => {
     goalReader.readGoals.mockRejectedValue(new Error('Sheets API unavailable'));
 
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(500);
-    expect(res.body.error).toBeDefined();
+    const res = await agent.get('/api/pacing?customerId=1234567890').expect(404);
+    expect(res.body.error).toMatch(/Could not load goals/);
+    expect(res.body.goalsLoaded).toBe(0);
   });
 });

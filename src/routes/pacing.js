@@ -77,24 +77,30 @@ function createPacingRouter(config, deps = {}) {
       // Use injected sheets client (tests) or create one from OAuth token (production)
       const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
-      // Fetch all data in parallel
+      // Fetch all data in parallel — inventory and sheets are non-fatal
       const [campaignSpend, sharedBudgets, impressionShare, inventoryResult, goals] =
         await Promise.all([
           googleAds.getMonthSpend(restCtx),
           googleAds.getSharedBudgets(restCtx),
           googleAds.getImpressionShare(restCtx),
-          googleAds.getInventory(restCtx),
-          readGoals(activeSheets, spreadsheetId),
+          googleAds.getInventory(restCtx).catch(err => {
+            console.warn('Inventory fetch failed (non-fatal):', err.message);
+            return { items: [], truncated: false };
+          }),
+          readGoals(activeSheets, spreadsheetId).catch(err => {
+            console.warn('Goals fetch failed:', err.message);
+            return [];
+          }),
         ]);
 
       // Find goal matching this customer ID
       const goal = goals.find(g => g.customerId === customerId.replace(/-/g, ''));
 
       if (!goal) {
-        return res.status(404).json({
-          error: `No goal found for customer ${customerId}. Add this account to the goals spreadsheet.`,
-          customerId,
-        });
+        const hint = goals.length === 0
+          ? 'Could not load goals from spreadsheet. Check Sheets permissions (re-login to grant spreadsheets.readonly scope).'
+          : `No goal found for customer ${customerId}. Add this account to the goals spreadsheet.`;
+        return res.status(404).json({ error: hint, customerId, goalsLoaded: goals.length });
       }
 
       // Count new vehicle inventory

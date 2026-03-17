@@ -383,24 +383,30 @@ async function getImpressionShare(restCtx) {
  */
 async function getInventory(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
-  const rows = await doQuery(
-    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-    `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand, shopping_product.custom_label1
-     FROM shopping_product
-     WHERE shopping_product.status = 'ELIGIBLE'
-     LIMIT 5000`,
-    restCtx.loginCustomerId
-  );
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand, shopping_product.custom_label_1
+       FROM shopping_product
+       WHERE shopping_product.status = 'ELIGIBLE'
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
 
-  return {
-    items: rows.map(row => ({
-      itemId: row.shoppingProduct.itemId,
-      condition: row.shoppingProduct.condition,
-      brand: row.shoppingProduct.brand || null,
-      model: row.shoppingProduct.customLabel1 || null,
-    })),
-    truncated: rows.length >= 5000,
-  };
+    return {
+      items: rows.map(row => ({
+        itemId: row.shoppingProduct.itemId,
+        condition: row.shoppingProduct.condition,
+        brand: row.shoppingProduct.brand || null,
+        model: row.shoppingProduct.customLabel1 || null,
+      })),
+      truncated: rows.length >= 5000,
+    };
+  } catch (err) {
+    // Non-fatal: shopping_product may not exist for this account type
+    console.warn('getInventory failed (non-fatal):', err.message);
+    return { items: [], truncated: false };
+  }
 }
 
 module.exports = {
