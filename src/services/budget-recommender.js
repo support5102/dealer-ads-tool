@@ -34,6 +34,34 @@ function statusToColor(status) {
 }
 
 /**
+ * Campaign priority tiers — higher number = higher priority.
+ * VLAs are handled separately; these tiers apply to keyword campaigns.
+ *
+ * Tier 1 (lowest): General terms, regional — can be paused first
+ * Tier 2: Model-specific, used, other campaigns
+ * Tier 3 (highest): Brand campaigns — last to be cut
+ */
+const CAMPAIGN_TIERS = {
+  GENERAL_REGIONAL: 1,
+  OTHER: 2,
+  BRAND: 3,
+};
+
+/**
+ * Classifies a campaign name into a priority tier.
+ * @param {string} name - Campaign name
+ * @returns {number} Tier number (1=lowest, 3=highest)
+ */
+function getCampaignTier(name) {
+  const lower = (name || '').toLowerCase();
+  if (lower.includes('brand')) return CAMPAIGN_TIERS.BRAND;
+  if (lower.includes('general') || lower.includes('regional') || lower.includes('conquest')) {
+    return CAMPAIGN_TIERS.GENERAL_REGIONAL;
+  }
+  return CAMPAIGN_TIERS.OTHER;
+}
+
+/**
  * Checks if a campaign is a VLA (Vehicle Listing Ad) campaign.
  * Matches by name pattern or Google Ads channel type.
  */
@@ -41,6 +69,45 @@ function isVlaCampaign(campaign) {
   const name = (campaign.campaignName || '').toLowerCase();
   const type = (campaign.channelType || '').toUpperCase();
   return name.includes('vla') || type === 'SHOPPING' || type === 'LOCAL';
+}
+
+/**
+ * Returns the highest campaign tier among campaigns in a shared budget.
+ * Used to classify the whole budget for prioritized over-pacing cuts.
+ * Brand budgets (tier 3) are cut less; general/regional (tier 1) are cut more.
+ */
+function getSharedBudgetTier(budget) {
+  const campaigns = budget.campaigns || [];
+  if (campaigns.length === 0) {
+    // Check the budget name itself for tier hints
+    return getCampaignTier(budget.name || '');
+  }
+  return Math.max(...campaigns.map(c => getCampaignTier(c.campaignName)));
+}
+
+/**
+ * Identifies low-priority campaigns within shared budgets that could be paused
+ * to free up budget when over-pacing. Returns campaign names by tier.
+ */
+function findPausableCampaigns(sharedBudgets, spendMap) {
+  const pausable = [];
+  for (const budget of (sharedBudgets || [])) {
+    for (const camp of (budget.campaigns || [])) {
+      const tier = getCampaignTier(camp.campaignName);
+      if (tier <= CAMPAIGN_TIERS.GENERAL_REGIONAL) {
+        const dailySpend = spendMap.get(String(camp.campaignId)) || 0;
+        pausable.push({
+          campaignName: camp.campaignName,
+          budgetName: budget.name,
+          tier,
+          dailySpend: Math.round(dailySpend * 100) / 100,
+        });
+      }
+    }
+  }
+  // Sort lowest tier first, then by highest spend (biggest savings first)
+  pausable.sort((a, b) => a.tier - b.tier || b.dailySpend - a.dailySpend);
+  return pausable;
 }
 
 /**
@@ -156,20 +223,40 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   const currentAdjustableSpend = currentVlaSpend + currentSharedSpend;
 
   // Over-pacing: current actual spend exceeds the target.
-  // ALL budgets must decrease proportionally — no increases allowed.
+  // ALL budgets must decrease, but VLAs are prioritized (smaller cut).
   const accountOverPacing = targetForAdjustable < currentAdjustableSpend;
 
-  // Proportional ratio to scale all budgets when over-pacing
-  const overPacingRatio = (accountOverPacing && currentAdjustableSpend > 0)
-    ? targetForAdjustable / currentAdjustableSpend
-    : 1;
+  // When over-pacing, VLAs take a smaller percentage cut than shared budgets.
+  // VLA_PROTECTION = 0.5 means VLAs lose half the percentage that shared loses.
+  // Example: if shared decreases by 40%, VLAs decrease by 20%.
+  const VLA_PROTECTION = 0.5;
+
+  let vlaOverPacingRatio = 1;
+  let sharedOverPacingRatio = 1;
+  if (accountOverPacing) {
+    if (currentVlaSpend > 0 && currentSharedSpend > 0) {
+      // Solve: VlaSpend * vlaR + SharedSpend * sharedR = target
+      // With:  (1 - vlaR) = VLA_PROTECTION * (1 - sharedR)
+      //   → sharedR = (target - VlaSpend * (1 - VLA_PROTECTION)) / (VlaSpend * VLA_PROTECTION + SharedSpend)
+      const numerator = targetForAdjustable - currentVlaSpend * (1 - VLA_PROTECTION);
+      const denominator = currentVlaSpend * VLA_PROTECTION + currentSharedSpend;
+      sharedOverPacingRatio = denominator > 0 ? Math.max(numerator / denominator, 0) : 0;
+      vlaOverPacingRatio = 1 - VLA_PROTECTION * (1 - sharedOverPacingRatio);
+      vlaOverPacingRatio = Math.max(vlaOverPacingRatio, 0);
+    } else if (currentAdjustableSpend > 0) {
+      // Only one type exists — it absorbs everything
+      const ratio = targetForAdjustable / currentAdjustableSpend;
+      vlaOverPacingRatio = ratio;
+      sharedOverPacingRatio = ratio;
+    }
+  }
 
   // Build impression share lookup
   const isMap = new Map();
   (impressionShareData || []).forEach(d => isMap.set(d.campaignId, d));
 
   // --- Step 1: VLA budgets ---
-  // Over-pacing: proportional decrease (same as shared). IS > 90% can decrease further.
+  // Over-pacing: smaller proportional decrease (protected). IS > 90% can decrease further.
   // Under-pacing: IS-driven allocation (priority), shared gets remainder.
   const vlaAllocations = vlaCampaigns.map(campaign => {
     const campIS = isMap.get(campaign.campaignId);
@@ -181,8 +268,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     let reason;
 
     if (accountOverPacing) {
-      // All budgets decrease proportionally to hit the target
-      recommended = currentSpend * overPacingRatio;
+      // VLAs take a smaller cut than shared budgets
+      recommended = currentSpend * vlaOverPacingRatio;
       reason = `Account over-pacing — decrease to hit $${requiredDailyRate.toFixed(2)}/day target`;
 
       // If IS > 90%, the IS reduction might be even steeper — use lower value
@@ -229,10 +316,10 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   const totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
 
   // --- Step 2: Shared budgets ---
-  // Over-pacing: proportional decrease (same ratio as VLAs).
+  // Over-pacing: larger proportional decrease (absorbs more of the cut).
   // Under-pacing: get whatever's left after VLA allocation.
   const remainingForShared = accountOverPacing
-    ? null  // not used — shared also uses proportional ratio
+    ? null  // not used — shared uses sharedOverPacingRatio
     : Math.max(targetForAdjustable - totalVlaRecommended, 0);
 
   // Build final recommendations
@@ -256,15 +343,24 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
   });
 
-  // Shared budget recs
+  // Shared budget recs — when over-pacing, lower-tier budgets (general/regional)
+  // get cut more aggressively than higher-tier (brand) budgets.
+  // Tier weights: general/regional = 1.5x the base cut, brand = 0.6x the base cut, other = 1x
+  const TIER_CUT_WEIGHTS = { [CAMPAIGN_TIERS.GENERAL_REGIONAL]: 1.5, [CAMPAIGN_TIERS.OTHER]: 1.0, [CAMPAIGN_TIERS.BRAND]: 0.6 };
+
   let recommendedSharedTotal = 0;
   if (budgets.length > 0) {
-    budgets.forEach(budget => {
+    // First pass: compute tier-weighted recommended values
+    const sharedAllocations = budgets.map(budget => {
       const currentSpend = actualDailySpend(budget, spendMap);
       let recommended;
       if (accountOverPacing) {
-        // Proportional decrease, same ratio as everything else
-        recommended = currentSpend * overPacingRatio;
+        // Apply tier-weighted cut: lower-tier budgets decrease more
+        const tier = getSharedBudgetTier(budget);
+        const tierWeight = TIER_CUT_WEIGHTS[tier] || 1.0;
+        const baseCut = 1 - sharedOverPacingRatio; // base cut percentage
+        const tierCut = Math.min(baseCut * tierWeight, 1); // cap at 100% cut
+        recommended = currentSpend * (1 - tierCut);
       } else if (currentSharedSpend > 0) {
         const proportion = currentSpend / currentSharedSpend;
         recommended = remainingForShared * proportion;
@@ -276,12 +372,33 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         recommended = Math.max(recommended, 1);
       }
       recommended = Math.max(recommended, 0.01);
+      return { budget, currentSpend, recommended };
+    });
+
+    // Normalize: tier weighting may over/under-shoot the target.
+    // Scale all shared recs so their total matches what shared should be.
+    if (accountOverPacing) {
+      const rawTotal = sharedAllocations.reduce((s, a) => s + a.recommended, 0);
+      const sharedTarget = currentSharedSpend * sharedOverPacingRatio;
+      if (rawTotal > 0 && Math.abs(rawTotal - sharedTarget) > 0.01) {
+        const normFactor = sharedTarget / rawTotal;
+        sharedAllocations.forEach(a => {
+          a.recommended = Math.max(a.recommended * normFactor, 0.01);
+        });
+      }
+    }
+
+    // Round and build recommendations
+    sharedAllocations.forEach(({ budget, currentSpend, recommended }) => {
       recommended = Math.round(recommended * 100) / 100;
       recommendedSharedTotal += recommended;
 
       const change = Math.round((recommended - currentSpend) * 100) / 100;
       if (Math.abs(change) < 0.01) return;
 
+      const tier = getSharedBudgetTier(budget);
+      const tierLabel = tier === CAMPAIGN_TIERS.GENERAL_REGIONAL ? ' (low priority — general/regional)'
+        : tier === CAMPAIGN_TIERS.BRAND ? ' (brand — protected)' : '';
       const direction = change >= 0 ? 'increase' : 'decrease';
       recommendations.push({
         type: 'shared_budget',
@@ -290,10 +407,16 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         currentDailyBudget: Math.round(currentSpend * 100) / 100,
         recommendedDailyBudget: recommended,
         change,
-        reason: `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction} to hit monthly budget`,
+        tier,
+        reason: `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`,
       });
     });
   }
+
+  // When over-pacing, identify low-priority campaigns that could be paused
+  const pausableCampaigns = accountOverPacing
+    ? findPausableCampaigns(budgets, spendMap)
+    : [];
 
   // Budget allocation summary — uses actual spend rates, not budget settings
   const currentTotal = currentVlaSpend + currentSharedSpend + nonVlaDedicatedSpend;
@@ -307,7 +430,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     totalChange,
   };
 
-  return { recommendations, budgetSummary };
+  return { recommendations, budgetSummary, pausableCampaigns };
 }
 
 /**
@@ -358,7 +481,7 @@ function generateRecommendation(params) {
   const pacing = calculatePacing(pacingParams);
 
   // Distribute account budget: VLA (priority) + shared (remainder)
-  const { recommendations, budgetSummary } = distributeAccountBudget({
+  const { recommendations, budgetSummary, pausableCampaigns } = distributeAccountBudget({
     pacing,
     dedicatedBudgets,
     sharedBudgets,
@@ -377,6 +500,7 @@ function generateRecommendation(params) {
     statusColor: statusToColor(pacing.paceStatus),
     recommendations,
     budgetSummary,
+    pausableCampaigns,
     impressionShareSummary,
     inventory: {
       count: inventoryCount,
@@ -392,5 +516,8 @@ module.exports = {
   summarizeImpressionShare,
   statusToColor,
   isVlaCampaign,
+  getCampaignTier,
+  getSharedBudgetTier,
   VLA_IS_TARGET,
+  CAMPAIGN_TIERS,
 };

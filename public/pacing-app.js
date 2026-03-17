@@ -169,7 +169,7 @@ function showView(id) {
 function renderDashboard(data) {
   renderHeader(data);
   renderMetrics(data);
-  renderRecommendations(data.recommendations, data.budgetSummary);
+  renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
   renderImpressionShare(data.impressionShareSummary);
   renderInventory(data.inventory);
 }
@@ -225,7 +225,7 @@ function renderMetrics(data) {
   `;
 }
 
-function renderRecommendations(recs, budgetSummary) {
+function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   const section = document.getElementById('recommendationsSection');
   if (!recs || recs.length === 0) {
     section.innerHTML = `
@@ -271,10 +271,14 @@ function renderRecommendations(recs, budgetSummary) {
     const dir = r.change >= 0 ? 'increase' : 'decrease';
     const sign = r.change >= 0 ? '+' : '';
     const vlaBadge = r.isVla ? '<span class="vla-badge">VLA</span>' : '';
+    // Tier badge for shared budgets
+    let tierBadge = '';
+    if (!r.isVla && r.tier === 3) tierBadge = '<span class="tier-badge brand">Brand</span>';
+    else if (!r.isVla && r.tier === 1) tierBadge = '<span class="tier-badge low">General/Regional</span>';
     rows += `
       <div class="rec-item">
         <div>
-          <div class="rec-target">${vlaBadge}${esc(r.target)}</div>
+          <div class="rec-target">${vlaBadge}${tierBadge}${esc(r.target)}</div>
           <div class="rec-budget-row">
             <span class="rec-current">$${r.currentDailyBudget.toFixed(2)}/day</span>
             <span class="rec-arrow">&rarr;</span>
@@ -286,6 +290,18 @@ function renderRecommendations(recs, budgetSummary) {
       </div>
     `;
   });
+
+  // Pausable campaigns suggestion
+  let pausableHtml = '';
+  if (pausableCampaigns && pausableCampaigns.length > 0) {
+    const totalSavings = pausableCampaigns.reduce((s, c) => s + c.dailySpend, 0);
+    pausableHtml = `
+      <div class="pausable-section">
+        <div class="pausable-title">Consider pausing (low priority — saves ~$${totalSavings.toFixed(2)}/day):</div>
+        ${pausableCampaigns.map(c => `<span class="pausable-item">&bull; ${esc(c.campaignName)}${c.dailySpend > 0 ? ` ($${c.dailySpend.toFixed(2)}/day)` : ''}</span>`).join('')}
+      </div>
+    `;
+  }
 
   const vlaCount = recs.filter(r => r.isVla).length;
   const sharedCount = recs.length - vlaCount;
@@ -301,6 +317,7 @@ function renderRecommendations(recs, budgetSummary) {
       </div>
       ${summaryHtml}
       ${rows}
+      ${pausableHtml}
     </div>
   `;
 }

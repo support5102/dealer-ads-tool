@@ -173,8 +173,9 @@ describe('distributeAccountBudget', () => {
     expect(budgetSummary.requiredDailyRate).toBe(100);
   });
 
-  test('over-pacing account: shared budgets decrease to hit monthly target', () => {
+  test('over-pacing account: shared budgets decrease more than VLAs (VLA priority)', () => {
     // Already spent most of the budget, little remaining. Required rate is low.
+    // Total cut = 81 - 20 = 61. VLAs absorb 30% ($18.3), shared absorbs 70% ($42.7).
     const pacing = makePacing({ remainingBudget: 280, daysRemaining: 14 }); // $20/day needed
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 10 },
@@ -190,17 +191,24 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // Over-pacing: ALL budgets decrease proportionally (ratio = 20/81 ≈ 0.247)
-    // VLA also decreases even though IS is on target
+    // Both decrease, but VLA decreases less than shared proportionally
     const vlaRec = recommendations.find(r => r.isVla);
+    const sharedRec = recommendations.find(r => !r.isVla);
+
+    // VLA still decreases (absorbs 30% of the cut)
     expect(vlaRec).toBeDefined();
     expect(vlaRec.recommendedDailyBudget).toBeLessThan(10);
     expect(vlaRec.change).toBeLessThan(0);
 
-    const sharedRec = recommendations.find(r => !r.isVla);
+    // Shared decreases more (absorbs 70% of the cut)
     expect(sharedRec).toBeDefined();
     expect(sharedRec.recommendedDailyBudget).toBeLessThan(71);
     expect(sharedRec.change).toBeLessThan(0);
+
+    // VLA cut % should be smaller than shared cut %
+    const vlaCutPct = Math.abs(vlaRec.change) / 10;
+    const sharedCutPct = Math.abs(sharedRec.change) / 71;
+    expect(vlaCutPct).toBeLessThan(sharedCutPct);
   });
 
   test('over-pacing account: NEVER recommends increasing any budget', () => {
@@ -407,18 +415,23 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // Over-pacing: ALL adjustable budgets decrease proportionally
-    // Target adjustable = $60, current adjustable = $70 (VLA $20 + shared $50)
-    // Ratio = 60/70 ≈ 0.857
+    // Over-pacing: VLA + shared must cover $60, currently $70 (VLA $20 + shared $50)
+    // VLA takes half the % cut of shared. sharedR = (60 - 20*0.5)/(20*0.5 + 50) = 50/60 = 0.833
+    // vlaR = 1 - 0.5*(1-0.833) = 0.917. VLA: 20*0.917=$18.33, Shared: 50*0.833=$41.67
     const vlaRec = recommendations.find(r => r.isVla);
     expect(vlaRec).toBeDefined();
-    expect(vlaRec.recommendedDailyBudget).toBeCloseTo(17.14, 1);
+    expect(vlaRec.recommendedDailyBudget).toBeCloseTo(18.33, 1);
     expect(vlaRec.change).toBeLessThan(0);
 
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
-    expect(sharedRec.recommendedDailyBudget).toBeCloseTo(42.86, 1);
-    expect(sharedRec.change).toBeCloseTo(-7.14, 1);
+    expect(sharedRec.recommendedDailyBudget).toBeCloseTo(41.67, 1);
+    expect(sharedRec.change).toBeLessThan(0);
+
+    // VLA cut % should be smaller than shared cut %
+    const vlaCutPct = Math.abs(vlaRec.change) / 20;
+    const sharedCutPct = Math.abs(sharedRec.change) / 50;
+    expect(vlaCutPct).toBeLessThan(sharedCutPct);
   });
 
   test('multiple shared budgets distributed proportionally to budget size', () => {
@@ -562,15 +575,18 @@ describe('distributeAccountBudget', () => {
     // Current daily total should reflect actual spend ($80/day), NOT budget settings ($300/day)
     expect(budgetSummary.currentDailyTotal).toBe(80);
 
-    // VLA current should show actual spend rate ($50), not budget ($200)
+    // Both should decrease (over-pacing: $80 actual vs $60 target)
+    // VLA gets a smaller cut (protected), shared gets a larger cut
     const vlaRec = recommendations.find(r => r.isVla);
+    const sharedRec = recommendations.find(r => !r.isVla);
+
     expect(vlaRec).toBeDefined();
     expect(vlaRec.currentDailyBudget).toBe(50);
+    expect(vlaRec.change).toBeLessThan(0);
 
-    // Shared current should show actual spend rate ($30), not budget ($100)
-    const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
     expect(sharedRec.currentDailyBudget).toBe(30);
+    expect(sharedRec.change).toBeLessThan(0);
   });
 
   test('falls back to budget settings when no campaignSpend provided', () => {
