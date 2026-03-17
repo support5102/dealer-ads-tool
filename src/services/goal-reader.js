@@ -74,11 +74,11 @@ function parseRow(row) {
  *
  * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
- * @param {string} [range='Goals!A2:E'] - Cell range to read (skip header row)
+ * @param {string} [range='PPC Spend Pace!A2:E'] - Cell range to read (skip header row)
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'Goals!A2:E') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:E') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'

@@ -239,7 +239,7 @@ describe('readGoals', () => {
     expect(capturedParams.range).toBe('CustomRange!A1:Z');
   });
 
-  test('uses default range Goals!A2:E when not specified', async () => {
+  test('uses default range PPC Spend Pace!A2:E when not specified', async () => {
     let capturedParams;
     const client = {
       spreadsheets: {
@@ -253,7 +253,7 @@ describe('readGoals', () => {
     };
 
     await readGoals(client, 'my-sheet-id');
-    expect(capturedParams.range).toBe('Goals!A2:E');
+    expect(capturedParams.range).toBe('PPC Spend Pace!A2:E');
   });
 
   test('skips invalid rows and returns only valid goals', async () => {

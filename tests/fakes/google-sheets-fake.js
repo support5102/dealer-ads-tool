@@ -33,7 +33,7 @@ function createFakeSheetsClient(rows = SAMPLE_GOALS_ROWS, error = null) {
           return {
             data: {
               values: rows,
-              range: params.range || 'Goals!A2:E',
+              range: params.range || 'PPC Spend Pace!A2:E',
               majorDimension: 'ROWS',
             },
           };
