@@ -61,23 +61,29 @@ function createPacingRouter(config, deps = {}) {
 
     try {
       const mccId = req.session.mccId;
-      const client = googleAds.createClient(
-        config.googleAds,
-        req.session.tokens.refresh_token,
-        customerId,
-        mccId
-      );
+
+      // Refresh access token for REST calls
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      req.session.tokens.access_token = accessToken;
+
+      // REST context for all Google Ads queries (avoids gRPC issues on Railway)
+      const restCtx = {
+        accessToken,
+        developerToken: config.googleAds.developerToken,
+        customerId: customerId.replace(/-/g, ''),
+        loginCustomerId: mccId,
+      };
 
       // Use injected sheets client (tests) or create one from OAuth token (production)
-      const activeSheets = sheetsClient || createSheetsClient(req.session.tokens.access_token);
+      const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
       // Fetch all data in parallel
       const [campaignSpend, sharedBudgets, impressionShare, inventoryResult, goals] =
         await Promise.all([
-          googleAds.getMonthSpend(client),
-          googleAds.getSharedBudgets(client),
-          googleAds.getImpressionShare(client),
-          googleAds.getInventory(client),
+          googleAds.getMonthSpend(restCtx),
+          googleAds.getSharedBudgets(restCtx),
+          googleAds.getImpressionShare(restCtx),
+          googleAds.getInventory(restCtx),
           readGoals(activeSheets, spreadsheetId),
         ]);
 

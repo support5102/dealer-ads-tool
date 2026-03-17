@@ -59,7 +59,7 @@ const SAMPLE_GOALS = [
 ];
 
 function setupMocks() {
-  googleAds.createClient.mockReturnValue({});
+  googleAds.refreshAccessToken.mockResolvedValue('fresh-access-token');
   googleAds.getMonthSpend.mockResolvedValue(SAMPLE_SPEND);
   googleAds.getSharedBudgets.mockResolvedValue(SAMPLE_SHARED_BUDGETS);
   googleAds.getImpressionShare.mockResolvedValue(SAMPLE_IMPRESSION_SHARE);
@@ -104,18 +104,24 @@ describe('GET /api/pacing', () => {
     expect(res.body.inventory).toBeDefined();
   });
 
-  test('creates Google Ads client with session credentials', async () => {
+  test('refreshes access token and passes REST context to queries', async () => {
     const agent = await authenticatedAgent(app, {
       tokens: { access_token: 'at', refresh_token: 'rt' },
       mccId: '999',
     });
     await agent.get('/api/pacing?customerId=1234567890').expect(200);
 
-    expect(googleAds.createClient).toHaveBeenCalledWith(
+    expect(googleAds.refreshAccessToken).toHaveBeenCalledWith(
       expect.any(Object),
-      'rt',
-      '1234567890',
-      '999'
+      'rt'
+    );
+    // Verify restCtx passed to queries
+    expect(googleAds.getMonthSpend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'fresh-access-token',
+        customerId: '1234567890',
+        loginCustomerId: '999',
+      })
     );
   });
 
@@ -163,14 +169,13 @@ describe('GET /api/pacing', () => {
 
   test('handles dashes in customerId', async () => {
     const agent = await authenticatedAgent(app);
-    // Route passes customerId as-is to createClient, but strips dashes for goal matching
+    // Route strips dashes for REST context and goal matching
     await agent.get('/api/pacing?customerId=123-456-7890').expect(200);
 
-    expect(googleAds.createClient).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.any(String),
-      '123-456-7890',
-      undefined
+    expect(googleAds.getMonthSpend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: '1234567890',
+      })
     );
   });
 

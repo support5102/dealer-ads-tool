@@ -301,61 +301,56 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
 // ===========================================================================
 
 /**
- * Fetches month-to-date spend per campaign.
+ * Fetches month-to-date spend per campaign via REST.
  *
- * @param {Object} client - Google Ads API customer client
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object[]>} Array of { campaignId, campaignName, status, spend }
  */
-async function getMonthSpend(client) {
-  const rows = await queryWithTimeout(client.query(`
-    SELECT
-      campaign.id,
-      campaign.name,
-      campaign.status,
-      metrics.cost_micros
-    FROM campaign
-    WHERE segments.date DURING THIS_MONTH
-      AND campaign.status != 'REMOVED'
-  `), 'month spend');
+async function getMonthSpend(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros
+     FROM campaign
+     WHERE segments.date DURING THIS_MONTH AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
 
   return rows.map(row => ({
     campaignId: String(row.campaign.id),
     campaignName: row.campaign.name,
     status: normalizeStatus(row.campaign.status),
-    spend: (row.metrics.cost_micros ?? 0) / 1_000_000,
+    spend: (row.metrics.costMicros ?? 0) / 1_000_000,
   }));
 }
 
 /**
- * Fetches all explicitly shared budgets with their linked campaigns.
+ * Fetches all explicitly shared budgets with their linked campaigns via REST.
  * Returns one entry per shared budget, with an array of campaign names.
  *
- * @param {Object} client - Google Ads API customer client
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object[]>} Array of { resourceName, name, dailyBudget, campaigns }
  */
-async function getSharedBudgets(client) {
-  const rows = await queryWithTimeout(client.query(`
-    SELECT
-      campaign.id,
-      campaign.name,
-      campaign_budget.resource_name,
-      campaign_budget.name,
-      campaign_budget.amount_micros
-    FROM campaign
-    WHERE campaign_budget.explicitly_shared = TRUE
-      AND campaign.status != 'REMOVED'
-    ORDER BY campaign_budget.name, campaign.name
-  `), 'shared budgets');
+async function getSharedBudgets(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, campaign_budget.resource_name, campaign_budget.name, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign_budget.explicitly_shared = TRUE AND campaign.status != 'REMOVED'
+     ORDER BY campaign_budget.name, campaign.name`,
+    restCtx.loginCustomerId
+  );
 
   // Deduplicate by budget resource_name, collecting linked campaigns
   const budgetMap = new Map();
   for (const row of rows) {
-    const key = row.campaign_budget.resource_name;
+    const key = row.campaignBudget.resourceName;
     if (!budgetMap.has(key)) {
       budgetMap.set(key, {
         resourceName: key,
-        name: row.campaign_budget.name,
-        dailyBudget: (row.campaign_budget.amount_micros ?? 0) / 1_000_000,
+        name: row.campaignBudget.name,
+        dailyBudget: (row.campaignBudget.amountMicros ?? 0) / 1_000_000,
         campaigns: [],
       });
     }
@@ -369,58 +364,53 @@ async function getSharedBudgets(client) {
 }
 
 /**
- * Fetches search impression share metrics per campaign for current month.
+ * Fetches search impression share metrics per campaign for current month via REST.
  * Only includes ENABLED campaigns — paused campaigns don't generate impression data.
  *
- * @param {Object} client - Google Ads API customer client
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object[]>} Array of { campaignId, campaignName, impressionShare, budgetLostShare }
  */
-async function getImpressionShare(client) {
-  const rows = await queryWithTimeout(client.query(`
-    SELECT
-      campaign.id,
-      campaign.name,
-      metrics.search_impression_share,
-      metrics.search_budget_lost_impression_share
-    FROM campaign
-    WHERE segments.date DURING THIS_MONTH
-      AND campaign.status = 'ENABLED'
-  `), 'impression share');
+async function getImpressionShare(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share
+     FROM campaign
+     WHERE segments.date DURING THIS_MONTH AND campaign.status = 'ENABLED'`,
+    restCtx.loginCustomerId
+  );
 
   return rows.map(row => ({
     campaignId: String(row.campaign.id),
     campaignName: row.campaign.name,
-    impressionShare: row.metrics.search_impression_share ?? null,
-    budgetLostShare: row.metrics.search_budget_lost_impression_share ?? null,
+    impressionShare: row.metrics.searchImpressionShare ?? null,
+    budgetLostShare: row.metrics.searchBudgetLostImpressionShare ?? null,
   }));
 }
 
 /**
- * Fetches vehicle inventory from shopping product feed.
- * Note: shopping_product resource requires google-ads-api v23+ / API v17+.
- * If the npm package doesn't support it, fall back to queryViaRest.
+ * Fetches vehicle inventory from shopping product feed via REST.
  *
- * @param {Object} client - Google Ads API customer client
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object>} { items: [{ itemId, condition, brand, model }], truncated: boolean }
  */
-async function getInventory(client) {
-  const rows = await queryWithTimeout(client.query(`
-    SELECT
-      shopping_product.item_id,
-      shopping_product.condition,
-      shopping_product.brand,
-      shopping_product.custom_label1
-    FROM shopping_product
-    WHERE shopping_product.status = 'ELIGIBLE'
-    LIMIT 5000
-  `), 'inventory', 20000);
+async function getInventory(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand, shopping_product.custom_label1
+     FROM shopping_product
+     WHERE shopping_product.status = 'ELIGIBLE'
+     LIMIT 5000`,
+    restCtx.loginCustomerId
+  );
 
   return {
     items: rows.map(row => ({
-      itemId: row.shopping_product.item_id,
-      condition: row.shopping_product.condition,
-      brand: row.shopping_product.brand || null,
-      model: row.shopping_product.custom_label1 || null,
+      itemId: row.shoppingProduct.itemId,
+      condition: row.shoppingProduct.condition,
+      brand: row.shoppingProduct.brand || null,
+      model: row.shoppingProduct.customLabel1 || null,
     })),
     truncated: rows.length >= 5000,
   };
