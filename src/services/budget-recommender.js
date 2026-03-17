@@ -84,9 +84,16 @@ function calculateBudgetAdjustments(pacing, sharedBudgets) {
     ? pacing.remainingBudget / pacing.daysRemaining
     : 0;
 
-  // If total daily budget is zero, distribute required rate evenly
-  const useEvenDistribution = totalDailyBudget === 0;
-  const ratio = useEvenDistribution ? 0 : requiredRate / totalDailyBudget;
+  // Compare against actual daily spend rate (not budget settings) because Google Ads
+  // routinely overspends daily budgets. Using budget settings as the denominator leads
+  // to wrong recommendations when actual spend diverges from settings (e.g. account
+  // spending $287/day on a $71/day budget would get an "increase" recommendation
+  // even when critically over-pacing).
+  // Fall back to budget settings only when there's no spend history.
+  const actualDailySpend = pacing.dailyAvgSpend || 0;
+  const denominator = actualDailySpend > 0 ? actualDailySpend : totalDailyBudget;
+  const useEvenDistribution = denominator === 0;
+  const ratio = useEvenDistribution ? 0 : requiredRate / denominator;
 
   return sharedBudgets.map(budget => {
     let recommended;

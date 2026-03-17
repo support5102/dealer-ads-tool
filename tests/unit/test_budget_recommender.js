@@ -258,6 +258,32 @@ describe('calculateBudgetAdjustments', () => {
     expect(adjustments[0].recommendedDailyBudget).toBeLessThan(500);
   });
 
+  test('recommends decrease when over-pacing with Google Ads overspend', () => {
+    // Real-world scenario: budget set to $71/day but Google Ads spends $287/day.
+    // Account is critically over-pacing. Tool should recommend DECREASING budgets.
+    const pacing = {
+      paceStatus: 'critical_over',
+      requiredDailyRate: 80.35,
+      dailyAvgSpend: 286.77,      // actual spend rate (4x budget settings)
+      daysRemaining: 14,
+      remainingBudget: 1124.92,
+    };
+    const sharedBudgets = [
+      { resourceName: 'r/1', name: 'Main', dailyBudget: 71.00, campaigns: [] },
+      { resourceName: 'r/2', name: 'Vinfast', dailyBudget: 0.01, campaigns: [] },
+    ];
+
+    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
+
+    expect(adjustments).toHaveLength(2);
+    // Main should decrease (not increase!)
+    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(71);
+    expect(adjustments[0].change).toBeLessThan(0);
+    expect(adjustments[0].reason).toMatch(/Over-pacing/i);
+    // Vinfast hits $1 minimum
+    expect(adjustments[1].recommendedDailyBudget).toBe(1);
+  });
+
   test('includes reason text in each adjustment', () => {
     const pacing = {
       paceStatus: 'under',
