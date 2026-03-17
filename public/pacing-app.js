@@ -242,10 +242,12 @@ function renderRecommendations(recs, budgetSummary) {
   // Budget allocation summary bar
   let summaryHtml = '';
   if (budgetSummary) {
-    const { requiredDailyRate, currentDailyTotal, recommendedDailyTotal } = budgetSummary;
-    const diff = recommendedDailyTotal - currentDailyTotal;
-    const diffSign = diff >= 0 ? '+' : '';
-    const diffColor = Math.abs(diff) < 1 ? 'var(--text3)' : (diff > 0 ? '#4ade80' : '#fb923c');
+    const { requiredDailyRate, currentDailyTotal, totalChange } = budgetSummary;
+    const gap = requiredDailyRate - currentDailyTotal;
+    const gapSign = gap >= 0 ? '+' : '';
+    const gapColor = Math.abs(gap) < 1 ? '#4ade80' : (gap > 0 ? '#4ade80' : '#f87171');
+    const gapLabel = gap > 0 ? 'Under by' : (gap < 0 ? 'Over by' : 'On target');
+    const gapAmount = Math.abs(gap);
     summaryHtml = `
       <div class="budget-summary">
         <div class="budget-summary-item">
@@ -257,8 +259,8 @@ function renderRecommendations(recs, budgetSummary) {
           <span class="budget-summary-value">$${currentDailyTotal.toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">
-          <span class="budget-summary-label">Recommended Total</span>
-          <span class="budget-summary-value" style="color:${diffColor}">$${recommendedDailyTotal.toFixed(2)}/day <small>(${diffSign}$${diff.toFixed(2)})</small></span>
+          <span class="budget-summary-label">Change Needed</span>
+          <span class="budget-summary-value" style="color:${gapColor}">${gapLabel} $${gapAmount.toFixed(2)}/day</span>
         </div>
       </div>
     `;

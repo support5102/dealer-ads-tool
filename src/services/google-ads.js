@@ -429,13 +429,28 @@ async function getDedicatedBudgets(restCtx) {
     restCtx.loginCustomerId
   );
 
-  return rows.map(row => ({
-    campaignId: String(row.campaign.id),
-    campaignName: row.campaign.name,
-    channelType: String(row.campaign.advertisingChannelType ?? row.campaign.advertising_channel_type ?? ''),
-    resourceName: row.campaignBudget?.resourceName ?? row.campaign_budget?.resource_name ?? '',
-    dailyBudget: ((row.campaignBudget?.amountMicros ?? row.campaign_budget?.amount_micros ?? 0)) / 1_000_000,
-  }));
+  // Deduplicate by budget resource_name — multiple campaigns can share the
+  // same non-shared budget, and each would return a separate row.
+  const budgetMap = new Map();
+  for (const row of rows) {
+    const key = row.campaignBudget?.resourceName ?? row.campaign_budget?.resource_name ?? '';
+    if (!budgetMap.has(key)) {
+      budgetMap.set(key, {
+        campaignId: String(row.campaign.id),
+        campaignName: row.campaign.name,
+        channelType: String(row.campaign.advertisingChannelType ?? row.campaign.advertising_channel_type ?? ''),
+        resourceName: key,
+        dailyBudget: ((row.campaignBudget?.amountMicros ?? row.campaign_budget?.amount_micros ?? 0)) / 1_000_000,
+        campaigns: [],
+      });
+    }
+    budgetMap.get(key).campaigns.push({
+      campaignId: String(row.campaign.id),
+      campaignName: row.campaign.name,
+    });
+  }
+
+  return Array.from(budgetMap.values());
 }
 
 module.exports = {

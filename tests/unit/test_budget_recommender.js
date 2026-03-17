@@ -190,15 +190,17 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // VLA in range (82%) — no VLA change
-    expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
+    // Over-pacing: ALL budgets decrease proportionally (ratio = 20/81 ≈ 0.247)
+    // VLA also decreases even though IS is on target
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.recommendedDailyBudget).toBeLessThan(10);
+    expect(vlaRec.change).toBeLessThan(0);
 
-    // Shared must decrease: account needs $20/day total, VLA stays at $10, so shared gets $10
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
     expect(sharedRec.recommendedDailyBudget).toBeLessThan(71);
     expect(sharedRec.change).toBeLessThan(0);
-    expect(sharedRec.reason).toMatch(/Account needs/);
   });
 
   test('over-pacing account: NEVER recommends increasing any budget', () => {
@@ -405,14 +407,18 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // VLA in range — no VLA change
-    expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
+    // Over-pacing: ALL adjustable budgets decrease proportionally
+    // Target adjustable = $60, current adjustable = $70 (VLA $20 + shared $50)
+    // Ratio = 60/70 ≈ 0.857
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.recommendedDailyBudget).toBeCloseTo(17.14, 1);
+    expect(vlaRec.change).toBeLessThan(0);
 
-    // Shared gets: $60 (target for adjustable) - $20 (VLA stays) = $40
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
-    expect(sharedRec.recommendedDailyBudget).toBe(40);
-    expect(sharedRec.change).toBe(-10); // was 50, now 40
+    expect(sharedRec.recommendedDailyBudget).toBeCloseTo(42.86, 1);
+    expect(sharedRec.change).toBeCloseTo(-7.14, 1);
   });
 
   test('multiple shared budgets distributed proportionally to budget size', () => {
