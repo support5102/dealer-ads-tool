@@ -9,10 +9,34 @@
  */
 
 const express = require('express');
+const axios   = require('axios');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
 const { generateRecommendation } = require('../services/budget-recommender');
+
+/**
+ * Creates a lightweight Google Sheets client from an OAuth access token.
+ * Matches the googleapis SDK interface: client.spreadsheets.values.get({spreadsheetId, range})
+ *
+ * @param {string} accessToken - OAuth2 access token with spreadsheets.readonly scope
+ * @returns {Object} Sheets-compatible client
+ */
+function createSheetsClient(accessToken) {
+  return {
+    spreadsheets: {
+      values: {
+        async get({ spreadsheetId, range }) {
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+          const res = await axios.get(url, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          return { data: res.data };
+        },
+      },
+    },
+  };
+}
 
 /**
  * Creates pacing routes with the given config.
@@ -44,6 +68,9 @@ function createPacingRouter(config, deps = {}) {
         mccId
       );
 
+      // Use injected sheets client (tests) or create one from OAuth token (production)
+      const activeSheets = sheetsClient || createSheetsClient(req.session.tokens.access_token);
+
       // Fetch all data in parallel
       const [campaignSpend, sharedBudgets, impressionShare, inventoryResult, goals] =
         await Promise.all([
@@ -51,7 +78,7 @@ function createPacingRouter(config, deps = {}) {
           googleAds.getSharedBudgets(client),
           googleAds.getImpressionShare(client),
           googleAds.getInventory(client),
-          readGoals(sheetsClient, spreadsheetId),
+          readGoals(activeSheets, spreadsheetId),
         ]);
 
       // Find goal matching this customer ID

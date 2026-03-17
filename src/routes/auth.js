@@ -30,7 +30,7 @@ function createAuthRouter(config) {
       client_id:     config.googleAds.clientId,
       redirect_uri:  `${config.app.url}/auth/callback`,
       response_type: 'code',
-      scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email',
+      scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly',
       access_type:   'offline',
       prompt:        'consent',
     });
