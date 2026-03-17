@@ -28,10 +28,17 @@ function createSheetsClient(accessToken) {
       values: {
         async get({ spreadsheetId, range }) {
           const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
-          const res = await axios.get(url, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          return { data: res.data };
+          try {
+            const res = await axios.get(url, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            return { data: res.data };
+          } catch (err) {
+            if (err.response) {
+              console.error(`[SheetsClient] HTTP ${err.response.status} for range "${range}":`, JSON.stringify(err.response.data));
+            }
+            throw err;
+          }
         },
       },
     },
