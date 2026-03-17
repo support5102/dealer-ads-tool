@@ -310,7 +310,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     recommended = Math.max(recommended, 0.01);
     recommended = Math.round(recommended * 100) / 100;
 
-    return { campaign, recommended, reason, currentSpend };
+    return { campaign, recommended, reason, currentSpend, budgetSetting: campaign.dailyBudget };
   });
 
   const totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
@@ -335,6 +335,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       type: 'campaign_budget',
       target: v.campaign.campaignName,
       resourceName: v.campaign.resourceName,
+      budgetSetting: Math.round(v.budgetSetting * 100) / 100,
       currentDailyBudget: Math.round(v.currentSpend * 100) / 100,
       recommendedDailyBudget: v.recommended,
       change,
@@ -404,6 +405,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         type: 'shared_budget',
         target: budget.name,
         resourceName: budget.resourceName,
+        budgetSetting: Math.round(budget.dailyBudget * 100) / 100,
         currentDailyBudget: Math.round(currentSpend * 100) / 100,
         recommendedDailyBudget: recommended,
         change,

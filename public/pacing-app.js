@@ -275,12 +275,16 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     let tierBadge = '';
     if (!r.isVla && r.tier === 3) tierBadge = '<span class="tier-badge brand">Brand</span>';
     else if (!r.isVla && r.tier === 1) tierBadge = '<span class="tier-badge low">General/Regional</span>';
+    // Budget setting — what the budget is actually set to in Google Ads
+    const setLabel = r.budgetSetting != null
+      ? `<span class="rec-setting">Set: $${r.budgetSetting.toFixed(2)}/day</span>` : '';
     rows += `
       <div class="rec-item">
         <div>
           <div class="rec-target">${vlaBadge}${tierBadge}${esc(r.target)}</div>
           <div class="rec-budget-row">
-            <span class="rec-current">$${r.currentDailyBudget.toFixed(2)}/day</span>
+            ${setLabel}
+            <span class="rec-current">Avg spend: $${r.currentDailyBudget.toFixed(2)}/day</span>
             <span class="rec-arrow">&rarr;</span>
             <span class="rec-recommended ${dir}">$${r.recommendedDailyBudget.toFixed(2)}/day</span>
             <span class="rec-change ${dir}">${sign}$${r.change.toFixed(2)}</span>

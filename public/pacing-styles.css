@@ -163,6 +163,14 @@
   gap: 10px;
   margin-top: 4px;
 }
+.rec-setting {
+  color: var(--text4);
+  font-size: 11px;
+  background: rgba(255,255,255,0.04);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
 .rec-current {
   color: var(--text3);
   font-size: 12px;
