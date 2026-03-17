@@ -75,20 +75,33 @@ async function listAccessibleCustomers(accessToken, developerToken) {
  * @returns {Promise<Object[]>} Query result rows
  */
 async function queryViaRest(accessToken, developerToken, customerId, query, loginCustomerId) {
+  const cleanCustomerId = String(customerId).replace(/-/g, '');
   const headers = {
     'Authorization': 'Bearer ' + accessToken,
     'developer-token': developerToken,
     'Content-Type': 'application/json',
   };
   if (loginCustomerId) {
-    headers['login-customer-id'] = String(loginCustomerId);
+    headers['login-customer-id'] = String(loginCustomerId).replace(/-/g, '');
   }
 
-  const resp = await axios.post(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
-    { query },
-    { headers, timeout: 20000 }
-  );
+  let resp;
+  try {
+    resp = await axios.post(
+      `https://googleads.googleapis.com/v20/customers/${cleanCustomerId}/googleAds:searchStream`,
+      { query },
+      { headers, timeout: 20000 }
+    );
+  } catch (err) {
+    // Log full API error details for debugging
+    if (err.response) {
+      console.error(`[queryViaRest] HTTP ${err.response.status} for customer ${cleanCustomerId}`);
+      console.error('[queryViaRest] Response body:', JSON.stringify(err.response.data, null, 2));
+    } else {
+      console.error('[queryViaRest] Network error:', err.message);
+    }
+    throw err;
+  }
 
   const results = [];
   const data = Array.isArray(resp.data) ? resp.data : [resp.data];

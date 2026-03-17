@@ -64,6 +64,9 @@ function createAccountsRouter(config) {
 
     } catch (err) {
       console.error('Accounts error:', err.response?.data?.error || err.message);
+      if (err.response?.data) {
+        console.error('Full API response:', JSON.stringify(err.response.data, null, 2));
+      }
       next(err);
     }
   });
