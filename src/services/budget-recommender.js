@@ -169,7 +169,6 @@ function generateRecommendation(params) {
   const impressionShareSummary = summarizeImpressionShare(impressionShare);
 
   return {
-    customerId: goal.customerId,
     dealerName: goal.dealerName,
     totalSpend,
     pacing,

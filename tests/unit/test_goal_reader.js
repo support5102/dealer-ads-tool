@@ -3,6 +3,9 @@
  * into structured DealerGoal objects.
  *
  * Tier 2 (unit): uses google-sheets-fake, no real API calls.
+ *
+ * Column layout matches PPC Spend Pace sheet:
+ * A: Account (dealer name) | B: Cost (USD) | C: Total Budget
  */
 
 const { readGoals, parseRow, parseNumber, cleanCustomerId } = require('../../src/services/goal-reader');
@@ -108,61 +111,42 @@ describe('cleanCustomerId', () => {
 });
 
 // ===========================================================================
-// parseRow
+// parseRow (new layout: A=Name, B=Cost, C=Budget)
 // ===========================================================================
 
 describe('parseRow', () => {
   test('parses complete row into DealerGoal', () => {
-    const goal = parseRow(['123-456-7890', 'Honda of Springfield', '15000', '45', '200']);
+    const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00']);
 
     expect(goal).toEqual({
-      customerId: '1234567890',
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
-      monthlySalesGoal: 45,
-      baselineInventory: 200,
     });
   });
 
-  test('strips dashes from customer ID', () => {
-    const goal = parseRow(['123-456-7890', 'Test', '5000']);
-    expect(goal.customerId).toBe('1234567890');
-  });
-
-  test('returns null for row missing customer ID', () => {
-    expect(parseRow(['', 'Honda', '15000'])).toBeNull();
+  test('parses budget with $ and commas', () => {
+    const goal = parseRow(['Honda', '$8,500', '$15,000']);
+    expect(goal.monthlyBudget).toBe(15000);
   });
 
   test('returns null for row missing dealer name', () => {
-    expect(parseRow(['1234567890', '', '15000'])).toBeNull();
+    expect(parseRow(['', '$12,000', '$15,000'])).toBeNull();
   });
 
-  test('returns null for row missing budget', () => {
-    expect(parseRow(['1234567890', 'Honda'])).toBeNull();
+  test('returns null for row missing budget (column C)', () => {
+    expect(parseRow(['Honda', '$12,000'])).toBeNull();
   });
 
   test('returns null for row with zero budget', () => {
-    expect(parseRow(['1234567890', 'Honda', '0'])).toBeNull();
+    expect(parseRow(['Honda', '$12,000', '0'])).toBeNull();
   });
 
   test('returns null for row with negative budget', () => {
-    expect(parseRow(['1234567890', 'Honda', '-500'])).toBeNull();
+    expect(parseRow(['Honda', '$12,000', '-500'])).toBeNull();
   });
 
   test('returns null for row with non-numeric budget', () => {
-    expect(parseRow(['1234567890', 'Honda', 'abc'])).toBeNull();
-  });
-
-  test('sets optional fields to null when missing', () => {
-    const goal = parseRow(['1234567890', 'Honda', '15000']);
-    expect(goal.monthlySalesGoal).toBeNull();
-    expect(goal.baselineInventory).toBeNull();
-  });
-
-  test('sets optional fields to null when empty string', () => {
-    const goal = parseRow(['1234567890', 'Honda', '15000', '', '']);
-    expect(goal.monthlySalesGoal).toBeNull();
-    expect(goal.baselineInventory).toBeNull();
+    expect(parseRow(['Honda', '$12,000', 'abc'])).toBeNull();
   });
 
   test('returns null for null input', () => {
@@ -178,24 +162,24 @@ describe('parseRow', () => {
   });
 
   test('returns null for all-empty row', () => {
-    expect(parseRow(['', '', '', '', ''])).toBeNull();
-  });
-
-  test('handles formatted budget with $ and commas', () => {
-    const goal = parseRow(['1234567890', 'Honda', '$15,000']);
-    expect(goal.monthlyBudget).toBe(15000);
+    expect(parseRow(['', '', ''])).toBeNull();
   });
 
   test('trims whitespace from dealer name', () => {
-    const goal = parseRow(['1234567890', '  Honda of Springfield  ', '15000']);
+    const goal = parseRow(['  Honda of Springfield  ', '$12,000', '$15,000']);
     expect(goal.dealerName).toBe('Honda of Springfield');
   });
 
-  test('ignores extra columns beyond expected five', () => {
-    const goal = parseRow(['1234567890', 'Honda', '15000', '45', '200', 'extra', 'stuff']);
+  test('ignores extra columns beyond expected three', () => {
+    const goal = parseRow(['Honda', '$12,000', '$15,000', '91%', '16', '31']);
     expect(goal).not.toBeNull();
     expect(goal.monthlyBudget).toBe(15000);
-    expect(goal.monthlySalesGoal).toBe(45);
+  });
+
+  test('cost column (B) does not affect parsing', () => {
+    const goal = parseRow(['Honda', 'not-a-number', '$5,000']);
+    expect(goal).not.toBeNull();
+    expect(goal.monthlyBudget).toBe(5000);
   });
 });
 
@@ -210,11 +194,8 @@ describe('readGoals', () => {
 
     expect(goals).toHaveLength(3);
     expect(goals[0]).toEqual({
-      customerId: '1234567890',
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
-      monthlySalesGoal: 45,
-      baselineInventory: 200,
     });
     expect(goals[1].dealerName).toBe('Toyota of Shelbyville');
     expect(goals[2].dealerName).toBe('Ford of Capital City');
@@ -239,7 +220,7 @@ describe('readGoals', () => {
     expect(capturedParams.range).toBe('CustomRange!A1:Z');
   });
 
-  test('uses default range PPC Spend Pace!A2:E when not specified', async () => {
+  test('uses default range PPC Spend Pace!A2:C when not specified', async () => {
     let capturedParams;
     const client = {
       spreadsheets: {
@@ -253,19 +234,17 @@ describe('readGoals', () => {
     };
 
     await readGoals(client, 'my-sheet-id');
-    expect(capturedParams.range).toBe('PPC Spend Pace!A2:E');
+    expect(capturedParams.range).toBe('PPC Spend Pace!A2:C');
   });
 
   test('skips invalid rows and returns only valid goals', async () => {
     const client = createFakeSheetsClient(PARTIAL_ROWS);
     const goals = await readGoals(client, 'test-id');
 
-    // Row 1: valid, Row 2: valid (optional fields null), Row 3: missing budget, Row 4: all empty
+    // Row 1: valid, Row 2: valid, Row 3: missing budget, Row 4: all empty
     expect(goals).toHaveLength(2);
     expect(goals[0].dealerName).toBe('Honda of Springfield');
     expect(goals[1].dealerName).toBe('Toyota of Shelbyville');
-    expect(goals[1].monthlySalesGoal).toBeNull();
-    expect(goals[1].baselineInventory).toBeNull();
   });
 
   test('handles rows with bad numeric data', async () => {
@@ -273,11 +252,9 @@ describe('readGoals', () => {
     const goals = await readGoals(client, 'test-id');
 
     // Row 1: budget is 'not-a-number' → skipped
-    // Row 2: valid budget, bad sales goal + inventory → included with nulls
+    // Row 2: valid budget → included
     expect(goals).toHaveLength(1);
     expect(goals[0].dealerName).toBe('Toyota of Shelbyville');
-    expect(goals[0].monthlySalesGoal).toBeNull();
-    expect(goals[0].baselineInventory).toBeNull();
   });
 
   test('handles messy formatting ($, commas, whitespace)', async () => {
@@ -285,7 +262,6 @@ describe('readGoals', () => {
     const goals = await readGoals(client, 'test-id');
 
     expect(goals).toHaveLength(2);
-    expect(goals[0].customerId).toBe('1234567890');
     expect(goals[0].dealerName).toBe('Honda of Springfield');
     expect(goals[0].monthlyBudget).toBe(15000);
     expect(goals[1].monthlyBudget).toBe(10000.5);
@@ -337,10 +313,10 @@ describe('readGoals', () => {
 
   test('returns all valid goals even when some rows are invalid', async () => {
     const mixedRows = [
-      ['111-222-3333', 'Good Dealer', '5000', '10', '100'],
-      ['', 'Bad Dealer', '5000'],                             // missing ID
-      ['444-555-6666', 'Another Good', '8000', '20', '150'],
-      ['777-888-9999', 'Zero Budget', '0'],                   // zero budget
+      ['Good Dealer',     '$4,000', '$5,000'],
+      ['',                '$4,000', '$5,000'],     // missing name
+      ['Another Good',    '$7,000', '$8,000'],
+      ['Zero Budget',     '$0',     '$0'],          // zero budget
     ];
     const client = createFakeSheetsClient(mixedRows);
     const goals = await readGoals(client, 'test-id');
@@ -350,17 +326,17 @@ describe('readGoals', () => {
     expect(goals[1].dealerName).toBe('Another Good');
   });
 
-  test('duplicate customer IDs are both returned (no deduplication)', async () => {
+  test('duplicate dealer names are both returned (no deduplication)', async () => {
     const dupeRows = [
-      ['123-456-7890', 'Honda of Springfield', '15000', '45', '200'],
-      ['123-456-7890', 'Honda of Springfield (copy)', '12000', '40', '180'],
+      ['Honda of Springfield', '$12,000', '$15,000'],
+      ['Honda of Springfield', '$10,000', '$12,000'],
     ];
     const client = createFakeSheetsClient(dupeRows);
     const goals = await readGoals(client, 'test-id');
 
     expect(goals).toHaveLength(2);
-    expect(goals[0].customerId).toBe('1234567890');
-    expect(goals[1].customerId).toBe('1234567890');
+    expect(goals[0].dealerName).toBe('Honda of Springfield');
+    expect(goals[1].dealerName).toBe('Honda of Springfield');
     expect(goals[0].monthlyBudget).toBe(15000);
     expect(goals[1].monthlyBudget).toBe(12000);
   });

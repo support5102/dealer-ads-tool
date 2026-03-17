@@ -335,11 +335,8 @@ describe('calculateBudgetAdjustments', () => {
 describe('generateRecommendation', () => {
   const baseParams = {
     goal: {
-      customerId: '1234567890',
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
-      monthlySalesGoal: 45,
-      baselineInventory: 200,
     },
     campaignSpend: [
       { campaignId: '100', campaignName: 'Honda Civic - Search', status: 'ENABLED', spend: 3000 },
@@ -363,7 +360,6 @@ describe('generateRecommendation', () => {
   test('produces complete recommendation object', () => {
     const rec = generateRecommendation(baseParams);
 
-    expect(rec.customerId).toBe('1234567890');
     expect(rec.dealerName).toBe('Honda of Springfield');
     expect(rec.totalSpend).toBe(5000);
     expect(rec.pacing).toBeDefined();
@@ -381,17 +377,17 @@ describe('generateRecommendation', () => {
     expect(rec.totalSpend).toBe(5000);
   });
 
-  test('passes inventory into pacing calculation', () => {
+  test('passes inventory count to recommendation output', () => {
     const params = {
       ...baseParams,
-      inventoryCount: 50, // 25% of baseline 200 → 60% modifier
+      inventoryCount: 50,
     };
     const rec = generateRecommendation(params);
 
-    expect(rec.pacing.inventoryModifier).toBe(0.60);
-    expect(rec.pacing.effectiveBudget).toBe(9000); // 15000 * 0.6
+    // No baselineInventory in goal → modifier stays 1.0
+    expect(rec.pacing.inventoryModifier).toBe(1.0);
     expect(rec.inventory.count).toBe(50);
-    expect(rec.inventory.modifier).toBe(0.60);
+    expect(rec.inventory.modifier).toBe(1.0);
   });
 
   test('handles null inventory gracefully', () => {
@@ -407,15 +403,6 @@ describe('generateRecommendation', () => {
   test('includes impression share summary', () => {
     const rec = generateRecommendation(baseParams);
     expect(rec.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.85, 2);
-  });
-
-  test('uses goal baseline inventory for pacing calculation', () => {
-    const params = {
-      ...baseParams,
-      inventoryCount: 250, // 125% of 200 baseline → modifier > 1.0
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.pacing.inventoryModifier).toBeGreaterThan(1.0);
   });
 
   test('produces recommendations when off-pace', () => {

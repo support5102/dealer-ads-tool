@@ -60,7 +60,7 @@ function createPacingRouter(config, deps = {}) {
   const spreadsheetId = deps.spreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '';
 
   router.get('/api/pacing', requireAuth, async (req, res, next) => {
-    const { customerId } = req.query;
+    const { customerId, accountName } = req.query;
 
     if (!customerId) {
       return res.status(400).json({ error: 'Missing customerId query parameter.' });
@@ -100,13 +100,14 @@ function createPacingRouter(config, deps = {}) {
           }),
         ]);
 
-      // Find goal matching this customer ID
-      const goal = goals.find(g => g.customerId === customerId.replace(/-/g, ''));
+      // Find goal matching this account by name (case-insensitive, trimmed)
+      const searchName = (accountName || '').trim().toLowerCase();
+      const goal = goals.find(g => g.dealerName.toLowerCase() === searchName);
 
       if (!goal) {
         const hint = goals.length === 0
           ? 'Could not load goals from spreadsheet. Check Sheets permissions (re-login to grant spreadsheets.readonly scope).'
-          : `No goal found for customer ${customerId}. Add this account to the goals spreadsheet.`;
+          : `No goal found for "${accountName || customerId}" in the spreadsheet. Available: ${goals.slice(0, 5).map(g => g.dealerName).join(', ')}${goals.length > 5 ? '...' : ''}`;
         return res.status(404).json({ error: hint, customerId, goalsLoaded: goals.length });
       }
 
@@ -128,7 +129,7 @@ function createPacingRouter(config, deps = {}) {
         currentDay: now.getDate(),
       });
 
-      res.json(recommendation);
+      res.json({ customerId: customerId.replace(/-/g, ''), ...recommendation });
     } catch (err) {
       console.error('Pacing error:', err.message);
       next(err);

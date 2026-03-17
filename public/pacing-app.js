@@ -122,8 +122,12 @@ async function loadPacing(customerId) {
   document.getElementById('refreshBtn').disabled = false;
   showView('loadingState');
 
+  // Find account name from loaded accounts list
+  const account = state.accounts.find(a => a.id === customerId);
+  const accountName = account ? account.name : '';
+
   try {
-    const res = await fetch(`/api/pacing?customerId=${encodeURIComponent(customerId)}`);
+    const res = await fetch(`/api/pacing?customerId=${encodeURIComponent(customerId)}&accountName=${encodeURIComponent(accountName)}`);
     if (state._requestId !== requestId) return; // stale response
     const data = await res.json();
 

@@ -5,16 +5,19 @@
  *
  * Mimics the Google Sheets API values.get response format:
  * { data: { values: [[row1col1, row1col2, ...], [row2col1, ...]] } }
+ *
+ * Column layout matches PPC Spend Pace sheet:
+ * A: Account (dealer name) | B: Cost (USD) | C: Total Budget
  */
 
 /**
- * Well-formed goal sheet data matching the expected column layout:
- * Customer ID | Dealer Name | Monthly Budget | Sales Goal | Baseline Inventory
+ * Well-formed goal sheet data matching the PPC Spend Pace column layout:
+ * Account Name | Cost (USD) | Total Budget
  */
 const SAMPLE_GOALS_ROWS = [
-  ['123-456-7890', 'Honda of Springfield',    '15000', '45', '200'],
-  ['234-567-8901', 'Toyota of Shelbyville',   '10000', '30', '150'],
-  ['345-678-9012', 'Ford of Capital City',    '20000', '60', '300'],
+  ['Honda of Springfield',    '$12,000.00', '$15,000.00'],
+  ['Toyota of Shelbyville',   '$8,500.00',  '$10,000.00'],
+  ['Ford of Capital City',    '$18,000.00', '$20,000.00'],
 ];
 
 /**
@@ -33,7 +36,7 @@ function createFakeSheetsClient(rows = SAMPLE_GOALS_ROWS, error = null) {
           return {
             data: {
               values: rows,
-              range: params.range || 'PPC Spend Pace!A2:E',
+              range: params.range || 'PPC Spend Pace!A2:C',
               majorDimension: 'ROWS',
             },
           };
@@ -47,26 +50,26 @@ function createFakeSheetsClient(rows = SAMPLE_GOALS_ROWS, error = null) {
  * Rows with missing/partial data for edge case testing.
  */
 const PARTIAL_ROWS = [
-  ['123-456-7890', 'Honda of Springfield', '15000', '45', '200'],  // complete
-  ['234-567-8901', 'Toyota of Shelbyville', '10000', '', ''],      // missing sales goal + inventory
-  ['345-678-9012', 'Ford of Capital City'],                         // only ID and name
-  ['', '', '', '', ''],                                              // all empty
+  ['Honda of Springfield',    '$12,000.00', '$15,000.00'],  // complete
+  ['Toyota of Shelbyville',   '$8,500.00',  '$10,000.00'],  // complete
+  ['Ford of Capital City',    '$18,000.00'],                  // missing budget
+  ['', '', ''],                                               // all empty
 ];
 
 /**
  * Rows with bad numeric data.
  */
 const BAD_NUMERIC_ROWS = [
-  ['123-456-7890', 'Honda of Springfield', 'not-a-number', '45', '200'],
-  ['234-567-8901', 'Toyota of Shelbyville', '10000', 'abc', 'xyz'],
+  ['Honda of Springfield',    '$12,000.00', 'not-a-number'],   // bad budget
+  ['Toyota of Shelbyville',   'abc',        '$10,000.00'],     // bad cost (irrelevant), valid budget
 ];
 
 /**
  * Rows with extra whitespace and formatting artifacts.
  */
 const MESSY_ROWS = [
-  ['  123-456-7890  ', '  Honda of Springfield  ', ' $15,000 ', ' 45 ', ' 200 '],
-  ['234-567-8901', 'Toyota of Shelbyville', '10,000.50', '30', '150'],
+  ['  Honda of Springfield  ', ' $12,000 ', ' $15,000 '],
+  ['Toyota of Shelbyville',    '$8,500',    '10,000.50'],
 ];
 
 module.exports = {

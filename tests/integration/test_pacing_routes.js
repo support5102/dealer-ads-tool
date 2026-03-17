@@ -43,18 +43,12 @@ const SAMPLE_INVENTORY = {
 
 const SAMPLE_GOALS = [
   {
-    customerId: '1234567890',
     dealerName: 'Honda of Springfield',
     monthlyBudget: 15000,
-    monthlySalesGoal: 45,
-    baselineInventory: 200,
   },
   {
-    customerId: '9876543210',
     dealerName: 'Toyota of Shelbyville',
     monthlyBudget: 10000,
-    monthlySalesGoal: 30,
-    baselineInventory: 150,
   },
 ];
 
@@ -80,7 +74,7 @@ describe('GET /api/pacing', () => {
   });
 
   test('returns 401 when not authenticated', async () => {
-    await supertest(app).get('/api/pacing?customerId=1234567890').expect(401);
+    await supertest(app).get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(401);
   });
 
   test('returns 400 when customerId is missing', async () => {
@@ -91,7 +85,7 @@ describe('GET /api/pacing', () => {
 
   test('returns pacing recommendation for a valid dealer', async () => {
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(res.body.customerId).toBe('1234567890');
     expect(res.body.dealerName).toBe('Honda of Springfield');
@@ -109,7 +103,7 @@ describe('GET /api/pacing', () => {
       tokens: { access_token: 'at', refresh_token: 'rt' },
       mccId: '999',
     });
-    await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(googleAds.refreshAccessToken).toHaveBeenCalledWith(
       expect.any(Object),
@@ -127,7 +121,7 @@ describe('GET /api/pacing', () => {
 
   test('fetches all data in parallel', async () => {
     const agent = await authenticatedAgent(app);
-    await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(googleAds.getMonthSpend).toHaveBeenCalledTimes(1);
     expect(googleAds.getSharedBudgets).toHaveBeenCalledTimes(1);
@@ -135,16 +129,16 @@ describe('GET /api/pacing', () => {
     expect(googleAds.getInventory).toHaveBeenCalledTimes(1);
   });
 
-  test('returns 404 when no goal matches customerId', async () => {
+  test('returns 404 when no goal matches accountName', async () => {
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=0000000000').expect(404);
+    const res = await agent.get('/api/pacing?customerId=0000000000&accountName=Unknown%20Dealer').expect(404);
     expect(res.body.error).toMatch(/No goal found/);
     expect(res.body.customerId).toBe('0000000000');
   });
 
   test('counts only NEW vehicles for inventory', async () => {
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     // SAMPLE_INVENTORY has 2 NEW + 1 USED
     expect(res.body.inventory.count).toBe(2);
@@ -152,7 +146,7 @@ describe('GET /api/pacing', () => {
 
   test('includes pacing calculations with correct budget', async () => {
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(res.body.pacing.monthlyBudget).toBe(15000);
     expect(res.body.pacing.spendToDate).toBe(5000);
@@ -163,14 +157,14 @@ describe('GET /api/pacing', () => {
     googleAds.getMonthSpend.mockRejectedValue(new Error('API quota exceeded'));
 
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(500);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(500);
     expect(res.body.error).toBeDefined();
   });
 
   test('handles dashes in customerId', async () => {
     const agent = await authenticatedAgent(app);
     // Route strips dashes for REST context and goal matching
-    await agent.get('/api/pacing?customerId=123-456-7890').expect(200);
+    await agent.get('/api/pacing?customerId=123-456-7890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(googleAds.getMonthSpend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -181,7 +175,7 @@ describe('GET /api/pacing', () => {
 
   test('returns impression share summary', async () => {
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     expect(res.body.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.85, 2);
   });
@@ -190,7 +184,7 @@ describe('GET /api/pacing', () => {
     goalReader.readGoals.mockResolvedValue([]);
 
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(404);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(404);
     expect(res.body.error).toMatch(/Could not load goals|No goal found/);
   });
 
@@ -198,7 +192,7 @@ describe('GET /api/pacing', () => {
     googleAds.getInventory.mockResolvedValue({});
 
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(200);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
     expect(res.body.inventory.count).toBe(0);
   });
 
@@ -206,7 +200,7 @@ describe('GET /api/pacing', () => {
     goalReader.readGoals.mockRejectedValue(new Error('Sheets API unavailable'));
 
     const agent = await authenticatedAgent(app);
-    const res = await agent.get('/api/pacing?customerId=1234567890').expect(404);
+    const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(404);
     expect(res.body.error).toMatch(/Could not load goals/);
     expect(res.body.goalsLoaded).toBe(0);
   });

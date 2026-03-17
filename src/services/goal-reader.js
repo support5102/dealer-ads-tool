@@ -1,22 +1,19 @@
 /**
  * Goal Reader — fetches dealer monthly goals from a Google Sheet.
  *
- * Called by: routes/pacing.js (future)
+ * Called by: routes/pacing.js
  * Calls: Google Sheets API v4 (via injected sheets client)
  *
- * Reads a single sheet with columns:
- * A: Customer ID | B: Dealer Name | C: Monthly Budget | D: Sales Goal | E: Baseline Inventory
+ * Reads the "PPC Spend Pace" sheet with columns:
+ * A: Account (dealer name) | B: Cost (USD) | C: Total Budget
  *
  * The sheets client is injected (not created here) so tests can provide a fake.
  */
 
 /**
  * @typedef {Object} DealerGoal
- * @property {string} customerId - Google Ads customer ID (dashes stripped)
- * @property {string} dealerName - Human-readable dealer name
+ * @property {string} dealerName - Human-readable dealer name (used for matching)
  * @property {number} monthlyBudget - Monthly budget target in dollars
- * @property {number|null} monthlySalesGoal - Monthly vehicle sales target (null if not set)
- * @property {number|null} baselineInventory - Normal inventory level (null if not set)
  */
 
 /**
@@ -43,7 +40,9 @@ function cleanCustomerId(id) {
 }
 
 /**
- * Parses a single row from the goals sheet into a DealerGoal object.
+ * Parses a single row from the PPC Spend Pace sheet into a DealerGoal object.
+ *
+ * Column layout: A=Account Name, B=Cost (USD), C=Total Budget
  *
  * @param {string[]} row - Array of cell values from one sheet row
  * @returns {DealerGoal|null} Parsed goal, or null if row is invalid
@@ -51,21 +50,17 @@ function cleanCustomerId(id) {
 function parseRow(row) {
   if (!row || !Array.isArray(row)) return null;
 
-  const customerId = cleanCustomerId(row[0]);
-  const dealerName = String(row[1] || '').trim();
+  const dealerName = String(row[0] || '').trim();
   const monthlyBudget = parseNumber(row[2]);
 
-  // Minimum viable: must have customer ID, name, and a valid budget
-  if (!customerId || !dealerName || monthlyBudget == null || monthlyBudget <= 0) {
+  // Minimum viable: must have dealer name and a valid budget
+  if (!dealerName || monthlyBudget == null || monthlyBudget <= 0) {
     return null;
   }
 
   return {
-    customerId,
     dealerName,
     monthlyBudget,
-    monthlySalesGoal: parseNumber(row[3]),
-    baselineInventory: parseNumber(row[4]),
   };
 }
 
@@ -74,11 +69,11 @@ function parseRow(row) {
  *
  * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
- * @param {string} [range='PPC Spend Pace!A2:E'] - Cell range to read (skip header row)
+ * @param {string} [range='PPC Spend Pace!A2:C'] - Cell range to read (skip header row)
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:E') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:C') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
