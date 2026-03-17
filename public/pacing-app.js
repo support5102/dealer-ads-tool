@@ -191,8 +191,8 @@ function renderHeader(data) {
 
 function renderMetrics(data) {
   const p = data.pacing || {};
-  const pctNum = p.pacingPercent != null ? p.pacingPercent : 0;
-  const pct = p.pacingPercent != null ? p.pacingPercent.toFixed(1) : '--';
+  const pctNum = p.pacePercent != null ? p.pacePercent : 0;
+  const pct = p.pacePercent != null ? p.pacePercent.toFixed(1) : '--';
   const color = data.statusColor || 'gray';
 
   document.getElementById('metricsRow').innerHTML = `
@@ -211,7 +211,7 @@ function renderMetrics(data) {
       <div class="pace-bar-container">
         <div class="pace-bar ${color}" style="width:${Math.min(pctNum, 100)}%"></div>
       </div>
-      <div class="metric-sub">Day ${p.currentDay} of ${p.daysInMonth}</div>
+      <div class="metric-sub">Day ${p.daysElapsed} of ${p.daysInMonth}</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Required Daily Rate</div>
