@@ -57,12 +57,20 @@ async function listAccessibleCustomers(config, refreshToken) {
     developer_token: config.developerToken,
   });
 
-  const result = await queryWithTimeout(
-    api.listAccessibleCustomers(refreshToken),
-    'accessible customers'
-  );
-
-  return result.resource_names || result.resourceNames || [];
+  // Retry once on timeout — Railway cold starts can be slow
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const result = await queryWithTimeout(
+        api.listAccessibleCustomers(refreshToken),
+        'accessible customers',
+        30000 // 30s — Railway can be slow on first call
+      );
+      return result.resource_names || result.resourceNames || [];
+    } catch (err) {
+      if (attempt === 2 || !err.message.includes('Timed out')) throw err;
+      console.warn('listAccessibleCustomers attempt 1 timed out, retrying...');
+    }
+  }
 }
 
 /**
