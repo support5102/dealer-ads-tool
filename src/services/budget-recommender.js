@@ -1,17 +1,16 @@
 /**
  * Budget Recommender — generates budget adjustment recommendations
- * for dealer accounts based on pacing state and market data.
+ * for dealer accounts based on account-level pacing.
  *
  * Called by: routes/pacing.js
  * Calls: services/pacing-calculator.js
  *
- * Takes a dealer's goal, spend data, shared budgets, dedicated budgets,
- * impression share, and inventory count, and produces a recommendation object with:
- * - Pacing state (from calculatePacing)
- * - Color-coded status for dashboard display
- * - Specific dollar-amount budget adjustments for shared + VLA budgets
- * - Impression share summary
- * - Inventory status
+ * Core principle: the ENTIRE ACCOUNT must pace at 100%. Individual budget
+ * pacing doesn't matter — what matters is that VLA daily budgets + shared
+ * daily budgets = the required daily rate to finish the month on target.
+ *
+ * VLAs are priority campaigns. Their budgets are set by impression share
+ * targets (75-90%). Shared budgets get whatever's left to hit the account target.
  */
 
 const { calculatePacing } = require('./pacing-calculator');
@@ -22,9 +21,6 @@ const VLA_IS_TARGET = { min: 0.75, max: 0.90 };
 
 /**
  * Maps pacing status to dashboard color.
- *
- * @param {string} status - Pacing status from calculatePacing
- * @returns {string} Color: 'green', 'yellow', 'red', or 'gray'
  */
 function statusToColor(status) {
   switch (status) {
@@ -40,9 +36,6 @@ function statusToColor(status) {
 /**
  * Checks if a campaign is a VLA (Vehicle Listing Ad) campaign.
  * Matches by name pattern or Google Ads channel type.
- *
- * @param {Object} campaign - Campaign with campaignName and channelType
- * @returns {boolean} True if VLA campaign
  */
 function isVlaCampaign(campaign) {
   const name = (campaign.campaignName || '').toLowerCase();
@@ -52,9 +45,6 @@ function isVlaCampaign(campaign) {
 
 /**
  * Summarizes impression share data across campaigns.
- *
- * @param {Object[]} impressionShareData - From getImpressionShare
- * @returns {Object} { avgImpressionShare, avgBudgetLostShare, limitedCampaigns }
  */
 function summarizeImpressionShare(impressionShareData) {
   if (!impressionShareData || impressionShareData.length === 0) {
@@ -80,92 +70,42 @@ function summarizeImpressionShare(impressionShareData) {
 }
 
 /**
- * Calculates recommended daily budget adjustments for shared budgets.
+ * Distributes the account's required daily rate across VLA and shared budgets.
  *
- * When off-pace, adjusts each shared budget proportionally so the total
- * daily spend rate matches the required daily rate from pacing.
+ * Algorithm:
+ * 1. Calculate account-level required daily rate (remainingBudget / daysRemaining)
+ * 2. Subtract non-VLA dedicated campaign budgets (not being adjusted)
+ * 3. Set VLA budgets based on impression share targets (priority)
+ * 4. Distribute remainder to shared budgets proportionally
  *
- * @param {Object} pacing - Output from calculatePacing
- * @param {Object[]} sharedBudgets - From getSharedBudgets
- * @returns {Object[]} Array of adjustment recommendations
+ * @param {Object} params
+ * @param {Object} params.pacing - Output from calculatePacing
+ * @param {Object[]} [params.dedicatedBudgets] - From getDedicatedBudgets
+ * @param {Object[]} [params.sharedBudgets] - From getSharedBudgets
+ * @param {Object[]} [params.impressionShareData] - From getImpressionShare
+ * @returns {Object} { recommendations, budgetSummary }
  */
-function calculateBudgetAdjustments(pacing, sharedBudgets) {
-  if (!sharedBudgets || sharedBudgets.length === 0) return [];
-  if (pacing.daysRemaining === 0) return [];
-  if (pacing.paceStatus === 'on_pace') return [];
+function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData }) {
+  if (pacing.daysRemaining === 0) {
+    return { recommendations: [], budgetSummary: null };
+  }
 
-  const totalDailyBudget = sharedBudgets.reduce((sum, b) => sum + b.dailyBudget, 0);
-  // Use flat daily rate (remainingBudget / daysRemaining), not the weighted-for-today
-  // rate, because Google Ads daily budgets apply every day going forward.
-  const requiredRate = pacing.daysRemaining > 0
-    ? pacing.remainingBudget / pacing.daysRemaining
-    : 0;
+  const requiredDailyRate = pacing.remainingBudget / pacing.daysRemaining;
 
-  // Compare against actual daily spend rate (not budget settings) because Google Ads
-  // routinely overspends daily budgets. Using budget settings as the denominator leads
-  // to wrong recommendations when actual spend diverges from settings (e.g. account
-  // spending $287/day on a $71/day budget would get an "increase" recommendation
-  // even when critically over-pacing).
-  // Fall back to budget settings only when there's no spend history.
-  const actualDailySpend = pacing.dailyAvgSpend || 0;
-  const denominator = actualDailySpend > 0 ? actualDailySpend : totalDailyBudget;
-  const useEvenDistribution = denominator === 0;
-  const ratio = useEvenDistribution ? 0 : requiredRate / denominator;
+  // Separate VLA vs non-VLA dedicated campaigns
+  const allDedicated = dedicatedBudgets || [];
+  const vlaCampaigns = allDedicated.filter(isVlaCampaign);
+  const nonVlaDedicated = allDedicated.filter(c => !isVlaCampaign(c));
+  const nonVlaDedicatedTotal = nonVlaDedicated.reduce((s, c) => s + c.dailyBudget, 0);
 
-  return sharedBudgets.map(budget => {
-    let recommended;
-    if (useEvenDistribution) {
-      recommended = requiredRate / sharedBudgets.length;
-    } else {
-      recommended = budget.dailyBudget * ratio;
-    }
+  // Budget available for VLA + shared (subtract non-VLA dedicated which we don't adjust)
+  const targetForAdjustable = Math.max(requiredDailyRate - nonVlaDedicatedTotal, 0);
 
-    // Enforce minimum $1/day
-    recommended = Math.max(recommended, 1);
-    // Round to 2 decimals
-    recommended = Math.round(recommended * 100) / 100;
-
-    const change = Math.round((recommended - budget.dailyBudget) * 100) / 100;
-    const direction = change >= 0 ? 'increase' : 'decrease';
-    const pacingLabel = change >= 0 ? 'Under' : 'Over';
-
-    return {
-      type: 'shared_budget',
-      target: budget.name,
-      resourceName: budget.resourceName,
-      currentDailyBudget: budget.dailyBudget,
-      recommendedDailyBudget: recommended,
-      change,
-      reason: `${pacingLabel}-pacing — ${direction} daily budget from $${budget.dailyBudget.toFixed(2)} to $${recommended.toFixed(2)} to hit monthly target`,
-    };
-  });
-}
-
-/**
- * Calculates recommended daily budget adjustments for VLA campaigns
- * based on impression share targets (75-90%).
- *
- * VLAs are priority campaigns — below 75% IS we're leaving money on the table,
- * above 90% IS CPC inflates with diminishing returns.
- *
- * @param {Object} pacing - Output from calculatePacing
- * @param {Object[]} dedicatedBudgets - From getDedicatedBudgets
- * @param {Object[]} impressionShareData - From getImpressionShare
- * @returns {Object[]} Array of VLA adjustment recommendations
- */
-function calculateVlaAdjustments(pacing, dedicatedBudgets, impressionShareData) {
-  if (!dedicatedBudgets || dedicatedBudgets.length === 0) return [];
-  if (pacing.daysRemaining === 0) return [];
-
-  // Only VLA campaigns
-  const vlaCampaigns = dedicatedBudgets.filter(isVlaCampaign);
-  if (vlaCampaigns.length === 0) return [];
-
-  // Build impression share lookup by campaign ID
+  // --- Step 1: VLA budgets — impression share driven (priority) ---
   const isMap = new Map();
   (impressionShareData || []).forEach(d => isMap.set(d.campaignId, d));
 
-  return vlaCampaigns.map(campaign => {
+  const vlaAllocations = vlaCampaigns.map(campaign => {
     const campIS = isMap.get(campaign.campaignId);
     const is = campIS?.impressionShare;
     const bls = campIS?.budgetLostShare;
@@ -173,47 +113,109 @@ function calculateVlaAdjustments(pacing, dedicatedBudgets, impressionShareData) 
     let recommended = campaign.dailyBudget;
     let reason;
 
-    if (is != null) {
-      if (is < VLA_IS_TARGET.min) {
-        // Under 75% IS — increase VLA budget to capture more traffic
-        // Scale proportionally toward 75%, cap at 2x to avoid over-correction
-        const boost = Math.min(VLA_IS_TARGET.min / Math.max(is, 0.01), 2.0);
-        recommended = campaign.dailyBudget * boost;
-        reason = `Impression share ${(is * 100).toFixed(1)}% below 75% target`
-          + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')
-          + ` — increase to capture more VLA traffic`;
-      } else if (is > VLA_IS_TARGET.max) {
-        // Over 90% IS — scale back to avoid CPC inflation
-        const scale = VLA_IS_TARGET.max / is;
-        recommended = campaign.dailyBudget * scale;
-        reason = `Impression share ${(is * 100).toFixed(1)}% exceeds 90% — reduce to avoid CPC inflation`;
-      } else {
-        // IS in target range 75-90% — VLA is performing well, no change needed
-        return null;
-      }
+    if (is != null && is < VLA_IS_TARGET.min) {
+      // Under 75% IS — boost to capture more traffic
+      const boost = Math.min(VLA_IS_TARGET.min / Math.max(is, 0.01), 2.0);
+      recommended = campaign.dailyBudget * boost;
+      reason = `IS ${(is * 100).toFixed(1)}% below 75% target`
+        + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')
+        + ` — increase to capture more VLA traffic`;
+    } else if (is != null && is > VLA_IS_TARGET.max) {
+      // Over 90% IS — scale back to avoid CPC inflation
+      const scale = VLA_IS_TARGET.max / is;
+      recommended = campaign.dailyBudget * scale;
+      reason = `IS ${(is * 100).toFixed(1)}% exceeds 90% — reduce to avoid CPC inflation`;
+    } else if (is != null) {
+      // IS in target range 75-90% — keep current
+      reason = `IS ${(is * 100).toFixed(1)}% on target (75-90%)`;
     } else {
-      // No IS data available — can't make IS-based recommendation
-      return null;
+      // No IS data — keep current budget
+      reason = null;
     }
 
     recommended = Math.max(recommended, 1);
     recommended = Math.round(recommended * 100) / 100;
-    const change = Math.round((recommended - campaign.dailyBudget) * 100) / 100;
 
-    // Skip if change is negligible
-    if (Math.abs(change) < 0.01) return null;
+    return { campaign, recommended, reason, currentBudget: campaign.dailyBudget };
+  });
 
-    return {
+  const totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
+
+  // --- Step 2: Shared budgets get the remainder ---
+  const budgets = sharedBudgets || [];
+  const remainingForShared = Math.max(targetForAdjustable - totalVlaRecommended, 0);
+  const currentSharedTotal = budgets.reduce((s, b) => s + b.dailyBudget, 0);
+
+  // Build final recommendations
+  const recommendations = [];
+
+  // VLA recs (only if there's a meaningful change)
+  vlaAllocations.forEach(v => {
+    if (!v.reason) return;
+    const change = Math.round((v.recommended - v.currentBudget) * 100) / 100;
+    if (Math.abs(change) < 0.01) return;
+
+    recommendations.push({
       type: 'campaign_budget',
-      target: campaign.campaignName,
-      resourceName: campaign.resourceName,
-      currentDailyBudget: campaign.dailyBudget,
-      recommendedDailyBudget: recommended,
+      target: v.campaign.campaignName,
+      resourceName: v.campaign.resourceName,
+      currentDailyBudget: v.currentBudget,
+      recommendedDailyBudget: v.recommended,
       change,
-      reason,
+      reason: v.reason,
       isVla: true,
-    };
-  }).filter(Boolean);
+    });
+  });
+
+  // Shared budget recs — distribute remaining proportionally
+  if (budgets.length > 0) {
+    budgets.forEach(budget => {
+      let recommended;
+      if (currentSharedTotal > 0) {
+        const proportion = budget.dailyBudget / currentSharedTotal;
+        recommended = remainingForShared * proportion;
+      } else {
+        recommended = remainingForShared / budgets.length;
+      }
+
+      recommended = Math.max(recommended, 1);
+      recommended = Math.round(recommended * 100) / 100;
+      const change = Math.round((recommended - budget.dailyBudget) * 100) / 100;
+
+      if (Math.abs(change) < 0.01) return;
+
+      const direction = change >= 0 ? 'increase' : 'decrease';
+      recommendations.push({
+        type: 'shared_budget',
+        target: budget.name,
+        resourceName: budget.resourceName,
+        currentDailyBudget: budget.dailyBudget,
+        recommendedDailyBudget: recommended,
+        change,
+        reason: `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction} to hit monthly budget`,
+      });
+    });
+  }
+
+  // Budget allocation summary for the dashboard
+  const currentTotal = vlaCampaigns.reduce((s, c) => s + c.dailyBudget, 0) + currentSharedTotal + nonVlaDedicatedTotal;
+  const recommendedSharedTotal = budgets.length > 0
+    ? budgets.reduce((s, b) => {
+        let rec;
+        if (currentSharedTotal > 0) rec = remainingForShared * (b.dailyBudget / currentSharedTotal);
+        else rec = remainingForShared / budgets.length;
+        return s + Math.max(Math.round(rec * 100) / 100, 1);
+      }, 0)
+    : 0;
+  const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedTotal;
+
+  const budgetSummary = {
+    requiredDailyRate: Math.round(requiredDailyRate * 100) / 100,
+    currentDailyTotal: Math.round(currentTotal * 100) / 100,
+    recommendedDailyTotal: Math.round(recommendedTotal * 100) / 100,
+  };
+
+  return { recommendations, budgetSummary };
 }
 
 /**
@@ -223,7 +225,7 @@ function calculateVlaAdjustments(pacing, dedicatedBudgets, impressionShareData) 
  * @param {Object} params.goal - DealerGoal from goal-reader
  * @param {Object[]} params.campaignSpend - From getMonthSpend
  * @param {Object[]} params.sharedBudgets - From getSharedBudgets
- * @param {Object[]} [params.dedicatedBudgets] - From getDedicatedBudgets (VLAs etc.)
+ * @param {Object[]} [params.dedicatedBudgets] - From getDedicatedBudgets
  * @param {Object[]} params.impressionShare - From getImpressionShare
  * @param {number|null} params.inventoryCount - Count of new vehicles
  * @param {number} params.year - Current year
@@ -263,10 +265,13 @@ function generateRecommendation(params) {
 
   const pacing = calculatePacing(pacingParams);
 
-  // Budget adjustments — VLA campaigns first (priority), then shared budgets
-  const vlaRecs = calculateVlaAdjustments(pacing, dedicatedBudgets, impressionShare);
-  const sharedRecs = calculateBudgetAdjustments(pacing, sharedBudgets);
-  const recommendations = [...vlaRecs, ...sharedRecs];
+  // Distribute account budget: VLA (priority) + shared (remainder)
+  const { recommendations, budgetSummary } = distributeAccountBudget({
+    pacing,
+    dedicatedBudgets,
+    sharedBudgets,
+    impressionShareData: impressionShare,
+  });
 
   // Impression share summary
   const impressionShareSummary = summarizeImpressionShare(impressionShare);
@@ -278,6 +283,7 @@ function generateRecommendation(params) {
     status: pacing.paceStatus,
     statusColor: statusToColor(pacing.paceStatus),
     recommendations,
+    budgetSummary,
     impressionShareSummary,
     inventory: {
       count: inventoryCount,
@@ -289,8 +295,7 @@ function generateRecommendation(params) {
 
 module.exports = {
   generateRecommendation,
-  calculateBudgetAdjustments,
-  calculateVlaAdjustments,
+  distributeAccountBudget,
   summarizeImpressionShare,
   statusToColor,
   isVlaCampaign,

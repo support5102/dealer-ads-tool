@@ -106,6 +106,8 @@ describe('GET /api/pacing', () => {
     expect(res.body.status).toBeDefined();
     expect(res.body.statusColor).toBeDefined();
     expect(res.body.recommendations).toBeDefined();
+    expect(res.body.budgetSummary).toBeDefined();
+    expect(res.body.budgetSummary.requiredDailyRate).toBeGreaterThan(0);
     expect(res.body.impressionShareSummary).toBeDefined();
     expect(res.body.inventory).toBeDefined();
   });

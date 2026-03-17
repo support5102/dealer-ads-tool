@@ -1,14 +1,13 @@
 /**
  * Unit tests for budget-recommender — generates budget adjustment
- * recommendations from pacing state, spend, and inventory data.
+ * recommendations from account-level pacing, VLA impression share, and spend data.
  *
  * Tier 2 (unit): pure logic, no external deps.
  */
 
 const {
   generateRecommendation,
-  calculateBudgetAdjustments,
-  calculateVlaAdjustments,
+  distributeAccountBudget,
   summarizeImpressionShare,
   statusToColor,
   isVlaCampaign,
@@ -88,7 +87,6 @@ describe('summarizeImpressionShare', () => {
     ];
     const summary = summarizeImpressionShare(data);
 
-    // Should only average non-null values
     expect(summary.avgImpressionShare).toBeCloseTo(0.80, 2);
     expect(summary.avgBudgetLostShare).toBeCloseTo(0.10, 2);
   });
@@ -100,259 +98,6 @@ describe('summarizeImpressionShare', () => {
     const summary = summarizeImpressionShare(data);
     expect(summary.avgImpressionShare).toBeNull();
     expect(summary.avgBudgetLostShare).toBeNull();
-  });
-});
-
-// ===========================================================================
-// calculateBudgetAdjustments
-// ===========================================================================
-
-describe('calculateBudgetAdjustments', () => {
-  test('recommends increase when under-pacing', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 600,
-      dailyAvgSpend: 400,
-      daysRemaining: 15,
-      remainingBudget: 9000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 300, campaigns: [{ campaignId: '1', campaignName: 'C1' }] },
-      { resourceName: 'r/2', name: 'Budget B', dailyBudget: 100, campaigns: [{ campaignId: '2', campaignName: 'C2' }] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-
-    expect(adjustments).toHaveLength(2);
-    // Both should increase proportionally
-    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThan(300);
-    expect(adjustments[1].recommendedDailyBudget).toBeGreaterThan(100);
-    expect(adjustments[0].change).toBeGreaterThan(0);
-    expect(adjustments[1].change).toBeGreaterThan(0);
-    expect(adjustments[0].type).toBe('shared_budget');
-  });
-
-  test('recommends decrease when over-pacing', () => {
-    const pacing = {
-      paceStatus: 'over',
-      requiredDailyRate: 300,
-      dailyAvgSpend: 600,
-      daysRemaining: 15,
-      remainingBudget: 4500,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 400, campaigns: [{ campaignId: '1', campaignName: 'C1' }] },
-      { resourceName: 'r/2', name: 'Budget B', dailyBudget: 200, campaigns: [{ campaignId: '2', campaignName: 'C2' }] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-
-    expect(adjustments).toHaveLength(2);
-    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(400);
-    expect(adjustments[1].recommendedDailyBudget).toBeLessThan(200);
-    expect(adjustments[0].change).toBeLessThan(0);
-  });
-
-  test('returns no adjustments when on_pace', () => {
-    const pacing = {
-      paceStatus: 'on_pace',
-      requiredDailyRate: 500,
-      dailyAvgSpend: 500,
-      daysRemaining: 15,
-      remainingBudget: 7500,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 500, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    expect(adjustments).toHaveLength(0);
-  });
-
-  test('returns empty array when no shared budgets', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 600,
-      dailyAvgSpend: 400,
-      daysRemaining: 15,
-      remainingBudget: 9000,
-    };
-
-    const adjustments = calculateBudgetAdjustments(pacing, []);
-    expect(adjustments).toHaveLength(0);
-  });
-
-  test('enforces minimum daily budget of $1', () => {
-    const pacing = {
-      paceStatus: 'critical_over',
-      requiredDailyRate: 5,
-      dailyAvgSpend: 500,
-      daysRemaining: 15,
-      remainingBudget: 75,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 300, campaigns: [] },
-      { resourceName: 'r/2', name: 'Budget B', dailyBudget: 200, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    adjustments.forEach(adj => {
-      expect(adj.recommendedDailyBudget).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  test('distributes adjustment proportionally to budget size', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 1000,
-      dailyAvgSpend: 500,
-      daysRemaining: 10,
-      remainingBudget: 10000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Big', dailyBudget: 400, campaigns: [] },
-      { resourceName: 'r/2', name: 'Small', dailyBudget: 100, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-
-    // Big budget should get larger absolute increase
-    const bigChange = adjustments.find(a => a.target === 'Big').change;
-    const smallChange = adjustments.find(a => a.target === 'Small').change;
-    expect(bigChange).toBeGreaterThan(smallChange);
-    // But same ratio
-    expect(adjustments[0].recommendedDailyBudget / 400).toBeCloseTo(
-      adjustments[1].recommendedDailyBudget / 100, 1
-    );
-  });
-
-  test('handles critical_under same as under (increase)', () => {
-    const pacing = {
-      paceStatus: 'critical_under',
-      requiredDailyRate: 800,
-      dailyAvgSpend: 300,
-      daysRemaining: 10,
-      remainingBudget: 8000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 300, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThan(300);
-  });
-
-  test('handles critical_over same as over (decrease)', () => {
-    const pacing = {
-      paceStatus: 'critical_over',
-      requiredDailyRate: 200,
-      dailyAvgSpend: 800,
-      daysRemaining: 10,
-      remainingBudget: 2000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 500, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(500);
-  });
-
-  test('recommends decrease when over-pacing with Google Ads overspend', () => {
-    // Real-world scenario: budget set to $71/day but Google Ads spends $287/day.
-    // Account is critically over-pacing. Tool should recommend DECREASING budgets.
-    const pacing = {
-      paceStatus: 'critical_over',
-      requiredDailyRate: 80.35,
-      dailyAvgSpend: 286.77,      // actual spend rate (4x budget settings)
-      daysRemaining: 14,
-      remainingBudget: 1124.92,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Main', dailyBudget: 71.00, campaigns: [] },
-      { resourceName: 'r/2', name: 'Vinfast', dailyBudget: 0.01, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-
-    expect(adjustments).toHaveLength(2);
-    // Main should decrease (not increase!)
-    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(71);
-    expect(adjustments[0].change).toBeLessThan(0);
-    expect(adjustments[0].reason).toMatch(/Over-pacing/i);
-    // Vinfast hits $1 minimum
-    expect(adjustments[1].recommendedDailyBudget).toBe(1);
-  });
-
-  test('includes reason text in each adjustment', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 600,
-      dailyAvgSpend: 400,
-      daysRemaining: 15,
-      remainingBudget: 9000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 400, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    expect(adjustments[0].reason).toBeTruthy();
-    expect(typeof adjustments[0].reason).toBe('string');
-  });
-
-  test('rounds recommended budget to 2 decimal places', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 333.33,
-      dailyAvgSpend: 200,
-      daysRemaining: 15,
-      remainingBudget: 5000,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 200, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    const decimals = String(adjustments[0].recommendedDailyBudget).split('.')[1] || '';
-    expect(decimals.length).toBeLessThanOrEqual(2);
-  });
-
-  test('handles zero daysRemaining (last day of month)', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 0,
-      dailyAvgSpend: 400,
-      daysRemaining: 0,
-      remainingBudget: 0,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 400, campaigns: [] },
-    ];
-
-    // No adjustments possible on last day
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    expect(adjustments).toHaveLength(0);
-  });
-
-  test('handles zero total daily budget', () => {
-    const pacing = {
-      paceStatus: 'under',
-      requiredDailyRate: 500,
-      dailyAvgSpend: 0,
-      daysRemaining: 15,
-      remainingBudget: 7500,
-    };
-    const sharedBudgets = [
-      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 0, campaigns: [] },
-    ];
-
-    const adjustments = calculateBudgetAdjustments(pacing, sharedBudgets);
-    // Can't proportionally distribute with zero base, should still produce recommendation
-    expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThan(0);
   });
 });
 
@@ -388,151 +133,334 @@ describe('isVlaCampaign', () => {
 });
 
 // ===========================================================================
-// calculateVlaAdjustments
+// distributeAccountBudget
 // ===========================================================================
 
-describe('calculateVlaAdjustments', () => {
-  const basePacing = {
-    paceStatus: 'under',
-    daysRemaining: 14,
-    remainingBudget: 5000,
-    dailyAvgSpend: 300,
-  };
+describe('distributeAccountBudget', () => {
+  // Helper: pacing object with remaining budget and days
+  function makePacing({ remainingBudget, daysRemaining }) {
+    return { remainingBudget, daysRemaining };
+  }
 
-  test('recommends increase when VLA impression share below 75%', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+  test('distributes required daily rate: VLA first (IS-driven), shared gets remainder', () => {
+    // Account needs $100/day. VLA IS at 50% → boost VLA budget.
+    // Whatever VLA takes, shared gets the rest.
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 }); // $100/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 30 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 70, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.20 },
+      { campaignId: '1', impressionShare: 0.50, budgetLostShare: 0.20 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    const { recommendations, budgetSummary } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
 
-    expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThan(100);
-    expect(adjustments[0].change).toBeGreaterThan(0);
-    expect(adjustments[0].isVla).toBe(true);
-    expect(adjustments[0].type).toBe('campaign_budget');
-    expect(adjustments[0].reason).toMatch(/below 75%/);
-    expect(adjustments[0].reason).toMatch(/lost to budget/);
+    // VLA should increase (IS 50% < 75% target)
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.recommendedDailyBudget).toBeGreaterThan(30);
+
+    // Shared should get whatever's left to hit $100/day total
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+
+    // VLA recommended + shared recommended ≈ required daily rate ($100)
+    expect(budgetSummary.requiredDailyRate).toBe(100);
   });
 
-  test('recommends decrease when VLA impression share above 90%', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 200 },
+  test('over-pacing account: shared budgets decrease to hit monthly target', () => {
+    // Already spent most of the budget, little remaining. Required rate is low.
+    const pacing = makePacing({ remainingBudget: 280, daysRemaining: 14 }); // $20/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 10 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 71, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.95, budgetLostShare: 0.01 },
+      { campaignId: '1', impressionShare: 0.82, budgetLostShare: 0.02 }, // IS on target
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
 
-    expect(adjustments).toHaveLength(1);
-    expect(adjustments[0].recommendedDailyBudget).toBeLessThan(200);
-    expect(adjustments[0].change).toBeLessThan(0);
-    expect(adjustments[0].reason).toMatch(/exceeds 90%/);
-    expect(adjustments[0].reason).toMatch(/CPC inflation/);
+    // VLA in range (82%) — no VLA change
+    expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
+
+    // Shared must decrease: account needs $20/day total, VLA stays at $10, so shared gets $10
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+    expect(sharedRec.recommendedDailyBudget).toBeLessThan(71);
+    expect(sharedRec.change).toBeLessThan(0);
+    expect(sharedRec.reason).toMatch(/Account needs/);
   });
 
-  test('returns no adjustment when VLA impression share in 75-90% target range', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 150 },
+  test('under-pacing account: shared budgets increase to fill gap', () => {
+    const pacing = makePacing({ remainingBudget: 10000, daysRemaining: 10 }); // $1000/day needed
+    const shared = [
+      { resourceName: 'r/1', name: 'Budget A', dailyBudget: 300, campaigns: [] },
+      { resourceName: 'r/2', name: 'Budget B', dailyBudget: 100, campaigns: [] },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: [],
+    });
+
+    // Both shared should increase proportionally
+    expect(recommendations).toHaveLength(2);
+    expect(recommendations[0].recommendedDailyBudget).toBeGreaterThan(300);
+    expect(recommendations[1].recommendedDailyBudget).toBeGreaterThan(100);
+
+    // Proportional: Budget A (300/400 = 75%) gets 75% of $1000
+    expect(recommendations[0].recommendedDailyBudget).toBe(750);
+    expect(recommendations[1].recommendedDailyBudget).toBe(250);
+  });
+
+  test('VLA with low IS gets boost even when account is over-pacing', () => {
+    // Account over-pacing but VLA IS is terrible — still recommend increasing VLA
+    const pacing = makePacing({ remainingBudget: 200, daysRemaining: 10 }); // $20/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 15 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.82, budgetLostShare: 0.03 },
+      { campaignId: '1', impressionShare: 0.40, budgetLostShare: 0.30 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
-    expect(adjustments).toHaveLength(0);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // VLA increases (IS 40% → boost toward 75%)
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.recommendedDailyBudget).toBeGreaterThan(15);
+
+    // Shared absorbs the hit — must decrease heavily
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+    expect(sharedRec.recommendedDailyBudget).toBeLessThan(50);
   });
 
-  test('caps boost at 2x to avoid over-correction', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 50 },
+  test('VLA with high IS gets reduced, freeing budget for shared', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 }); // $100/day needed
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 80 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 20, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.10, budgetLostShare: 0.50 },
+      { campaignId: '1', impressionShare: 0.96, budgetLostShare: 0.00 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
 
-    // 0.75 / 0.10 = 7.5x but capped at 2x
-    expect(adjustments[0].recommendedDailyBudget).toBe(100); // 50 * 2.0
+    // VLA decreases (96% > 90% target)
+    const vlaRec = recommendations.find(r => r.isVla);
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.recommendedDailyBudget).toBeLessThan(80);
+    expect(vlaRec.reason).toMatch(/exceeds 90%/);
+
+    // Shared gets more of the pie (total must still hit $100/day)
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+    expect(sharedRec.recommendedDailyBudget).toBeGreaterThan(20);
   });
 
-  test('skips non-VLA dedicated budget campaigns', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda Brand Search', channelType: 'SEARCH', resourceName: 'r/3', dailyBudget: 100 },
+  test('caps VLA boost at 2x to avoid over-correction', () => {
+    const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda Brand Search', impressionShare: 0.50, budgetLostShare: 0.20 },
+      { campaignId: '1', impressionShare: 0.10, budgetLostShare: 0.50 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
-    expect(adjustments).toHaveLength(0);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: [], impressionShareData: isData,
+    });
+
+    const vlaRec = recommendations.find(r => r.isVla);
+    // 0.75 / 0.10 = 7.5x but capped at 2x → $100
+    expect(vlaRec.recommendedDailyBudget).toBe(100);
   });
 
-  test('skips VLA campaigns with no impression share data', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+  test('skips non-VLA dedicated campaigns (not adjusted)', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Brand Search', channelType: 'SEARCH', resourceName: 'r/1', dailyBudget: 30 },
     ];
-
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, []);
-    expect(adjustments).toHaveLength(0);
-  });
-
-  test('enforces minimum $1/day', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 5 },
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 70, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.98, budgetLostShare: 0.00 },
+      { campaignId: '1', impressionShare: 0.50, budgetLostShare: 0.20 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
-    expect(adjustments[0].recommendedDailyBudget).toBeGreaterThanOrEqual(1);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // No VLA recs (Brand Search is not a VLA)
+    expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
+
+    // Shared gets $100 - $30 (non-VLA dedicated) = $70 — same as current, no change
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeUndefined(); // no change needed
   });
 
-  test('returns empty when no dedicated budgets', () => {
-    expect(calculateVlaAdjustments(basePacing, [], [])).toHaveLength(0);
-    expect(calculateVlaAdjustments(basePacing, null, [])).toHaveLength(0);
+  test('non-VLA dedicated budget is subtracted from target before distributing', () => {
+    // Required $100/day. Non-VLA dedicated takes $40. VLA + shared must cover $60.
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Brand Search', channelType: 'SEARCH', resourceName: 'r/1', dailyBudget: 40 },
+      { campaignId: '2', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/2', dailyBudget: 20 },
+    ];
+    const shared = [
+      { resourceName: 'r/3', name: 'Main', dailyBudget: 50, campaigns: [] },
+    ];
+    const isData = [
+      { campaignId: '2', impressionShare: 0.80, budgetLostShare: 0.02 }, // VLA on target
+    ];
+
+    const { recommendations, budgetSummary } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // VLA in range — no VLA change
+    expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
+
+    // Shared gets: $60 (target for adjustable) - $20 (VLA stays) = $40
+    const sharedRec = recommendations.find(r => !r.isVla);
+    expect(sharedRec).toBeDefined();
+    expect(sharedRec.recommendedDailyBudget).toBe(40);
+    expect(sharedRec.change).toBe(-10); // was 50, now 40
+  });
+
+  test('multiple shared budgets distributed proportionally to budget size', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 }); // $100/day
+    const shared = [
+      { resourceName: 'r/1', name: 'Big', dailyBudget: 60, campaigns: [] },
+      { resourceName: 'r/2', name: 'Small', dailyBudget: 20, campaigns: [] },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: [],
+    });
+
+    // Big gets 75% of $100 = $75, Small gets 25% = $25
+    const big = recommendations.find(r => r.target === 'Big');
+    const small = recommendations.find(r => r.target === 'Small');
+    expect(big.recommendedDailyBudget).toBe(75);
+    expect(small.recommendedDailyBudget).toBe(25);
+  });
+
+  test('enforces minimum $1/day on shared budgets', () => {
+    // Required $10/day, VLA takes $9. Shared splits $1 across 2 budgets.
+    const pacing = makePacing({ remainingBudget: 100, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 4 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'A', dailyBudget: 50, campaigns: [] },
+      { resourceName: 'r/3', name: 'B', dailyBudget: 50, campaigns: [] },
+    ];
+    const isData = [
+      { campaignId: '1', impressionShare: 0.50, budgetLostShare: 0.25 }, // boost VLA
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    recommendations.filter(r => !r.isVla).forEach(r => {
+      expect(r.recommendedDailyBudget).toBeGreaterThanOrEqual(1);
+    });
   });
 
   test('returns empty when zero days remaining', () => {
-    const pacing = { ...basePacing, daysRemaining: 0 };
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
-    ];
-    const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.50, budgetLostShare: 0.20 },
-    ];
-
-    expect(calculateVlaAdjustments(pacing, budgets, isData)).toHaveLength(0);
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 0 });
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: [], impressionShareData: [],
+    });
+    expect(recommendations).toHaveLength(0);
   });
 
-  test('includes budget lost share in reason when high', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+  test('returns empty when already on target (no changes needed)', () => {
+    // Required $100/day, VLA at $50 (IS on target), shared at $50 — perfect.
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.60, budgetLostShare: 0.15 },
+      { campaignId: '1', impressionShare: 0.82, budgetLostShare: 0.02 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
-    expect(adjustments[0].reason).toMatch(/15\.0% lost to budget/);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    expect(recommendations).toHaveLength(0);
   });
 
-  test('omits budget lost share from reason when low', () => {
-    const budgets = [
-      { campaignId: '300', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/3', dailyBudget: 100 },
+  test('handles null inputs gracefully', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: null, sharedBudgets: null, impressionShareData: null,
+    });
+    expect(recommendations).toHaveLength(0);
+  });
+
+  test('includes budget lost share in VLA reason when high', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
     ];
     const isData = [
-      { campaignId: '300', campaignName: 'Honda VLA', impressionShare: 0.60, budgetLostShare: 0.03 },
+      { campaignId: '1', impressionShare: 0.60, budgetLostShare: 0.15 },
     ];
 
-    const adjustments = calculateVlaAdjustments(basePacing, budgets, isData);
-    expect(adjustments[0].reason).not.toMatch(/lost to budget/);
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: [], impressionShareData: isData,
+    });
+
+    expect(recommendations[0].reason).toMatch(/15\.0% lost to budget/);
+  });
+
+  test('budgetSummary shows current vs recommended totals', () => {
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 });
+    const dedicated = [
+      { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 30 },
+    ];
+    const shared = [
+      { resourceName: 'r/2', name: 'Main', dailyBudget: 50, campaigns: [] },
+    ];
+    const isData = [
+      { campaignId: '1', impressionShare: 0.82, budgetLostShare: 0.02 },
+    ];
+
+    const { budgetSummary } = distributeAccountBudget({
+      pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    expect(budgetSummary.requiredDailyRate).toBe(100);
+    expect(budgetSummary.currentDailyTotal).toBe(80); // 30 + 50
+    // Recommended should be closer to 100
+    expect(budgetSummary.recommendedDailyTotal).toBeGreaterThan(budgetSummary.currentDailyTotal);
   });
 });
 
@@ -555,8 +483,12 @@ describe('generateRecommendation', () => {
         { campaignId: '100', campaignName: 'Honda Civic - Search' },
       ]},
     ],
+    dedicatedBudgets: [
+      { campaignId: '200', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/v1', dailyBudget: 100 },
+    ],
     impressionShare: [
       { campaignId: '100', campaignName: 'Honda Civic - Search', impressionShare: 0.85, budgetLostShare: 0.10 },
+      { campaignId: '200', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.25 },
     ],
     inventoryCount: 200,
     year: 2026,
@@ -576,6 +508,7 @@ describe('generateRecommendation', () => {
     expect(rec.status).toBeDefined();
     expect(rec.statusColor).toBeDefined();
     expect(rec.recommendations).toBeDefined();
+    expect(rec.budgetSummary).toBeDefined();
     expect(rec.impressionShareSummary).toBeDefined();
     expect(rec.inventory).toBeDefined();
   });
@@ -586,23 +519,15 @@ describe('generateRecommendation', () => {
   });
 
   test('passes inventory count to recommendation output', () => {
-    const params = {
-      ...baseParams,
-      inventoryCount: 50,
-    };
+    const params = { ...baseParams, inventoryCount: 50 };
     const rec = generateRecommendation(params);
-
-    // No baselineInventory in goal → modifier stays 1.0
     expect(rec.pacing.inventoryModifier).toBe(1.0);
     expect(rec.inventory.count).toBe(50);
     expect(rec.inventory.modifier).toBe(1.0);
   });
 
   test('handles null inventory gracefully', () => {
-    const params = {
-      ...baseParams,
-      inventoryCount: null,
-    };
+    const params = { ...baseParams, inventoryCount: null };
     const rec = generateRecommendation(params);
     expect(rec.pacing.inventoryModifier).toBe(1.0);
     expect(rec.inventory.count).toBeNull();
@@ -610,116 +535,31 @@ describe('generateRecommendation', () => {
 
   test('includes impression share summary', () => {
     const rec = generateRecommendation(baseParams);
-    expect(rec.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.85, 2);
+    expect(rec.impressionShareSummary.avgImpressionShare).toBeCloseTo(0.70, 2);
   });
 
-  test('produces recommendations when off-pace', () => {
-    // Day 15 of 31, spent only 2000 of 15000 → severely under-pacing
-    const params = {
-      ...baseParams,
-      campaignSpend: [
-        { campaignId: '100', campaignName: 'Honda Civic - Search', status: 'ENABLED', spend: 2000 },
-      ],
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.status).toMatch(/under/);
-    expect(rec.statusColor).toMatch(/yellow|red/);
-    expect(rec.recommendations.length).toBeGreaterThan(0);
-  });
+  test('VLA recommendations come before shared in the list', () => {
+    const rec = generateRecommendation(baseParams);
 
-  test('produces no recommendations when on pace', () => {
-    // Day 15 of 31, spent ~7258 of 15000 → roughly on pace
-    const params = {
-      ...baseParams,
-      campaignSpend: [
-        { campaignId: '100', campaignName: 'Honda', status: 'ENABLED', spend: 7258 },
-      ],
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.status).toBe('on_pace');
-    expect(rec.statusColor).toBe('green');
-    expect(rec.recommendations).toHaveLength(0);
-  });
-
-  test('handles empty campaign spend', () => {
-    const params = {
-      ...baseParams,
-      campaignSpend: [],
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.totalSpend).toBe(0);
-    expect(rec.status).toMatch(/under/);
-  });
-
-  test('handles empty shared budgets', () => {
-    const params = {
-      ...baseParams,
-      sharedBudgets: [],
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.recommendations).toHaveLength(0);
-  });
-
-  test('handles empty impression share', () => {
-    const params = {
-      ...baseParams,
-      impressionShare: [],
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
-  });
-
-  test('handles null campaignSpend', () => {
-    const params = {
-      ...baseParams,
-      campaignSpend: null,
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.totalSpend).toBe(0);
-  });
-
-  test('handles null sharedBudgets', () => {
-    const params = {
-      ...baseParams,
-      sharedBudgets: null,
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.recommendations).toHaveLength(0);
-  });
-
-  test('handles null impressionShare', () => {
-    const params = {
-      ...baseParams,
-      impressionShare: null,
-    };
-    const rec = generateRecommendation(params);
-    expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
-  });
-
-  test('includes VLA recommendations before shared budget recommendations', () => {
-    const params = {
-      ...baseParams,
-      dedicatedBudgets: [
-        { campaignId: '200', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/v1', dailyBudget: 100 },
-      ],
-      impressionShare: [
-        { campaignId: '100', campaignName: 'Honda Civic - Search', impressionShare: 0.85, budgetLostShare: 0.10 },
-        { campaignId: '200', campaignName: 'Honda VLA', impressionShare: 0.55, budgetLostShare: 0.25 },
-      ],
-      // Make it under-pacing so shared budget recs also appear
-      campaignSpend: [
-        { campaignId: '100', campaignName: 'Honda Civic - Search', status: 'ENABLED', spend: 2000 },
-      ],
-    };
-    const rec = generateRecommendation(params);
-
-    // Should have VLA rec first, then shared budget rec
+    // Honda VLA has 55% IS → should get increase recommendation
     const vlaRecs = rec.recommendations.filter(r => r.isVla);
     const sharedRecs = rec.recommendations.filter(r => !r.isVla);
+
     expect(vlaRecs.length).toBeGreaterThan(0);
-    expect(sharedRecs.length).toBeGreaterThan(0);
-    // VLA should come first
-    expect(rec.recommendations[0].isVla).toBe(true);
+    if (sharedRecs.length > 0) {
+      // VLA should be first
+      const firstVla = rec.recommendations.findIndex(r => r.isVla);
+      const firstShared = rec.recommendations.findIndex(r => !r.isVla);
+      expect(firstVla).toBeLessThan(firstShared);
+    }
+  });
+
+  test('budgetSummary included in output', () => {
+    const rec = generateRecommendation(baseParams);
+    expect(rec.budgetSummary).toBeDefined();
+    expect(rec.budgetSummary.requiredDailyRate).toBeGreaterThan(0);
+    expect(rec.budgetSummary.currentDailyTotal).toBeGreaterThan(0);
+    expect(rec.budgetSummary.recommendedDailyTotal).toBeGreaterThan(0);
   });
 
   test('handles null dedicatedBudgets gracefully', () => {
@@ -728,8 +568,44 @@ describe('generateRecommendation', () => {
     expect(rec.recommendations).toBeDefined();
   });
 
-  test('budget fully spent recommends $1 minimum', () => {
-    // Day 15, already spent the full budget
+  test('handles empty campaign spend', () => {
+    const params = { ...baseParams, campaignSpend: [] };
+    const rec = generateRecommendation(params);
+    expect(rec.totalSpend).toBe(0);
+    expect(rec.status).toMatch(/under/);
+  });
+
+  test('handles empty shared budgets', () => {
+    const params = { ...baseParams, sharedBudgets: [] };
+    const rec = generateRecommendation(params);
+    expect(rec.recommendations).toBeDefined();
+  });
+
+  test('handles empty impression share', () => {
+    const params = { ...baseParams, impressionShare: [] };
+    const rec = generateRecommendation(params);
+    expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
+  });
+
+  test('handles null campaignSpend', () => {
+    const params = { ...baseParams, campaignSpend: null };
+    const rec = generateRecommendation(params);
+    expect(rec.totalSpend).toBe(0);
+  });
+
+  test('handles null sharedBudgets', () => {
+    const params = { ...baseParams, sharedBudgets: null };
+    const rec = generateRecommendation(params);
+    expect(rec.recommendations).toBeDefined();
+  });
+
+  test('handles null impressionShare', () => {
+    const params = { ...baseParams, impressionShare: null };
+    const rec = generateRecommendation(params);
+    expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
+  });
+
+  test('budget fully spent: shared budgets at minimum, VLA still IS-driven', () => {
     const params = {
       ...baseParams,
       campaignSpend: [
@@ -738,7 +614,7 @@ describe('generateRecommendation', () => {
     };
     const rec = generateRecommendation(params);
     expect(rec.status).toMatch(/over/);
-    rec.recommendations.forEach(r => {
+    rec.recommendations.filter(r => !r.isVla).forEach(r => {
       expect(r.recommendedDailyBudget).toBeGreaterThanOrEqual(1);
     });
   });

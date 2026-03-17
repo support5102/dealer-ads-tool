@@ -229,6 +229,36 @@
   transition: width .3s;
 }
 
+/* Budget allocation summary */
+.budget-summary {
+  display: flex;
+  gap: 24px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border2);
+  background: #0c1a2e;
+  flex-wrap: wrap;
+}
+.budget-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.budget-summary-label {
+  font-size: 9px;
+  color: var(--text4);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.budget-summary-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.budget-summary-value small {
+  font-size: 11px;
+  font-weight: 400;
+}
+
 /* VLA badge */
 .vla-badge {
   display: inline-block;

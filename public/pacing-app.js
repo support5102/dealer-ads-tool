@@ -169,7 +169,7 @@ function showView(id) {
 function renderDashboard(data) {
   renderHeader(data);
   renderMetrics(data);
-  renderRecommendations(data.recommendations);
+  renderRecommendations(data.recommendations, data.budgetSummary);
   renderImpressionShare(data.impressionShareSummary);
   renderInventory(data.inventory);
 }
@@ -225,7 +225,7 @@ function renderMetrics(data) {
   `;
 }
 
-function renderRecommendations(recs) {
+function renderRecommendations(recs, budgetSummary) {
   const section = document.getElementById('recommendationsSection');
   if (!recs || recs.length === 0) {
     section.innerHTML = `
@@ -237,6 +237,31 @@ function renderRecommendations(recs) {
       </div>
     `;
     return;
+  }
+
+  // Budget allocation summary bar
+  let summaryHtml = '';
+  if (budgetSummary) {
+    const { requiredDailyRate, currentDailyTotal, recommendedDailyTotal } = budgetSummary;
+    const diff = recommendedDailyTotal - currentDailyTotal;
+    const diffSign = diff >= 0 ? '+' : '';
+    const diffColor = Math.abs(diff) < 1 ? 'var(--text3)' : (diff > 0 ? '#4ade80' : '#fb923c');
+    summaryHtml = `
+      <div class="budget-summary">
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Target Daily Rate</span>
+          <span class="budget-summary-value">$${requiredDailyRate.toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Current Budgets Total</span>
+          <span class="budget-summary-value">$${currentDailyTotal.toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Recommended Total</span>
+          <span class="budget-summary-value" style="color:${diffColor}">$${recommendedDailyTotal.toFixed(2)}/day <small>(${diffSign}$${diff.toFixed(2)})</small></span>
+        </div>
+      </div>
+    `;
   }
 
   let rows = '';
@@ -272,6 +297,7 @@ function renderRecommendations(recs) {
         <div class="dash-section-title">Budget Recommendations</div>
         <div class="dash-section-count">${countParts.join(' + ')} budget${recs.length !== 1 ? 's' : ''}</div>
       </div>
+      ${summaryHtml}
       ${rows}
     </div>
   `;
