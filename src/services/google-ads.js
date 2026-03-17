@@ -52,7 +52,7 @@ function createClient(config, refreshToken, customerId, loginCustomerId) {
  */
 async function listAccessibleCustomers(accessToken, developerToken) {
   const resp = await axios.get(
-    'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
+    'https://googleads.googleapis.com/v20/customers:listAccessibleCustomers',
     {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -85,7 +85,7 @@ async function queryViaRest(accessToken, developerToken, customerId, query, logi
   }
 
   const resp = await axios.post(
-    `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
     { query },
     { headers, timeout: 20000 }
   );
