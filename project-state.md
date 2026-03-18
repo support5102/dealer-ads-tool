@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
 **Last Updated:** 2026-03-18
-**Current Phase:** Phase 8: Campaign Builder Integration — Phase 1 COMPLETE
+**Current Phase:** Phase 8: Campaign Builder Integration — COMPLETE (all 3 phases)
 
 ---
 
@@ -17,7 +17,7 @@
 | 5 | Operational Reliability | ✅ COMPLETE | Audit logging, query timeouts, user identity, keyword limit |
 | 6 | Feature Expansion | 📋 PLANNED | Change history UI, email notifications, Facebook Ads |
 | 7 | Budget Pacing Dashboard | ✅ COMPLETE | Advisory pacing tool for multi-account budget management |
-| 8 | Campaign Builder Integration | 🔧 IN PROGRESS | Merge Campaign Builder + CSV export for changes (Phase 1-2 done) |
+| 8 | Campaign Builder Integration | ✅ COMPLETE | Campaign Builder + CSV export + shared CSV utils (475 tests) |
 
 ---
 
@@ -75,12 +75,39 @@
 - [x] 47 new tests (475 total, all green)
 - [x] Note: `exclude_radius` has no CSV encoding — API-only, skipped with warning
 
-**Phase 3 — Shared CSV Infrastructure (PLANNED):**
-- [ ] Extract COLS to shared module, update builder.html to use it
+**Phase 3 — Shared CSV Infrastructure (COMPLETE):**
+- [x] Created `public/csv-utils.js` — browser-side shared module (ADS_COLS, blankAdsRow, buildAdsCSV)
+- [x] Updated `builder.html` — removed inline COLS + dead toCSV, uses shared module
+- [x] Tab/newline sanitization in browser CSV generation
+- [x] Fixed footer encoding label (UTF-16 → UTF-8)
 
 ---
 
 ## Session Log
+
+### 2026-03-18 (session 3) - CLEAN HANDOFF
+
+**Completed:**
+- Implemented Phase 3: Shared CSV Infrastructure
+  - Created `public/csv-utils.js` with ADS_COLS (176 columns), blankAdsRow(), buildAdsCSV()
+  - Updated builder.html to load shared module, removed 18 lines of inline COLS/toCSV/bk() duplication
+  - Added tab/newline sanitization to browser-side CSV (matching server-side)
+  - Fixed stale "UTF-16" footer label → "UTF-8"
+- Staff engineer (Opus) review: clean pass, found 2 minor issues (dead alias, stale footer), both fixed
+- Pushed V3 branch to GitHub (2 commits: 5393b52 + 0d6143e)
+- Phase 8 now fully complete (all 3 phases)
+
+**Files Changed:**
+- Created: `public/csv-utils.js`
+- Modified: `public/builder.html` (-18 lines, +5 lines)
+
+**Test Count:** 475 (unchanged — Phase 3 was pure refactor)
+
+**Next Session Focus:**
+- Deploy V3 to Railway (env vars + OAuth redirect URI)
+- Fix high-severity PR findings (XSS in app.js innerHTML, OAuth CSRF in auth.js)
+
+---
 
 ### 2026-03-18 (session 2) - CLEAN HANDOFF
 
