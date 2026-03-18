@@ -333,6 +333,7 @@ function renderPlan(plan) {
     <div class="apply-row">
       <button class="btn-dryrun" onclick="applyChanges(true)">🔍 Dry Run (preview only)</button>
       <button class="btn-apply" onclick="confirmApply()">Apply Changes to Google Ads</button>
+      <button class="btn-secondary" onclick="exportChangesCSV()">📥 Export as CSV</button>
       <button class="btn-secondary" onclick="clearPlan()">Cancel</button>
     </div>
   `;
@@ -417,6 +418,55 @@ function clearTask() {
 function clearPlan() {
   state.plan = null;
   document.getElementById('planArea').innerHTML = '';
+}
+
+// ─────────────────────────────────────────────────────────────
+// EXPORT CHANGES AS CSV
+// ─────────────────────────────────────────────────────────────
+async function exportChangesCSV() {
+  if (!state.plan || !state.plan.changes || !state.plan.changes.length) {
+    showToast('No changes to export', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/export-changes-csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        changes: state.plan.changes,
+        accountName: state.selectedName || 'changes',
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Export failed' }));
+      showToast(err.error || 'Export failed', 'error');
+      return;
+    }
+
+    const data = await res.json();
+
+    // Trigger browser download from the CSV string
+    const blob = new Blob([data.csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
+
+    // Show result
+    let msg = `Exported ${data.rowCount} change${data.rowCount !== 1 ? 's' : ''} to CSV`;
+    if (data.skipped && data.skipped.length) {
+      msg += ` (${data.skipped.length} skipped — API only)`;
+    }
+    showToast(msg);
+  } catch (err) {
+    showToast('Export error: ' + err.message, 'error');
+  }
 }
 
 let toastTimer;

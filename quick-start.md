@@ -6,7 +6,13 @@
 
 ## What Is This?
 
-A web-based Google Ads management tool for car dealer digital marketing teams. Users paste Freshdesk support tasks in plain English (e.g., "pause the Honda Civic campaign", "add negative keyword [free cars] to all campaigns"), and the tool uses Claude AI to translate them into structured Google Ads API changes — with review, dry-run preview, and one-click apply. Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from one interface.
+A web-based Google Ads management tool for car dealer digital marketing teams. Three integrated tools in one:
+
+1. **Task Manager** — Paste Freshdesk tasks in plain English, Claude AI translates to structured Google Ads API changes with review, dry-run, and one-click apply
+2. **Campaign Builder** — Build new dealer campaign structures from scratch (auto-fills dealer info via web scraping, generates Ads Editor CSV with model/brand/competitor/regional campaigns)
+3. **Pacing Dashboard** — Monitor budget pacing across MCC accounts with Google Sheets goal integration
+
+Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from one interface.
 
 ---
 
@@ -25,10 +31,10 @@ A web-based Google Ads management tool for car dealer digital marketing teams. U
 
 | Aspect | Value |
 |--------|-------|
-| **Phase** | 7: Budget Pacing Dashboard — COMPLETE (405 tests: 44 config + 280 unit + 81 integration) |
-| **Last Session** | 2026-03-16 - CLEAN |
-| **Immediate Next** | Deploy V3 to Railway, or Phase 6 feature expansion |
-| **Live Version** | V2 on Railway (V3 PR #1 open, all Phase 1-7 code ready to commit + push) |
+| **Phase** | 8: Campaign Builder Integration — Phase 1+2 COMPLETE (475 tests: 44 config + 320 unit + 111 integration) |
+| **Last Session** | 2026-03-18 - CLEAN |
+| **Immediate Next** | Phase 3: shared COLS module, or deploy V3 to Railway |
+| **Live Version** | V2 on Railway (V3 PR #1 open, Phases 1-8.2 code ready) |
 
 ---
 

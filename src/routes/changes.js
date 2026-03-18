@@ -5,14 +5,16 @@
  * Calls: services/claude-parser.js, services/change-executor.js, services/google-ads.js
  *
  * Routes:
- *   POST /api/parse-task     → Send task to Claude, get structured change plan
- *   POST /api/apply-changes  → Execute changes against Google Ads API
+ *   POST /api/parse-task         → Send task to Claude, get structured change plan
+ *   POST /api/apply-changes      → Execute changes against Google Ads API
+ *   POST /api/export-changes-csv → Export change plan as Google Ads Editor CSV
  */
 
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const claudeParser = require('../services/claude-parser');
 const { applyChange } = require('../services/change-executor');
+const { changesToRows, toCSV } = require('../services/csv-exporter');
 const googleAds = require('../services/google-ads');
 const { logAudit } = require('../utils/audit-log');
 
@@ -120,6 +122,29 @@ function createChangesRouter(config) {
       console.error('Apply error:', err.message);
       next(err);
     }
+  });
+
+  // Export change plan as Google Ads Editor CSV
+  router.post('/api/export-changes-csv', requireAuth, (req, res) => {
+    const { changes, accountName } = req.body;
+    if (!Array.isArray(changes) || changes.length === 0) {
+      return res.status(400).json({ error: 'Missing or empty changes array' });
+    }
+
+    const { rows, skipped } = changesToRows(changes);
+    const csv = toCSV(rows);
+
+    const safeName = (accountName || 'changes')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 50);
+    const filename = `${safeName}_GoogleAds_Changes.csv`;
+
+    res.json({
+      csv,
+      filename,
+      rowCount: rows.length,
+      skipped,
+    });
   });
 
   return router;

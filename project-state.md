@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-16
-**Current Phase:** Phase 7: Budget Pacing Dashboard — COMPLETE (Phase 7.1-7.5 done)
+**Last Updated:** 2026-03-18
+**Current Phase:** Phase 8: Campaign Builder Integration — Phase 1 COMPLETE
 
 ---
 
@@ -17,6 +17,7 @@
 | 5 | Operational Reliability | ✅ COMPLETE | Audit logging, query timeouts, user identity, keyword limit |
 | 6 | Feature Expansion | 📋 PLANNED | Change history UI, email notifications, Facebook Ads |
 | 7 | Budget Pacing Dashboard | ✅ COMPLETE | Advisory pacing tool for multi-account budget management |
+| 8 | Campaign Builder Integration | 🔧 IN PROGRESS | Merge Campaign Builder + CSV export for changes (Phase 1-2 done) |
 
 ---
 
@@ -51,7 +52,91 @@
 
 ---
 
+## Current Phase Detail
+
+### Phase 8: Campaign Builder Integration
+
+**Goal:** Merge the standalone Google Ads Campaign Builder (React HTML tool) into the Dealer Ads Tool as a unified application, and add CSV export for change plans.
+
+**Phase 1 — Core Integration (COMPLETE):**
+- [x] Created `src/routes/builder.js` — `POST /api/builder/ai` proxies Claude calls with server-side API key
+- [x] Mounted builder router in `src/server.js`
+- [x] Migrated Campaign Builder to `public/builder.html` — all Claude calls now use `/api/builder/ai` proxy
+- [x] Eliminated client-side API key exposure (was calling `api.anthropic.com` directly from browser)
+- [x] Added nav links across all 3 pages (Task Manager ↔ Pacing Dashboard ↔ Campaign Builder)
+- [x] 9 integration tests for builder route (428 total, all green)
+
+**Phase 2 — CSV Export for Changes (COMPLETE):**
+- [x] Created `src/utils/ads-editor-columns.js` — shared 176-column COLS array + match type normalizer
+- [x] Created `src/services/csv-exporter.js` — `changeToRows()` maps 9 of 10 change types to Ads Editor CSV rows
+- [x] Created `POST /api/export-changes-csv` route in `src/routes/changes.js`
+- [x] Added "Export as CSV" button in `public/app.js` alongside Dry Run / Apply Changes
+- [x] Staff engineer review: fixed 5 issues (wrong state var, CSV injection, null details guard, radius Campaign Status, km unit detection)
+- [x] 47 new tests (475 total, all green)
+- [x] Note: `exclude_radius` has no CSV encoding — API-only, skipped with warning
+
+**Phase 3 — Shared CSV Infrastructure (PLANNED):**
+- [ ] Extract COLS to shared module, update builder.html to use it
+
+---
+
 ## Session Log
+
+### 2026-03-18 (session 2) - CLEAN HANDOFF
+
+**Completed:**
+- Implemented Phase 2: CSV Export for Changes
+  - `src/utils/ads-editor-columns.js` — 176-column COLS array, match type normalizer (API "EXACT" → CSV "Exact"), blankRow()
+  - `src/services/csv-exporter.js` — changeToRows() for 9/10 change types, toCSV() with UTF-8 BOM + tab sanitization
+  - `POST /api/export-changes-csv` route — returns JSON with CSV data, filename, rowCount, skipped array
+  - "Export as CSV" button in app.js — triggers browser download via Blob
+- Staff engineer (Opus) review caught 5 issues, all fixed:
+  1. `state.selectedAccountName` → `state.selectedName` (wrong var, filenames always "changes")
+  2. Tab/newline sanitization in toCSV() (CSV injection prevention)
+  3. Missing `details` guard — 6 change types now skip gracefully instead of TypeError
+  4. `add_radius` no longer sets `Campaign Status = Enabled` (prevented re-enabling paused campaigns)
+  5. Unit detection handles 'km'/'KM' in addition to 'KILOMETERS'
+
+**Files Changed:**
+- Created: `src/utils/ads-editor-columns.js`, `src/services/csv-exporter.js`, `tests/unit/test_ads_editor_columns.js`, `tests/unit/test_csv_exporter.js`
+- Modified: `src/routes/changes.js` (export route), `public/app.js` (export button), `tests/integration/test_change_routes.js` (+7 tests)
+
+**Test Count:** 475 (was 428)
+
+**Next Session Focus:**
+- Phase 3: Extract shared COLS to module used by both builder.html and csv-exporter
+- Or: deploy V3 to Railway
+
+---
+
+### 2026-03-18 (session 1) - CLEAN HANDOFF
+
+**Completed:**
+- Reviewed PR #1 (V3 modular rewrite) — identified 2 high-severity issues (XSS via innerHTML, missing OAuth CSRF), 8 medium, 7 low
+- Explored integration of standalone Campaign Builder (GoogleAdsCampaignBuilder.html) with Dealer Ads Tool
+- Spawned 4 specialist subagents (architecture, data flow, integration, domain) to analyze feasibility
+- Produced grounded implementation plan: 3 phases, 14 steps
+- Implemented Phase 1 of Campaign Builder Integration:
+  - `src/routes/builder.js` — Claude API proxy (no auth required, 60s timeout, 4096 token cap)
+  - `public/builder.html` — Campaign Builder migrated, all AI calls proxied through server
+  - Cross-navigation between all 3 pages
+  - 9 new integration tests (428 total, all green)
+
+**Key Decisions:**
+- Campaign Builder does not require Google Ads OAuth (only generates CSV, no API calls)
+- Keep CDN React/Babel/Tailwind on builder page only — no build step, no vanilla JS conversion
+- API key now server-side only — eliminated security exposure from original standalone tool
+- Model controlled by server config (`config.claude.model`) — no hardcoded model in frontend
+- 9 of 10 change types can export to Ads Editor CSV; `exclude_radius` is API-only (no CSV encoding for negative lat/lng radius)
+
+**Files Changed:**
+- Created: `src/routes/builder.js`, `public/builder.html`, `tests/integration/test_builder_routes.js`
+- Modified: `src/server.js` (mount builder router), `public/index.html` (nav link), `public/pacing.html` (nav link)
+
+**Next Session Focus:**
+- Phase 2: CSV export for change plans (`csv-exporter.js`, export route, UI button)
+
+---
 
 ### 2026-03-10 - CLEAN HANDOFF
 

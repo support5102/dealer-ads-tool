@@ -289,6 +289,120 @@ describe('POST /api/apply-changes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/export-changes-csv
+// ---------------------------------------------------------------------------
+describe('POST /api/export-changes-csv', () => {
+  let app;
+
+  beforeEach(() => {
+    app = createTestApp();
+    jest.clearAllMocks();
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    await supertest(app)
+      .post('/api/export-changes-csv')
+      .send({ changes: [{ type: 'pause_campaign', campaignName: 'Test' }] })
+      .expect(401);
+  });
+
+  test('returns 400 when changes missing', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({})
+      .expect(400);
+    expect(res.body.error).toMatch(/missing/i);
+  });
+
+  test('returns 400 when changes is empty array', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({ changes: [] })
+      .expect(400);
+    expect(res.body.error).toMatch(/empty/i);
+  });
+
+  test('returns JSON with CSV data and filename for pause_campaign', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({
+        changes: [{ type: 'pause_campaign', campaignName: 'Honda Civic - Search' }],
+        accountName: 'Honda of Springfield',
+      })
+      .expect(200);
+
+    expect(res.body.filename).toContain('Honda_of_Springfield');
+    expect(res.body.filename).toContain('.csv');
+    expect(res.body.rowCount).toBe(1);
+    expect(res.body.skipped).toHaveLength(0);
+
+    // Parse the embedded CSV
+    const lines = res.body.csv.replace('\uFEFF', '').split('\r\n');
+    expect(lines).toHaveLength(2); // header + 1 row
+
+    const header = lines[0].split('\t');
+    const data = lines[1].split('\t');
+    const campIdx = header.indexOf('Campaign');
+    const statusIdx = header.indexOf('Campaign Status');
+
+    expect(data[campIdx]).toBe('Honda Civic - Search');
+    expect(data[statusIdx]).toBe('Paused');
+  });
+
+  test('returns skipped changes for exclude_radius', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({
+        changes: [
+          { type: 'pause_campaign', campaignName: 'Camp A' },
+          { type: 'exclude_radius', campaignName: 'Camp B', details: { lat: 0, lng: 0, radius: 5 } },
+        ],
+      })
+      .expect(200);
+
+    expect(res.body.rowCount).toBe(1);
+    expect(res.body.skipped).toHaveLength(1);
+    expect(res.body.skipped[0]).toContain('exclude_radius');
+  });
+
+  test('handles multiple change types in one export', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({
+        changes: [
+          { type: 'pause_campaign', campaignName: 'Camp A' },
+          { type: 'enable_ad_group', campaignName: 'Camp A', adGroupName: 'AG1' },
+          { type: 'add_keyword', campaignName: 'Camp A', adGroupName: 'AG1', details: { keyword: 'test', matchType: 'EXACT' } },
+        ],
+      })
+      .expect(200);
+
+    expect(res.body.rowCount).toBe(3);
+    const lines = res.body.csv.replace('\uFEFF', '').split('\r\n');
+    expect(lines).toHaveLength(4); // header + 3 rows
+  });
+
+  test('sanitizes accountName for filename', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/export-changes-csv')
+      .send({
+        changes: [{ type: 'pause_campaign', campaignName: 'Test' }],
+        accountName: 'Bob\'s <Dealer> "Lot"',
+      })
+      .expect(200);
+
+    expect(res.body.filename).toContain('Bob_s__Dealer___Lot_');
+    expect(res.body.filename).not.toContain('<');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Health check
 // ---------------------------------------------------------------------------
 describe('GET /health', () => {

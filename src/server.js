@@ -20,6 +20,7 @@ const { createAuthRouter }     = require('./routes/auth');
 const { createAccountsRouter } = require('./routes/accounts');
 const { createChangesRouter }  = require('./routes/changes');
 const { createPacingRouter }   = require('./routes/pacing');
+const { createBuilderRouter }  = require('./routes/builder');
 const { errorHandler }         = require('./middleware/error-handler');
 
 /**
@@ -63,6 +64,7 @@ function createApp(config) {
   app.use(createAccountsRouter(config));
   app.use(createChangesRouter(config));
   app.use(createPacingRouter(config));
+  app.use(createBuilderRouter(config));
 
   // ── Health check ──
   app.get('/health', (req, res) => {

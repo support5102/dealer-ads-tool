@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Google Ads Campaign Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet"/>
+<style>
+  .anim-pulse{animation:pulse 1.5s cubic-bezier(.4,0,.6,1) infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+</style>
+</head>
+<body class="bg-gray-100">
+<div style="background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:system-ui,sans-serif;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:20px;">🚗</span>
+    <span style="color:#fff;font-weight:700;font-size:15px;">Campaign Builder</span>
+    <span style="color:#94a3b8;font-size:12px;">Dealer Ads Tool</span>
+  </div>
+  <div style="display:flex;gap:16px;align-items:center;">
+    <a href="/" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;">Task Manager</a>
+    <a href="/pacing.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;">Pacing Dashboard</a>
+  </div>
+</div>
+<div id="root"></div>
+<script type="text/babel">
+const {useState} = React;
+const E = encodeURIComponent;
+
+const COMBOS = {"CDJR":["Chrysler","Dodge","Jeep","Ram"],"Dodge/Jeep":["Dodge","Jeep"],"Dodge/Ram":["Dodge","Ram"],"Jeep/Ram":["Jeep","Ram"],"GM All":["Chevrolet","Buick","GMC","Cadillac"],"Chevy/GMC/CDJR":["Chevrolet","GMC","Chrysler","Jeep","Dodge","Ram"],"Chevy/GMC":["Chevrolet","GMC"],"Buick/GMC":["Buick","GMC"],"Ford/Lincoln":["Ford","Lincoln"],"Toyota/Lexus":["Toyota","Lexus"],"Honda/Acura":["Honda","Acura"],"Hyundai/Kia":["Hyundai","Kia"],"Nissan/Infiniti":["Nissan","Infiniti"],"VW/Audi":["Volkswagen","Audi"]};
+const SINGLES = ["Chrysler","Dodge","Jeep","Ram","Chevrolet","Buick","GMC","Cadillac","Ford","Lincoln","Toyota","Lexus","Honda","Acura","Hyundai","Kia","Genesis","Nissan","Infiniti","Volkswagen","Audi","Subaru","Mazda","BMW","Mercedes-Benz","Volvo","Porsche"];
+const MM = {"Chrysler":["Pacifica","Pacifica Hybrid","Voyager"],"Dodge":["Charger","Durango","Hornet"],"Jeep":["Wrangler","Gladiator","Cherokee","Grand Cherokee","Grand Cherokee L","Compass","Renegade","Wagoneer","Grand Wagoneer"],"Ram":["1500","2500","3500","ProMaster","ProMaster City"],"Chevrolet":["Silverado 1500","Silverado 2500HD","Silverado 3500HD","Colorado","Equinox","Trax","Trailblazer","Blazer","Traverse","Tahoe","Suburban","Corvette","Malibu","Camaro"],"Buick":["Encore GX","Envista","Envision","Enclave"],"GMC":["Sierra 1500","Sierra 2500HD","Sierra 3500HD","Canyon","Terrain","Acadia","Yukon","Yukon XL"],"Cadillac":["CT4","CT5","XT4","XT5","XT6","Escalade","Escalade ESV","Lyriq"],"Ford":["F-150","F-250 Super Duty","F-350 Super Duty","Maverick","Ranger","Bronco","Bronco Sport","Escape","Explorer","Expedition","Mustang","Mustang Mach-E","Edge"],"Lincoln":["Corsair","Nautilus","Aviator","Navigator"],"Toyota":["Camry","Corolla","Corolla Hatchback","Corolla Hybrid","Corolla Cross","Corolla Cross Hybrid","Crown","Crown Signia","Prius","Prius Prime","Prius Plug-In Hybrid","GR86","GR Corolla","GR Supra","Supra","RAV4","RAV4 Hybrid","RAV4 Prime","Highlander","Highlander Hybrid","Grand Highlander","Grand Highlander Hybrid","4Runner","4Runner i-FORCE MAX","Sequoia","Land Cruiser","Tacoma","Tacoma i-FORCE MAX","Tundra","Tundra Hybrid","Tundra i-FORCE MAX","Sienna","bZ","bZ4X","Mirai"],"Lexus":["IS","ES","LS","RC","LC","RZ","UX","NX","RX","GX","LX"],"Honda":["Civic","Civic Hatchback","Civic Hybrid","Accord","Accord Hybrid","Prelude","HR-V","CR-V","CR-V Hybrid","Passport","Pilot","Ridgeline","Odyssey"],"Acura":["Integra","TLX","MDX","RDX","ZDX"],"Hyundai":["Elantra","Sonata","Tucson","Santa Fe","Palisade","Kona","Venue","Santa Cruz","Ioniq 5","Ioniq 6"],"Kia":["Forte","K5","Sportage","Sorento","Telluride","Soul","Seltos","Carnival","EV6","EV9"],"Genesis":["G70","G80","G90","GV70","GV80","GV60"],"Nissan":["Sentra","Altima","Kicks","Rogue","Murano","Pathfinder","Armada","Frontier","Titan","Ariya","LEAF"],"Infiniti":["Q50","Q60","QX50","QX55","QX60","QX80"],"Volkswagen":["Jetta","Tiguan","Atlas","Atlas Cross Sport","ID.4","Taos","Golf GTI","Golf R"],"Audi":["A3","A4","A5","A6","A7","A8","Q3","Q4 e-tron","Q5","Q7","Q8","e-tron GT","RS3","RS5","S3","S4","S5"],"Subaru":["Impreza","Legacy","Outback","Forester","Crosstrek","Ascent","Solterra","BRZ","WRX"],"Mazda":["Mazda3","CX-5","CX-50","CX-70","CX-90","MX-5 Miata"],"BMW":["2 Series","3 Series","4 Series","5 Series","7 Series","X1","X2","X3","X4","X5","X6","X7","i4","i5","i7","iX","M2","M3","M4","Z4"],"Mercedes-Benz":["C-Class","E-Class","S-Class","GLA","GLB","GLC","GLE","GLS","EQB","EQE","EQS","CLA","G-Class"],"Volvo":["S60","S90","XC40","XC60","XC90","C40 Recharge","EX40","EX90"],"Porsche":["718","911","Panamera","Macan","Cayenne","Taycan"]};
+
+const COLS = "Campaign,Labels,Campaign Type,Networks,Budget name,Budget,Budget type,EU political ads,Standard conversion goals,Customer acquisition,Languages,Bid Strategy Type,Bid Strategy Name,Enhanced CPC,Target ROAS,Start Date,End Date,Broad match keywords,Ad Schedule,Ad rotation,Content exclusions,Targeting method,Exclusion method,Google Merchant Center feed,Merchant Identifier,Country of Sale,Feed label,Campaign Priority,Local Inventory Ads,Shopping ads on excluded brands,Inventory filter,Audience targeting,Flexible Reach,AI Max,Text customization,Final URL expansion,Image enhancement,Image generation,Landing page images,Video enhancement,Brand guidelines,Ad Group,Max CPC,Max CPM,Target CPA,Max CPV,Target CPV,Percent CPC,Target CPM,Target CPC,Desktop Bid Modifier,Mobile Bid Modifier,Tablet Bid Modifier,TV Screen Bid Modifier,Display Network Custom Bid Type,Optimized targeting,Strict age and gender targeting,Search term matching,Ad Group Type,Channels,Audience name,Age demographic,Gender demographic,Income demographic,Parental status demographic,Remarketing audience segments,Interest categories,Life events,Custom audience segments,Detailed demographics,Remarketing audience exclusions,Tracking template,Final URL suffix,Custom parameters,Asset Group,Headline 1,Headline 2,Headline 3,Headline 4,Headline 5,Headline 6,Headline 7,Headline 8,Headline 9,Headline 10,Headline 11,Headline 12,Headline 13,Headline 14,Headline 15,Long headline 1,Long headline 2,Long headline 3,Long headline 4,Long headline 5,Description 1,Description 2,Description 3,Description 4,Description 5,Call to action,Business name,Video ID 1,Video ID 2,Video ID 3,Video ID 4,Video ID 5,Path 1,Path 2,Final URL,Final mobile URL,Audience signal,ID,Location,Reach,Location groups,Radius,Unit,Bid Modifier,Account keyword type,Keyword,Criterion Type,First page bid,Top of page bid,First position bid,Quality score,Landing page experience,Expected CTR,Ad relevance,Product Group,Product Group Type,Label,Color,Description,Ad type,Headline 1 position,Headline 2 position,Headline 3 position,Headline 4 position,Headline 5 position,Headline 6 position,Headline 7 position,Headline 8 position,Headline 9 position,Headline 10 position,Headline 11 position,Headline 12 position,Headline 13 position,Headline 14 position,Headline 15 position,Description 1 position,Description 2 position,Description 3 position,Description 4 position,IP address,Shared set name,Shared set type,Keyword count,Campaigns,Link Text,Description Line 1,Description Line 2,Upgraded extension,Source,Header,Snippet Values,Callout text,Account settings,Inventory type,Campaign Status,Ad Group Status,Asset Group Status,Status,Approval Status,Ad strength,Comment".split(",");
+
+function toCSV(rows) {
+  const lines = [COLS.join("\t")];
+  rows.forEach(r => lines.push(COLS.map(c => r[c] !== undefined ? r[c] : "").join("\t")));
+  const txt = lines.join("\r\n");
+  const buf = new ArrayBuffer(2 + txt.length * 2);
+  const v = new DataView(buf);
+  v.setUint8(0, 0xff); v.setUint8(1, 0xfe);
+  for (let i = 0; i < txt.length; i++) v.setUint16(2 + i * 2, txt.charCodeAt(i), true);
+  return buf;
+}
+
+function parseTpl(tpl, sm, mo, groupMake) {
+  if (!tpl || !mo) return tpl || "";
+  let u = tpl;
+  const slug = s => s.toLowerCase().replace(/\s+/g,"-");
+  const mkSlug = groupMake ? slug(groupMake) : "";
+  const moSlug = slug(mo);
+
+  // Team Velocity — /inventory/new/{make}/{model}  e.g. /inventory/new/ford/f-150
+  // Detect the pattern and replace BOTH make and model slugs directly — no templateModel needed
+  const tvMatch = u.match(/\/inventory\/new\/([a-z0-9-]+)\/([a-z0-9-]+)/i);
+  if (tvMatch) {
+    u = u.replace(/\/inventory\/new\/[a-z0-9-]+\/[a-z0-9-]+/i,
+      "/inventory/new/" + mkSlug + "/" + moSlug);
+    return u;
+  }
+
+  // Autofusion — /search/New+{Make}+{Model}+tmM  e.g. /search/New+Nissan+Altima+tmM
+  if (/\/search\/New\+[^+]+\+.+?\+tmM/i.test(u)) {
+    const enc = s => s.replace(/\s+/g, "+");
+    u = u.replace(/\/search\/New\+[^+]+\+.+?\+tmM/i,
+      "/search/New+" + enc(groupMake||"") + "+" + enc(mo) + "+tmM");
+    return u;
+  }
+
+  // Dealer Inspire — /new-vehicles/{model}/  e.g. /new-vehicles/altima/
+  if (/\/new-vehicles\/[a-z0-9-]+\/?/i.test(u)) {
+    const enc = s => s.toLowerCase().replace(/\s+/g, "-");
+    u = u.replace(/\/new-vehicles\/[a-z0-9-]+\/?/i, "/new-vehicles/" + enc(mo) + "/");
+    return u;
+  }
+
+  // eProcess — /new-vehicles/{make}/{model}/ — cannot auto-generate (custom URL required per model)
+
+  // No pattern matched — return null so callers can fall back to buildInventoryUrl
+  return null;
+}
+
+async function geocode(city, state) {
+  // Use Claude API — avoids CORS issues with third-party geocoding services
+  const txt = await callAI(
+    "You return GPS coordinates as JSON. Return ONLY raw JSON with no markdown, no explanation, no code blocks.",
+    "GPS coordinates for " + city + ", " + state + " USA. Respond with only a JSON object containing lat and lng as decimal numbers."
+  );
+  // Strip any markdown code fences Claude might add
+  const clean = txt.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim();
+  const j = parseJ(clean);
+  if (!j || j.lat === undefined || j.lng === undefined) {
+    throw new Error("Bad geocode response: " + clean.slice(0,80));
+  }
+  return [{lat: +j.lat, lng: +j.lng, city: city, state: state, label: city + ", " + state}];
+}
+
+async function callAI(system, prompt, tokens, tools) {
+  const body = { system, prompt, tokens: tokens || 300 };
+  if (tools) body.tools = tools;
+  const r = await fetch("/api/builder/ai", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error("API " + r.status + ": " + t.slice(0,200)); }
+  const d = await r.json();
+  if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+  return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+}
+
+function parseJ(txt) {
+  const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
+  if (s >= 0) try { return JSON.parse(txt.slice(s, e+1)); } catch(ex) {}
+  const a = txt.indexOf("["), b = txt.lastIndexOf("]");
+  if (a >= 0) try { return JSON.parse(txt.slice(a, b+1)); } catch(ex) {}
+  return null;
+}
+
+async function autofill(url, onStatus) {
+  if (!url || url.indexOf("http") !== 0) return null;
+  onStatus("🔍 Reading dealer website…");
+  const system = `You are extracting info from a car dealership new inventory page. You will use web_search to fetch the actual page and read its content directly.
+DEALER NAME: Use the branded name shown in the site header/logo/title — e.g. "Thayer Ford" or "Alan Jay Chevrolet". Do NOT use legal entity names, parent company names, or group names like "Thayer Motor Sales" or "AutoNation".
+CITY/STATE: Find the dealership physical street address directly on the page. Check: (1) header — many dealers show their full address at the top of every page, (2) footer, (3) contact/about page. Use ONLY the city and state from that address. Do NOT guess or use training knowledge — read the actual page content.
+MAKES: List ONLY the OEM brands this dealer sells as NEW vehicles — look at the actual nav links and new inventory sections on the page. Do NOT include brands only in used inventory. Do NOT assume or infer makes.
+PLATFORM DETECTION — read the actual URL structure from inventory links on the page:
+- autofusion: links look like /search/New+Make+Model+tmM
+- teamvelocity: links look like /inventory/new/make/model
+- dealerinspire: links look like /new-vehicles/model/
+- eprocess: links look like /search/new-make-model-city-state/?cy=XXXXX&md=XXXXX&tp=new
+- if none match, all false
+INVENTORY URL: Only needed for teamvelocity sites. Find ONE real new-vehicle page URL from the page. Leave blank for all other types.
+Return ONLY valid JSON, no other text:
+{"dealerName":"Thayer Chevrolet","city":"Bowling Green","state":"OH","makes":["Chevrolet"],"inventoryUrl":"","inventoryModel":"","autofusion":false,"teamvelocity":false,"dealerinspire":false,"eprocess":false}`;
+  try {
+    const txt = await callAI(system, "Fetch this page and extract the dealer info: " + url, 1000,
+      [{"type":"web_search_20250305","name":"web_search"}]);
+    const clean = txt.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim();
+    const info = parseJ(clean);
+    if (!info) { onStatus("❌ Could not read — fill in manually"); return null; }
+    onStatus("✅ Found: " + info.dealerName + " | " + (info.makes||[]).join(", ") + " | " + info.city + ", " + info.state);
+    return info;
+  } catch(ex) { onStatus("❌ Error: " + ex.message); return null; }
+}
+
+async function findComps(city, state, makes, dealer, onStatus) {
+  try {
+    const txt = await callAI(
+      'You are a car industry expert with knowledge of dealership locations across the US. Use your training knowledge — do NOT say you lack real-time data. Return ONLY a raw JSON array of dealer name strings, no markdown, no explanation.',
+      "Using your training knowledge, list up to 5 authorized " + makes.join("/") + " franchise dealerships closest to " + city + ", " + state + ". These must be official " + makes.join("/") + " new-car franchises — not independent used car lots. Sort by proximity (closest first). Do NOT include \"" + (dealer||"") + "\". Return only a JSON array like: [\"Dealer A\",\"Dealer B\"]",
+      250);
+    const clean = txt.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim();
+    if(onStatus)onStatus("🔎 Raw response: " + clean.slice(0,120));
+    const d = parseJ(clean);
+    if(!Array.isArray(d)){if(onStatus)onStatus("⚠️ Competitors parse failed — fill in manually"); return [];}
+    if(d.length===0){if(onStatus)onStatus("⚠️ No competitors found — fill in manually"); return [];}
+    if(onStatus)onStatus("✅ Competitors found: " + d.join(", "));
+    return d.slice(0,5);
+  } catch(ex) {
+    if(onStatus)onStatus("⚠️ Competitors error: " + ex.message);
+    return [];
+  }
+}
+
+// US state abbreviation → full name
+var STATE_NAMES={"AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"};
+
+// Build a clean inventory URL from scratch using make/model/city/state
+// Works for CDK/DealerSocket/most CDJR/GM/Ford sites that use the /search/new-{make}-{model}-{city}-{state}/ pattern
+function buildInventoryUrl(baseUrl, make, model, city, state, siteType) {
+  const base = (baseUrl||"").replace(/\/$/,"");
+  if (siteType === "autofusion") {
+    const enc = s => (s||"").replace(/\s+/g, "+");
+    return base + "/search/New+" + enc(make) + "+" + enc(model) + "+tmM";
+  }
+  if (siteType === "dealerinspire") {
+    const sl = s => (s||"").toLowerCase().replace(/\s+/g,"-");
+    return base + "/new-vehicles/" + sl(model) + "/";
+  }
+  const sl = s => (s||"").toLowerCase().replace(/\s+/g,"-");
+  return base + "/search/new-" + sl(make) + "-" + sl(model) + "-" + sl(city) + "-" + sl(state).slice(0,2) + "/?tp=new";
+}
+
+function buildRows(dealer, city, state, groups, startDate, comps, locs, nearbyCities) {
+  var rows = [];
+  var VL = locs.filter(function(l){ return l.lat && l.lng && l.radius; });
+
+  // Shared budget row — creates "Main" budget at $20/day in Ads Editor
+  var budgetRow = bk();
+  budgetRow["Budget name"] = "Main";
+  budgetRow["Budget"] = "20";
+  rows.push(budgetRow);
+
+  // Short aliases for makes that are too long in headlines
+  var MK_ALIAS = {
+    "Chevrolet":"Chevy","Volkswagen":"VW","Mercedes-Benz":"Mercedes",
+    "Cadillac":"Cadillac","Chrysler":"Chrysler","Genesis":"Genesis"
+  };
+  function mka(mk){ return MK_ALIAS[mk] || mk; }
+
+  // Hard-cap headline at 30 chars, description at 90 chars
+  function h30(s){ return String(s||"").slice(0,30); }
+  function d90(s){ return String(s||"").slice(0,90); }
+
+  // Dealer short name for headlines (max 30)
+  var D = h30(dealer);
+
+  // Build a blank row with all columns empty
+  function bk(){ var o={}; COLS.forEach(function(c){o[c]="";}); return o; }
+
+  // Campaign row
+  function CR(name){
+    var r=bk(); r.Campaign=name;
+    r["Campaign Type"]="Search";
+    r["Budget name"]="Main"; r["Budget"]="20"; r["Budget type"]="Daily";
+    r["EU political ads"]="Doesn't have EU political ads";
+    r["Standard conversion goals"]="Account-level";
+    r["Customer acquisition"]="Bid equally";
+    r["Languages"]="en";
+    r["Bid Strategy Type"]="Manual CPC";
+    r["Enhanced CPC"]="Disabled";
+    r["Broad match keywords"]="Off";
+    r["Ad rotation"]="Optimize for clicks";
+    r["Targeting method"]="Location of presence";
+    r["Exclusion method"]="Location of presence";
+    r["Google Merchant Center feed"]="Enabled";
+    r["Campaign Priority"]="Low";
+    r["Local Inventory Ads"]="Disabled";
+    r["Shopping ads on excluded brands"]="Disabled";
+    r["Inventory filter"]="*";
+    r["Audience targeting"]="Audience segments";
+    r["Flexible Reach"]="Audience segments";
+    r["AI Max"]="Disabled";
+    r["Text customization"]="Disabled";
+    r["Final URL expansion"]="Disabled";
+    r["Image enhancement"]="Disabled";
+    r["Image generation"]="Disabled";
+    r["Landing page images"]="Disabled";
+    r["Video enhancement"]="Disabled";
+    r["Brand guidelines"]="Disabled";
+    r["Campaign Status"]="Paused";
+    r["Start Date"]=startDate;
+    r["Networks"]="Google search";
+    return r;
+  }
+
+  // Ad group row
+  function AR(camp, ag, cpc){
+    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag; r["Max CPC"]=cpc;
+    r["Languages"]="All";
+    r["Audience targeting"]="Audience segments";
+    r["Flexible Reach"]="Audience segments;Genders;Ages;Parental status;Household incomes";
+    r["Max CPM"]="0.01"; r["Target CPV"]="0.01"; r["Target CPM"]="0.01";
+    r["Optimized targeting"]="Disabled";
+    r["Strict age and gender targeting"]="Disabled";
+    r["Search term matching"]="Enabled";
+    r["Ad Group Type"]="Standard";
+    r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled";
+    return r;
+  }
+
+  // Keyword row — type is "Exact", "Phrase", or "Negative Phrase"
+  function KR(camp, ag, kw, type){
+    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag;
+    r.Keyword=kw; r["Criterion Type"]=type;
+    if(type.indexOf("Negative")===-1){
+      r["Max CPC"]="9";  // keyword-level bid — edit here to cascade to ad group & campaign in Ads Editor
+      r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled";
+      r.Status="Enabled"; r["Approval Status"]="Approved";
+    }
+    return r;
+  }
+
+  // Ad row — all headlines truncated to 30, descriptions to 90
+  function AD(camp, ag, hl, ds, p1, p2, url){
+    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag;
+    // Deduplicate headlines — remove any that already appear earlier in the list
+    var seenHL={}, dedupedHL=[];
+    for(var di=0;di<hl.length;di++){
+      var hval=h30(hl[di]);
+      if(hval && !seenHL[hval.toLowerCase()]){
+        seenHL[hval.toLowerCase()]=true;
+        dedupedHL.push(hval);
+      }
+    }
+    for(var i=0;i<Math.min(dedupedHL.length,15);i++) r["Headline "+(i+1)]=dedupedHL[i];
+    for(var j=0;j<Math.min(ds.length,4);j++) r["Description "+(j+1)]=d90(ds[j]);
+    // Path 1 must always be filled before Path 2
+    var rp1=String(p1||"").slice(0,15);
+    var rp2=String(p2||"").slice(0,15);
+    if(!rp1 && rp2){ rp1=rp2; rp2=""; }  // shift p2 into p1 if p1 empty
+    r["Path 1"]=rp1;
+    r["Path 2"]=rp2;
+    r["Final URL"]=url||"";
+    r["Ad type"]="Responsive search ad";
+    r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled";
+    r.Status="Enabled"; r["Approval Status"]="Approved"; r["Ad strength"]="Good";
+    for(var k=1;k<=15;k++) r["Headline "+k+" position"]=" -";
+    for(var m=1;m<=4;m++) r["Description "+m+" position"]=" -";
+    return r;
+  }
+
+  // Add radius location rows to a campaign
+  function addLocs(campName){
+    VL.forEach(function(l){
+      var r=bk(); r.Campaign=campName;
+      r.Location="("+l.radius+"mi:"+(+l.lat).toFixed(6)+":"+(+l.lng).toFixed(6)+")";
+      r.Radius=String(l.radius); r.Unit="mi";
+      r["Campaign Status"]="Enabled"; r.Status="Enabled";
+      rows.push(r);
+    });
+  }
+
+  // ── MODEL CAMPAIGNS ──────────────────────────────────────────────────────────
+  groups.forEach(function(g){
+    var make=g.make, short=mka(make);
+    var base=(g.baseUrl||"").replace(/\/$/,"");
+    var mkSlug=make.replace(/\s+/g,"-").slice(0,15);
+
+    g.models.forEach(function(m){
+      var mo=m.name, y1=m.year1, y2=m.year2;
+      var oldYr=String(parseInt(y1)-2); // e.g. 2025→2023
+      var cu=(m.customUrl||"").trim();
+      // Priority: 1) custom URL per model, 2) parseTpl from autofill template, 3) buildInventoryUrl fallback
+      var skipTpl=(g.siteType==="autofusion"||g.siteType==="dealerinspire"); var url=cu?cu:(!skipTpl&&g.templateUrl?(parseTpl(g.templateUrl,null,mo,g.make)||buildInventoryUrl(base,make,mo,city,state,g.siteType)):buildInventoryUrl(base,make,mo,city,state,g.siteType));
+      var moSlug=mo.replace(/\s+/g,"-").slice(0,15);
+
+      var camp=dealer+" - New - "+make+" - "+mo;
+      var campRow=CR(camp); var stockCount=parseInt(m.stock||0); if(m.stock!==""&&!isNaN(stockCount)) campRow["Campaign Status"]=stockCount>=4?"Enabled":"Paused"; rows.push(campRow);
+      addLocs(camp);
+
+      // Build 15 headlines for a given year
+      function makeHL(yr){
+        // Each headline uses smart fallbacks so nothing ever cuts mid-word
+        // H2: "New yr short mo" → "New yr mo" → "New mo"
+        var h2="New "+yr+" "+short+" "+mo;
+        if(h2.length>30) h2="New "+yr+" "+mo;
+        if(h2.length>30) h2="New "+mo;
+        // H3: "yr make mo" → "yr mo" → "make mo"
+        var h3=yr+" "+make+" "+mo;
+        if(h3.length>30) h3=yr+" "+mo;
+        if(h3.length>30) h3=make+" "+mo;
+        // H4: "yr short mo For Sale" → "yr mo For Sale" → "mo For Sale"
+        var h4=yr+" "+short+" "+mo+" For Sale";
+        if(h4.length>30) h4=yr+" "+mo+" For Sale";
+        if(h4.length>30) h4=mo+" For Sale";
+        // H7: "yr short mo Near You" → "yr mo Near You" → "mo Near You"
+        var h7=yr+" "+short+" "+mo+" Near You";
+        if(h7.length>30) h7=yr+" "+mo+" Near You";
+        if(h7.length>30) h7=mo+" Near You";
+        // H9: "Only At dealer" → "Only At" + first 2 words of dealer
+        var h9="Only At "+D;
+        if(h9.length>30) h9="Only At "+D.split(" ").slice(0,2).join(" ");
+        // H13: "Many mo's To Choose From" → "mo In Stock"
+        var h13="Many "+mo+"'s To Choose From";
+        if(h13.length>30) h13=mo+" In Stock";
+        // H14: "yr mo's In Stock" → "mo In Stock Now" → "mo In Stock"
+        var h14=yr+" "+mo+"'s In Stock";
+        if(h14.length>30) h14=mo+" In Stock Now";
+        if(h14.length>30) h14=mo+" In Stock";
+        return [
+          D,    // H1  dealer name (hard-capped at 30 by AD())
+          h2,   // H2  e.g. "New 2025 Chevy Equinox"
+          h3,   // H3  e.g. "2025 Chevrolet Equinox"
+          h4,   // H4  e.g. "2025 Chevy Equinox For Sale"
+          "Huge Savings & Great Offers",   // H5
+          "Local Incentives",              // H6
+          h7,   // H7  e.g. "2025 Chevy Equinox Near You"
+          "View Our Models In Stock",      // H8
+          h9,   // H9  e.g. "Only At Thayer CDJR"
+          "View Our Monthly Specials",     // H10
+          "Visit Our Digital Showroom",    // H11
+          "View Our Exclusive Offers",     // H12
+          h13,  // H13 e.g. "Many Equinox's To Choose From"
+          h14,  // H14 e.g. "2025 Equinox's In Stock"
+          "Exclusive Offers"               // H15
+        ];
+      }
+
+      // 4 descriptions for a given year
+      function makeDS(yr){
+        return [
+          "View Our New "+yr+" "+mo+" Inventory. Awesome Monthly Specials Currently Going On!",
+          "Visit Our Digital Showroom Today For Exclusive Offers & To Schedule Your Test Drive Now!",
+          "Huge Savings & Great Offers On The All New "+yr+" "+make+" "+mo+" In Stock Today!",
+          "Proudly Serving "+city+" & Its Surrounding Areas. Only at "+D
+        ];
+      }
+
+      var HL1=makeHL(y1), DS1=makeDS(y1);
+      var HL2=makeHL(y2), DS2=makeDS(y2);
+
+      // Helper: add one ad group with neg phrases, then exact+phrase, then ad
+      function addAG(agName, kws, negs, HL, DS, cpc){
+        rows.push(AR(camp, agName, cpc));
+        negs.forEach(function(n){ rows.push(KR(camp,agName,n,"Negative Phrase")); });
+        kws.forEach(function(k){
+          rows.push(KR(camp,agName,k,"Exact"));
+          rows.push(KR(camp,agName,k,"Phrase"));
+        });
+        rows.push(AD(camp,agName,HL,DS,mkSlug,moSlug,url));
+      }
+
+      // ── Y1 ad groups (6) ──
+      addAG("SD: "+y1+" "+make+" "+mo,           [y1+" "+make+" "+mo],           ["Sale","Lease",y2],         HL1,DS1,"9");
+      addAG("SD: "+y1+" "+make+" "+mo+" For Sale",[y1+" "+make+" "+mo+" For Sale"],["Lease",y2],              HL1,DS1,"9");
+      addAG("SD: "+y1+" "+make+" "+mo+" Lease",   [y1+" "+make+" "+mo+" Lease"],   ["Sale",y2],               HL1,DS1,"9");
+      addAG("SD: "+y1+" "+mo,                     [y1+" "+mo],                     ["Lease","Sale",make,y2],  HL1,DS1,"9");
+      addAG("SD: "+y1+" "+mo+" For Sale",         [y1+" "+mo+" For Sale"],         ["Lease",make,y2],         HL1,DS1,"9");
+      addAG("SD: "+y1+" "+mo+" Lease",            [y1+" "+mo+" Lease"],            ["Sale",make,y2],          HL1,DS1,"9");
+
+      // ── Y2 ad groups (6) ──
+      addAG("SD: "+y2+" "+make+" "+mo,           [y2+" "+make+" "+mo],           ["Sale","Lease",oldYr],        HL2,DS2,"9");
+      addAG("SD: "+y2+" "+make+" "+mo+" For Sale",[y2+" "+make+" "+mo+" For Sale"],["Lease",oldYr],            HL2,DS2,"9");
+      addAG("SD: "+y2+" "+make+" "+mo+" Lease",   [y2+" "+make+" "+mo+" Lease"],   ["Sale",oldYr],             HL2,DS2,"9");
+      addAG("SD: "+y2+" "+mo,                     [y2+" "+mo],                     ["Lease","Sale",make,oldYr],HL2,DS2,"9");
+      addAG("SD: "+y2+" "+mo+" For Sale",         [y2+" "+mo+" For Sale"],         ["Lease",make,oldYr],       HL2,DS2,"9");
+      addAG("SD: "+y2+" "+mo+" Lease",            [y2+" "+mo+" Lease"],            ["Sale",make,oldYr],        HL2,DS2,"9");
+
+      // ── Non-year ad groups (8) — use y1 headlines ──
+      addAG("SD: "+make+" "+mo,         [make+" "+mo],         ["Sale","Lease",y2,oldYr],          HL1,DS1,"9");
+      addAG("SD: "+make+" "+mo+" For Sale",[make+" "+mo+" For Sale"],["Lease",y2,oldYr],           HL1,DS1,"9");
+      addAG("SD: "+make+" "+mo+" Lease",  [make+" "+mo+" Lease"],  ["Sale",y2,oldYr],              HL1,DS1,"9");
+      addAG("SD: New "+make+" "+mo,    ["New "+make+" "+mo],    ["Sale","Lease",y2,oldYr],          HL1,DS1,"9");
+      addAG("SD: New "+mo,             ["New "+mo],             ["Lease","Sale",make,y2,oldYr],     HL1,DS1,"9");
+      addAG("SD: "+mo,                 [mo],                    ["Lease",y2,oldYr,"Sale",make],     HL1,DS1,"9");
+      addAG("SD: "+mo+" For Sale",     [mo+" For Sale"],        [make,y2,"Lease",oldYr],            HL1,DS1,"9");
+      addAG("SD: "+mo+" Lease",        [mo+" Lease"],           ["Sale",oldYr,y2,make],             HL1,DS1,"9");
+    });
+  });
+
+  // ── GENERAL TERMS — one per make ────────────────────────────────────────────
+  groups.forEach(function(g){
+    var make=g.make;
+    var base=(g.baseUrl||"").replace(/\/$/,"");
+    var gUrl=base?base+"/":"";
+    var mkSlug=make.replace(/\s+/g,"-").slice(0,15);
+    var y1=(g.models[0]||{}).year1||"2025";
+    var y2=(g.models[0]||{}).year2||"2026";
+    var oldYr=String(parseInt(y1)-2);
+
+    var camp=dealer+" - New - "+make+" - General Terms";
+    rows.push(CR(camp));
+    addLocs(camp);
+
+    var gHL=[
+      D,
+      "Proudly Serving "+city,
+      "Local "+make+" Dealership",
+      "Huge Savings & Great Offers",
+      "Local "+make+" Dealer",
+      make+" Dealer In "+city,
+      "Only At "+D,
+      "View Our Monthly Specials",
+      "Visit Our Digital Showroom",
+      "View Our Exclusive Offers",
+      "Local Incentives",
+      "View Our Models In Stock",
+      "Exclusive Offers",
+      "Many Vehicles To Choose From",
+      "Shop "+make+" Vehicles"
+    ];
+    var gDS=[
+      "Experience The "+make+" Way! We Have Amazing Specials On All "+make+" Models",
+      "Huge Savings & Great Offers On All Vehicles In Stock at "+D+" Today!",
+      "Proudly Serving "+city+" & Its Surrounding Areas. Only At "+D,
+      "Browse Our Inventory Online Or Visit Us In Store For More Information!"
+    ];
+
+    function addGAG(agName,kws,negs){
+      rows.push(AR(camp,agName,"9"));
+      negs.forEach(function(n){ rows.push(KR(camp,agName,n,"Negative Phrase")); });
+      kws.forEach(function(k){
+        rows.push(KR(camp,agName,k,"Exact"));
+        rows.push(KR(camp,agName,k,"Phrase"));
+      });
+      rows.push(AD(camp,agName,gHL,gDS,mkSlug,"New",gUrl));
+    }
+
+    addGAG("SDG: New "+make,              ["New "+make],              ["Sale","Financing","Finance","Lease","Specials",oldYr,y2]);
+    addGAG("SDG: "+make+" Dealer",        [make+" Dealer"],           ["Dealership","Sale",oldYr,"Lease","Finance","Financing",y2,"Specials"]);
+    addGAG("SDG: "+make+" Dealer Near Me",[make+" Dealer Near Me"],   ["Finance","Financing",oldYr,"Sale",y2,"Lease","Dealership","Specials"]);
+    addGAG("SDG: "+make+" Dealership",    [make+" Dealership"],       ["Specials",oldYr,y2,"Finance","Sale","Financing","Dealer","Lease"]);
+    addGAG("SDG: "+make+" Dealership Near Me",[make+" Dealership Near Me"],["Financing","Finance","Sale","Lease","Specials",y2,"Dealer",oldYr]);
+    addGAG("SDG: "+make+" For Sale",      [make+" For Sale"],         [y2,oldYr,"Finance","Financing","Specials","Lease"]);
+    addGAG("SDG: "+make+" Lease",         [make+" Lease"],            ["Financing","Finance","Specials",y2,"Sale",oldYr]);
+    addGAG("SDG: "+make+" Finance",       [make+" Finance"],          ["Specials","Financing","Sale",oldYr,"Lease",y2]);
+    addGAG("SDG: "+make+" Financing",     [make+" Financing"],        [y2,"Finance",oldYr,"Specials","Sale","Lease"]);
+    addGAG("SDG: "+make+" Specials",      [make+" Specials"],         ["Financing",y2,"Lease",oldYr,"Finance","Sale"]);
+    addGAG("SDG: "+y1+" "+make,           [y1+" "+make],              [y2,"Financing","Finance","Sale","Specials","Lease"]);
+    addGAG("SDG: "+y2+" "+make,           [y2+" "+make],              ["Finance",oldYr,"Lease","Sale","Specials","Financing"]);
+  });
+
+  // ── BRAND CAMPAIGN ───────────────────────────────────────────────────────────
+  var allMk=groups.map(function(g){return g.make;});
+  var bUrl=(groups[0]&&groups[0].baseUrl)?groups[0].baseUrl.replace(/\/$/,""):"";
+  var bCamp=dealer+" - Brand";
+  var bCampRow=CR(bCamp); bCampRow["Campaign Status"]="Enabled"; rows.push(bCampRow);
+  addLocs(bCamp);
+
+  var bHL=[
+    D,
+    "Proudly Serving "+city,
+    "Local "+allMk[0]+" Dealership",
+    "Huge Savings & Great Offers",
+    "Local "+allMk[0]+" Dealer",
+    "Only At "+D,
+    "View Our Monthly Specials",
+    "Visit Our Digital Showroom",
+    "View Our Exclusive Offers",
+    "Local Incentives",
+    "View Our Models In Stock",
+    "Exclusive Offers",
+    "Many Vehicles To Choose From",
+    "New & Used Vehicles",
+    "Shop Our Full Inventory"
+  ];
+  var bDS=[
+    "Experience The "+allMk[0]+" Way! We Have Amazing Specials On All "+allMk[0]+" Models",
+    "Great Offers On All Vehicles In Stock at "+D+" Today!",
+    "Proudly Serving "+city+" & Its Surrounding Areas. Only At "+D,
+    "Browse Our Inventory Online Or Visit Us In Store For More Information!"
+  ];
+  var bAG="SDB: "+dealer.slice(0,44)+" Brand";
+  rows.push(AR(bCamp,bAG,"9"));
+  rows.push(KR(bCamp,bAG,dealer,"Exact"));
+  rows.push(KR(bCamp,bAG,dealer,"Phrase"));
+  rows.push(AD(bCamp,bAG,bHL,bDS,dealer.replace(/\s+/g,"-").slice(0,15),"Dealer",bUrl));
+
+  // ── COMPETITOR CAMPAIGN ──────────────────────────────────────────────────────
+  var vc=comps.filter(function(c){return c&&c.trim();});
+  if(vc.length){
+    var cCamp=dealer+" - Competitor";
+    rows.push(CR(cCamp));
+    addLocs(cCamp);
+    var cAG="SDC: "+dealer.slice(0,20)+" - Competitor";
+    rows.push(AR(cCamp,cAG,"9"));
+    vc.forEach(function(c){
+      rows.push(KR(cCamp,cAG,c,"Exact"));
+      rows.push(KR(cCamp,cAG,c,"Phrase"));
+    });
+    var cHL=[
+      D,
+      "Proudly Serving "+city,
+      "Local "+allMk[0]+" Dealership",
+      "Huge Savings & Great Offers",
+      "Local "+allMk[0]+" Dealer",
+      "Only At "+D,
+      "View Our Monthly Specials",
+      "Visit Our Digital Showroom",
+      "View Our Exclusive Offers",
+      "Local Incentives",
+      "View Our Models In Stock",
+      "Exclusive Offers",
+      "Many Vehicles To Choose From",
+      "New & Used Vehicles",
+      "Shop Our Full Inventory"
+    ];
+    var cDS=[
+      "Experience The "+allMk[0]+" Way! We Have Amazing Specials On All "+allMk[0]+" Models",
+      "Huge Savings & Great Offers On All Vehicles In Stock at "+D+" Today!",
+      "Proudly Serving "+city+" & Its Surrounding Areas. Only At "+D,
+      "Browse Our Inventory Online Or Visit Us In Store For More Information!"
+    ];
+    rows.push(AD(cCamp,cAG,cHL,cDS,dealer.replace(/\s+/g,"-").slice(0,15),"Compare",bUrl));
+  }
+
+  // ── REGIONAL CAMPAIGN ───────────────────────────────────────────────────────
+  var rCities=(nearbyCities||[]).filter(function(c){return c&&c.trim();});
+  if(rCities.length){
+    var allMk2=groups.map(function(g){return g.make;});
+    var rMake=allMk2[0]||"";
+    var rUrl=(groups[0]&&groups[0].baseUrl)?groups[0].baseUrl.replace(/\/$/,"")+"/":"";
+    var stAbbr=(state||"").trim().toUpperCase();
+    var stFull=STATE_NAMES[stAbbr]||state||"";
+    var rCamp=dealer+" - Regional - New";
+    rows.push(CR(rCamp));
+    addLocs(rCamp);
+
+    // Regional ad headlines/descriptions (shared across all ad groups)
+    var rHL=[
+      D,
+      "Proudly Serving "+city+" & Beyond",
+      "Local "+rMake+" Dealership",
+      "Huge Savings & Great Offers",
+      "Local "+rMake+" Dealer",
+      "Only At "+D,
+      "View Our Monthly Specials",
+      "Visit Our Digital Showroom",
+      "View Our Exclusive Offers",
+      "Local Incentives Available",
+      "View Our Models In Stock",
+      "Exclusive Offers",
+      "Many Vehicles To Choose From",
+      "New & Used Vehicles",
+      "Shop Our Full Inventory"
+    ];
+    var rDS=[
+      "Experience The "+rMake+" Way! Amazing Specials On All "+rMake+" Models",
+      "Great Offers On All Vehicles In Stock at "+D+" Today!",
+      "Proudly Serving "+city+" & Its Surrounding Areas. Only At "+D,
+      "Browse Our Inventory Online Or Visit Us In Store For More Information!"
+    ];
+
+    // Per-city ad groups (R01, R02, …)
+    rCities.forEach(function(rc, ci){
+      var rn="R"+(ci+1<10?"0"+(ci+1):ci+1);
+      function rAG(suffix){ return rn+" - "+rMake+" - "+rc+(suffix?" - "+suffix:""); }
+      function rKW(kw){
+        var ag=rAG(null); // placeholder — overridden below per group
+        return kw;
+      }
+      var cityGroups=[
+        // ag suffix                         keyword(s)
+        [null,                               [rMake+" "+rc, rc+" "+rMake]],
+        ["Dealer",                           [rMake+" Dealer "+rc]],
+        ["Dealer - "+stAbbr,                 [rMake+" Dealer "+rc+" "+stAbbr]],
+        ["Dealer - "+stFull,                 [rMake+" Dealer "+rc+" "+stFull]],
+        ["Dealership",                       [rMake+" Dealership "+rc]],
+        ["Dealership - "+stAbbr,             [rMake+" Dealership "+rc+" "+stAbbr]],
+        ["Dealership - "+stFull,             [rMake+" Dealership "+rc+" "+stFull]],
+        ["FL",                               [rMake+" "+rc+" "+stAbbr]],
+        [stFull,                             [rMake+" "+rc+" "+stFull]],
+        ["In",                               [rMake+" In "+rc]],
+        ["In - Dealer",                      [rMake+" Dealer In "+rc]],
+        ["In - Dealer - "+stAbbr,            [rMake+" Dealer In "+rc+" "+stAbbr]],
+        ["In - Dealer - "+stFull,            [rMake+" Dealer In "+rc+" "+stFull]],
+        ["In - Dealership",                  [rMake+" Dealership In "+rc]],
+        ["In - Dealership - "+stAbbr,        [rMake+" Dealership In "+rc+" "+stAbbr]],
+        ["In - Dealership - "+stFull,        [rMake+" Dealership In "+rc+" "+stFull]],
+        ["In - "+stAbbr,                     [rMake+" In "+rc+" "+stAbbr]],
+        ["In - "+stFull,                     [rMake+" In "+rc+" "+stFull]],
+        ["Of",                               [rMake+" Of "+rc]],
+        ["Of - "+stAbbr,                     [rMake+" Of "+rc+" "+stAbbr]],
+        ["Of - "+stFull,                     [rMake+" Of "+rc+" "+stFull]],
+      ];
+      cityGroups.forEach(function(cg){
+        var agName=rn+" - "+rMake+" - "+rc+(cg[0]?" - "+cg[0]:"");
+        rows.push(AR(rCamp,agName,"9"));
+        cg[1].forEach(function(kw){
+          rows.push(KR(rCamp,agName,kw,"Exact"));
+          rows.push(KR(rCamp,agName,kw,"Phrase"));
+        });
+        rows.push(AD(rCamp,agName,rHL,rDS,dealer.replace(/\s+/g,"-").slice(0,15),"Dealer",rUrl));
+      });
+    });
+
+    // State-level ad groups (S01 = abbr, S02 = full name)
+    var stateGroups=[
+      ["S01","- "+stAbbr,             [rMake+" "+stAbbr]],
+      ["S01","- In - "+stAbbr,        [rMake+" In "+stAbbr]],
+      ["S01","- Dealer - "+stAbbr,    [rMake+" Dealer "+stAbbr]],
+      ["S01","- Dealer - In - "+stAbbr,[rMake+" Dealer In "+stAbbr]],
+      ["S01","- Dealership - "+stAbbr, [rMake+" Dealership "+stAbbr]],
+      ["S01","- Dealership - In - "+stAbbr,[rMake+" Dealership In "+stAbbr]],
+      ["S02","- "+stFull,             [rMake+" "+stFull]],
+      ["S02","- In - "+stFull,        [rMake+" In "+stFull]],
+      ["S02","- Dealer - "+stFull,    [rMake+" Dealer "+stFull]],
+      ["S02","- Dealer - In - "+stFull,[rMake+" Dealer In "+stFull]],
+      ["S02","- Dealership - "+stFull, [rMake+" Dealership "+stFull]],
+      ["S02","- Dealership - In - "+stFull,[rMake+" Dealership In "+stFull]],
+    ];
+    stateGroups.forEach(function(sg){
+      var agName=sg[0]+" - "+rMake+" "+sg[1];
+      rows.push(AR(rCamp,agName,"9"));
+      sg[2].forEach(function(kw){
+        rows.push(KR(rCamp,agName,kw,"Exact"));
+        rows.push(KR(rCamp,agName,kw,"Phrase"));
+      });
+      rows.push(AD(rCamp,agName,rHL,rDS,dealer.replace(/\s+/g,"-").slice(0,15),"Dealer",rUrl));
+    });
+  }
+
+  return rows;
+}
+
+const newM = () => ({id:Math.random(),name:"",year1:"2025",year2:"2026",customUrl:"",stock:""});
+const newG = () => ({id:Math.random(),make:"",baseUrl:"",templateUrl:"",templateModel:"",siteType:"",models:[newM()]});
+const mkGrp = make => ({id:Math.random(),make,baseUrl:"",templateUrl:"",templateModel:"",siteType:"",
+  models:MM[make]?MM[make].map(n=>({id:Math.random(),name:n,year1:"2025",year2:"2026",customUrl:"",stock:""})):[newM()]});
+
+const I = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
+
+function MakeCard({g,gi,groups,setGroups,city,state}) {
+  const sg = (f,v) => { const a=[...groups]; a[gi]={...a[gi],[f]:v}; setGroups(a); };
+  const sm = (mi,f,v) => { const a=[...groups]; a[gi]={...a[gi],models:[...a[gi].models]}; a[gi].models[mi]={...a[gi].models[mi],[f]:v}; setGroups(a); };
+  const skipTpl=(g.siteType==="autofusion"||g.siteType==="dealerinspire"); const getUrl = m => { if(m.customUrl&&m.customUrl.trim())return m.customUrl.trim(); if(!skipTpl&&g.templateUrl&&m.name){const p=parseTpl(g.templateUrl,null,m.name,g.make);if(p)return p;} if(g.baseUrl&&m.name)return buildInventoryUrl(g.baseUrl,g.make,m.name,city,state,g.siteType); if(g.baseUrl)return g.baseUrl.replace(/\/$/,"")+"/"; return ""; };
+  return (
+    <div className="border-2 border-green-200 rounded-2xl overflow-hidden">
+      <div className="bg-green-600 px-4 py-2 flex items-center gap-2 flex-wrap">
+        <span className="text-white text-sm font-bold">Make {gi+1}:</span>
+        <input className="border border-white rounded-lg px-3 py-1 text-sm w-28 focus:outline-none text-white font-bold" style={{background:"rgba(255,255,255,0.2)"}} placeholder="e.g. Jeep" value={g.make} onChange={e=>sg("make",e.target.value)}/>
+        {MM[g.make]&&<button onClick={()=>sg("models",mkGrp(g.make).models)} className="bg-white text-green-700 text-xs font-bold px-2 py-1 rounded-lg">⚡ {MM[g.make].length} Models</button>}
+        {groups.length>1&&<button onClick={()=>setGroups(groups.filter((_,j)=>j!==gi))} className="ml-auto text-white text-xs" style={{opacity:0.7}}>✕ Remove</button>}
+      </div>
+      <div className="bg-green-50 p-4">
+        <div className="flex gap-3 mb-3">
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 mb-1">Website URL</p>
+            <input className={I} placeholder="https://dealersite.com" value={g.baseUrl} onChange={e=>sg("baseUrl",e.target.value)}/>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">Site Type</p>
+            <select className={I} value={g.siteType} onChange={e=>sg("siteType",e.target.value)}>
+              <option value="">Auto-detect</option>
+              <option value="autofusion">Autofusion</option>
+              <option value="teamvelocity">Team Velocity</option>
+              <option value="dealerinspire">Dealer Inspire</option>
+              <option value="eprocess">eProcess</option>
+            </select>
+          </div>
+        </div>
+        {g.siteType!=="autofusion"&&g.siteType!=="eprocess"&&g.siteType!=="dealerinspire"&&<div>
+          <p className="text-xs text-gray-500 mb-1">Example Inventory URL <span className="text-gray-400">(paste any one model's URL — others auto-generate)</span></p>
+          <input className={I+" mb-1 font-mono text-xs"} placeholder="https://dealer.com/inventory/new/ford/f-150?paymenttype=cash" value={g.templateUrl} onChange={e=>{const parts=e.target.value.trim().split("/");const mo=parts[parts.length-1]?parts[parts.length-1].split("?")[0]:"";sg("templateUrl",e.target.value.trim());sg("templateModel",mo.replace(/-/g," ").replace(/\w/g,c=>c.toUpperCase()));}}/>
+          {g.templateUrl&&g.templateModel&&<p className="text-xs text-gray-400 mb-1">📋 Template model detected: <b>{g.templateModel}</b></p>}
+        </div>}
+        {g.siteType==="autofusion"&&<p className="text-xs text-green-600 mb-3">✅ Autofusion — URLs auto-built as /search/New+Make+Model+tmM</p>}
+        {g.siteType==="dealerinspire"&&<p className="text-xs text-green-600 mb-3">✅ Dealer Inspire — URLs auto-built as /new-vehicles/model/</p>}
+        {g.siteType==="eprocess"&&<p className="text-xs text-orange-500 mb-3">⚠️ eProcess — paste Override URL on each model row below</p>}
+        <p className="text-xs font-bold text-gray-600 mb-2">MODELS</p>
+        <div className="space-y-2">
+          {g.models.map((m,mi)=>{
+            const u=getUrl(m);
+            return (
+              <div key={m.id} className="bg-white border border-green-100 rounded-xl p-3">
+                <div className="flex justify-between mb-2">
+                  <span className="text-xs font-semibold text-green-700">#{mi+1}</span>
+                  {g.models.length>1&&<button onClick={()=>sg("models",g.models.filter((_,j)=>j!==mi))} className="text-xs text-red-400">✕</button>}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="col-span-2"><p className="text-xs text-gray-500 mb-1">Model Name</p><input className={I} placeholder="Grand Cherokee" value={m.name} onChange={e=>sm(mi,"name",e.target.value)}/></div>
+                  <div><p className="text-xs text-gray-500 mb-1">Year 1</p><input className={I} value={m.year1} onChange={e=>sm(mi,"year1",e.target.value)}/></div>
+                  <div><p className="text-xs text-gray-500 mb-1">Year 2</p><input className={I} value={m.year2} onChange={e=>sm(mi,"year2",e.target.value)}/></div>
+                  <div className="col-span-2"><p className="text-xs text-gray-500 mb-1">Override URL</p><input className={I} placeholder="Leave blank = auto" value={m.customUrl} onChange={e=>sm(mi,"customUrl",e.target.value)}/></div>
+                  <div className="col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">In Stock <span className="text-gray-400">(campaign enables at 4+)</span></p>
+                    <input className={I} type="number" min="0" placeholder="0" value={m.stock} onChange={e=>sm(mi,"stock",e.target.value)}/>
+                    {m.stock!==""&&<p className={"text-xs mt-1 font-semibold "+(parseInt(m.stock||0)>=4?"text-green-600":"text-orange-500")}>{parseInt(m.stock||0)>=4?"✅ Campaign will be Enabled":"⏸ Campaign will be Paused (need 4+)"}</p>}
+                  </div>
+
+                </div>
+                {u&&m.name&&<p className="mt-2 text-xs font-mono text-green-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 break-all">{u}</p>}
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={()=>sg("models",[...g.models,newM()])} className="mt-2 text-xs text-green-600 font-semibold">+ Add Model</button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [dealer,setDealer]=useState(""), [city,setCity]=useState(""), [state,setState]=useState("");
+  const [start,setStart]=useState(new Date().toISOString().slice(0,10));
+  const [groups,setGroups]=useState([newG()]);
+  const [comps,setComps]=useState([""]);
+  const [nearbyCities,setNearbyCities]=useState([""]);
+
+  const [autoUrl,setAutoUrl]=useState(""), [autoMsg,setAutoMsg]=useState([]), [busy,setBusy]=useState(false);
+  const [findingC,setFindingC]=useState(false);
+  const [errs,setErrs]=useState([]), [done,setDone]=useState(false), [cnt,setCnt]=useState(0);
+
+
+  const addMsg=m=>setAutoMsg(p=>[...p.slice(-2),m]);
+
+  const runFill = async () => {
+    if(!autoUrl.trim())return;
+    setBusy(true); setAutoMsg([]);
+    const info = await autofill(autoUrl.trim(), addMsg);
+    if(info){
+      const base=autoUrl.trim().replace(/\/$/,"").replace(/^(https?:\/\/[^\/]+).*$/,"$1");
+      if(info.dealerName)setDealer(info.dealerName);
+      if(info.city)setCity(info.city);
+      if(info.state)setState(info.state);
+      if(info.makes&&info.makes.length){const st=info.autofusion?"autofusion":info.teamvelocity?"teamvelocity":info.dealerinspire?"dealerinspire":info.eprocess?"eprocess":""; setGroups(info.makes.map(mk=>({...mkGrp(mk),baseUrl:base,templateUrl:info.inventoryUrl||"",templateModel:info.inventoryModel||"",siteType:st})));}
+      if(info.autofusion) addMsg("✅ Autofusion detected — URLs: /search/New+Make+Model+tmM");
+      if(info.teamvelocity) addMsg("✅ Team Velocity detected — paste one model URL in Example Inventory URL field");
+      if(info.dealerinspire) addMsg("✅ Dealer Inspire detected — URLs: /new-vehicles/model/");
+      if(info.eprocess) addMsg("⚠️ eProcess detected — paste Override URL on each model row");
+
+      if(info.city&&info.state){
+        addMsg("🗺️ Finding nearby cities…");
+        try{
+          const nct=await callAI("Return a JSON array of city names only, no explanation.",
+            "List 5 cities within 30 miles of "+info.city+", "+info.state+" USA. Return only a JSON array like: [\"City1\",\"City2\"]",150);
+          const nd=parseJ(nct.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim());
+          if(Array.isArray(nd)&&nd.length) setNearbyCities(nd);
+        }catch(ex){}
+      }
+      if(info.city&&info.state&&info.makes&&info.makes.length){
+        addMsg("🏁 Finding competitors…");setFindingC(true);
+        const fc=await findComps(info.city,info.state,info.makes,info.dealerName||"",addMsg);
+        setFindingC(false);if(fc.length)setComps(fc);
+      }
+      addMsg("✅ All done! Review below then generate.");
+    }
+    setBusy(false);
+  };
+
+  const go = async () => {
+    const e=[];
+    if(!dealer.trim())e.push("Dealer name required");
+    if(!city.trim())e.push("City required");
+    if(!state.trim())e.push("State required");
+    const hasModel=groups.some(g=>g.make.trim()&&g.models.some(m=>m.name.trim()));
+    if(!hasModel)e.push("At least one make + model required");
+    if(e.length){setErrs(e);return;}
+    setErrs([]);
+
+    // Always geocode city+state to get a fresh 20-mile radius pin
+    try{
+      const res = await geocode(city.trim(), state.trim());
+      if(res&&res[0]){
+        const pin=[{label:res[0].city||city.trim(),lat:res[0].lat.toFixed(6),lng:res[0].lng.toFixed(6),radius:"20"}];
+        doGenerate(pin);
+      } else {
+        setErrs(["❌ Could not find location for "+city+", "+state+". Check city and state spelling."]);
+      }
+    }catch(ex){
+      setErrs(["❌ Geocode error: "+ex.message]);
+    }
+  };
+
+  const doGenerate = (resolvedLocs) => {
+    try{
+      const fg=groups.filter(g=>g.make.trim()).map(g=>({...g,models:g.models.filter(m=>m.name.trim())}));
+      const rows=buildRows(dealer.trim(),city.trim(),state.trim(),fg,start,comps,resolvedLocs,nearbyCities);
+      if(!rows||rows.length===0){setErrs(["No rows generated — check makes & models"]);return;}
+      // UTF-8 BOM + tab-separated — Excel opens this correctly
+      const lines=[COLS.join("\t")];
+      rows.forEach(r=>lines.push(COLS.map(c=>{ const v=r[c]; return(v!==undefined&&v!==null)?String(v):""; }).join("\t")));
+      const csv="\uFEFF"+lines.join("\r\n");
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.style.display="none";
+      a.href=url;
+      a.download=dealer.trim().replace(/\s+/g,"_")+"_GoogleAds.csv";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); document.body.removeChild(a); },1000);
+      setCnt(rows.length); setDone(true);
+    }catch(ex){
+      console.error("Generate failed:",ex);
+      setErrs(["❌ Error: "+ex.message]);
+    }
+  };
+
+  let totalM=0; groups.forEach(g=>g.models.forEach(m=>{if(m.name)totalM++;}));
+
+  return (
+    <div className="min-h-screen bg-gray-100 py-6 px-4">
+    <div className="max-w-3xl mx-auto" style={{display:"flex",flexDirection:"column",gap:16}}>
+
+      <div className="rounded-2xl overflow-hidden shadow-xl">
+        <div className="px-6 py-4 text-white flex items-center gap-3" style={{background:"linear-gradient(to right, #1e3a8a, #2563eb)"}}>
+          <span style={{fontSize:32}}>🚗</span>
+          <div><h1 className="text-xl font-bold">Google Ads Campaign Builder</h1><p className="text-xs" style={{color:"#bfdbfe"}}>Multi-Make · Search Only · Manual CPC · Ads Editor Format</p></div>
+        </div>
+      </div>
+
+      {errs.length>0&&<div className="bg-red-50 border border-red-200 rounded-xl p-4">
+        <p className="text-red-700 font-bold text-sm mb-1">Fix before generating:</p>
+        {errs.map((err,i)=><p key={i} className="text-red-600 text-sm">• {err}</p>)}
+      </div>}
+
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{border:"2px solid #60a5fa"}}>
+        <div className="px-5 py-3 flex items-center gap-2" style={{background:"linear-gradient(to right,#2563eb,#3b82f6)"}}>
+          <span style={{fontSize:20}}>⚡</span>
+          <div><b className="text-white text-sm">Auto-Fill Everything</b><p className="text-xs" style={{color:"#bfdbfe"}}>Paste a new inventory page URL → auto-detects site type, makes, models, location &amp; competitors</p></div>
+        </div>
+        <div className="p-5">
+          <div className="flex gap-2">
+            <input className={I+" flex-1"} placeholder="https://dealer.com/inventory/new/ford/f-150" value={autoUrl} onChange={e=>setAutoUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!busy&&runFill()}/>
+            <button onClick={runFill} disabled={busy||!autoUrl.trim()} className="text-white font-bold text-sm px-5 py-2 rounded-xl whitespace-nowrap" style={{background:"#2563eb",opacity:(busy||!autoUrl.trim())?0.5:1}}>{busy?"Working…":"Fill It In"}</button>
+          </div>
+          {autoMsg.length>0&&<div className="mt-3 space-y-1">
+            {autoMsg.map((m,i)=><p key={i} className={"text-xs font-medium "+(m[0]==="✅"?"text-green-600":m[0]==="❌"?"text-red-500":"text-blue-600 anim-pulse")}>{m}</p>)}
+          </div>}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-blue-50 px-5 py-3 border-b border-blue-100 flex items-center gap-2"><span>🏢</span><b className="text-sm text-gray-800">Dealer Information</b></div>
+        <div className="p-5 grid grid-cols-2 gap-3">
+          <div className="col-span-2"><p className="text-xs text-gray-500 mb-1">Dealer Name</p><input className={I} placeholder="Alan Jay CDJR of Wauchula" value={dealer} onChange={e=>setDealer(e.target.value)}/></div>
+          <div><p className="text-xs text-gray-500 mb-1">City</p><input className={I} placeholder="Wauchula" value={city} onChange={e=>setCity(e.target.value)}/></div>
+          <div><p className="text-xs text-gray-500 mb-1">State</p><input className={I} placeholder="FL" value={state} onChange={e=>setState(e.target.value)}/></div>
+          <div><p className="text-xs text-gray-500 mb-1">Start Date</p><input className={I} type="date" value={start} onChange={e=>setStart(e.target.value)}/></div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-green-50 px-5 py-3 border-b border-green-100 flex items-center gap-2"><span>🚘</span><b className="text-sm text-gray-800">Makes &amp; Models</b></div>
+        <div className="p-5">
+          <p className="text-xs font-bold text-gray-600 mb-1">COMBOS</p>
+          <div className="flex flex-wrap gap-1" style={{marginBottom:12}}>
+            {Object.keys(COMBOS).map(n=><button key={n} onClick={()=>setGroups(COMBOS[n].map(m=>mkGrp(m)))} className="px-2 py-1 rounded-full text-xs font-semibold text-blue-700" style={{border:"1px solid #bfdbfe",background:"#eff6ff",marginBottom:4}}>{n}</button>)}
+          </div>
+          <p className="text-xs font-bold text-gray-600 mb-1">SINGLE MAKE</p>
+          <div className="flex flex-wrap gap-1" style={{marginBottom:16}}>
+            {SINGLES.map(m=><button key={m} onClick={()=>setGroups([mkGrp(m)])} className="px-2 py-1 rounded-full text-xs font-semibold text-gray-600" style={{border:"1px solid #e5e7eb",background:"#fff",marginBottom:4}}>{m}</button>)}
+          </div>
+          <div className="space-y-4">
+            {groups.map((g,gi)=><MakeCard key={g.id} g={g} gi={gi} groups={groups} setGroups={setGroups} city={city} state={state}/>)}
+          </div>
+          <button onClick={()=>setGroups([...groups,newG()])} className="mt-3 w-full text-green-600 text-sm font-bold py-2" style={{border:"2px dashed #86efac",borderRadius:16}}>+ Add Another Make</button>
+        </div>
+      </div>
+
+
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-blue-50 px-5 py-3 border-b border-blue-100 flex items-center gap-2"><span>🗺️</span><b className="text-sm text-gray-800">Regional Campaign — Nearby Cities</b></div>
+        <div className="p-5">
+          <p className="text-xs text-gray-500 mb-3">Auto-filled by Auto-Fill. Edit or add cities within ~30 miles of the dealer.</p>
+          <div className="space-y-2">
+            {nearbyCities.map((c,i)=>(
+              <div key={i} className="flex gap-2 items-center">
+                <input className={I} placeholder="e.g. Brandon" value={c} onChange={e=>{const x=[...nearbyCities];x[i]=e.target.value;setNearbyCities(x);}}/>
+                {nearbyCities.length>1&&<button onClick={()=>setNearbyCities(nearbyCities.filter((_,j)=>j!==i))} className="text-red-400 text-lg">✕</button>}
+              </div>
+            ))}
+          </div>
+          <button onClick={()=>setNearbyCities([...nearbyCities,""])} className="mt-2 text-xs text-blue-600 font-semibold">+ Add City</button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-red-50 px-5 py-3 border-b border-red-100 flex items-center gap-2"><span>🥊</span><b className="text-sm text-gray-800">Competitor Campaign (Optional)</b></div>
+        <div className="p-5">
+          <p className="text-xs text-gray-500 mb-3">Auto-filled by Auto-Fill above. Edit or re-search.</p>
+          <button onClick={async()=>{
+            const ms=groups.filter(g=>g.make.trim()).map(g=>g.make);
+            if(!city||!state||!ms.length){alert("Fill city, state and at least one make first.");return;}
+            setFindingC(true); const fc=await findComps(city,state,ms,dealer,addMsg); setFindingC(false);
+            if(fc.length)setComps(fc);
+          }} disabled={findingC} className="w-full mb-4 text-red-700 text-xs font-bold py-2" style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:12,opacity:findingC?0.5:1}}>
+            {findingC?"🔍 Searching…":"🏁 Re-Search Competitors"}
+          </button>
+          <div className="space-y-2">
+            {comps.map((c,i)=><div key={i} className="flex gap-2">
+              <input className={I} placeholder="Competitor Dealer Name" value={c} onChange={e=>{const x=[...comps];x[i]=e.target.value;setComps(x);}}/>
+              {comps.length>1&&<button onClick={()=>setComps(comps.filter((_,j)=>j!==i))} className="text-red-400 text-lg">✕</button>}
+            </div>)}
+          </div>
+          <button onClick={()=>setComps([...comps,""])} className="mt-2 text-xs text-red-500 font-semibold">+ Add Competitor</button>
+        </div>
+      </div>
+
+      <button onClick={go} className="w-full text-white font-bold text-lg py-4 rounded-2xl shadow-xl" style={{background:"#1d4ed8"}}>
+        ⬇️ Generate &amp; Download Google Ads CSV
+      </button>
+
+      {done&&<div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center">
+        <p className="text-green-700 font-bold text-xl mb-2">✅ CSV Downloaded!</p>
+        <div className="flex justify-center gap-6 text-sm text-green-700">
+          <span>📋 <b>{cnt.toLocaleString()}</b> rows</span>
+          <span>🚘 <b>{groups.filter(g=>g.make).length}</b> make(s)</span>
+          <span>📁 <b>{totalM}</b> models</span>
+        </div>
+        <p className="text-gray-400 text-xs mt-2">Ads Editor → File → Import → CSV → Review → Apply</p>
+      </div>}
+
+      <p className="text-center text-xs text-gray-300 pb-4">Google Ads Builder · Multi-Make · Search Only · 176-col UTF-16</p>
+    </div></div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
