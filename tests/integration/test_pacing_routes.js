@@ -45,9 +45,9 @@ const SAMPLE_IMPRESSION_SHARE = [
 
 const SAMPLE_INVENTORY = {
   items: [
-    { itemId: 'VIN001', condition: 'NEW', brand: 'Honda', model: 'Civic' },
-    { itemId: 'VIN002', condition: 'NEW', brand: 'Honda', model: 'Accord' },
-    { itemId: 'VIN003', condition: 'USED', brand: 'Honda', model: 'CR-V' },
+    { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' },
+    { itemId: 'VIN002', condition: 'NEW', brand: 'Honda' },
+    { itemId: 'VIN003', condition: 'USED', brand: 'Honda' },
   ],
   truncated: false,
 };

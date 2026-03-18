@@ -239,12 +239,12 @@ describe('getImpressionShare', () => {
 
 describe('getInventory', () => {
   const defaultRows = [
-    { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda', customLabel1: 'Civic' } },
-    { shoppingProduct: { itemId: 'VIN002', condition: 'NEW', brand: 'Honda', customLabel1: 'Accord' } },
-    { shoppingProduct: { itemId: 'VIN003', condition: 'USED', brand: 'Toyota', customLabel1: 'Camry' } },
+    { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' } },
+    { shoppingProduct: { itemId: 'VIN002', condition: 'NEW', brand: 'Honda' } },
+    { shoppingProduct: { itemId: 'VIN003', condition: 'USED', brand: 'Toyota' } },
   ];
 
-  test('returns inventory items with condition, brand, model', async () => {
+  test('returns inventory items with condition and brand', async () => {
     const { items, truncated } = await getInventory(fakeCtx(defaultRows));
 
     expect(items).toHaveLength(3);
@@ -253,19 +253,11 @@ describe('getInventory', () => {
       itemId: 'VIN001',
       condition: 'NEW',
       brand: 'Honda',
-      model: 'Civic',
-    });
-    expect(items[1]).toEqual({
-      itemId: 'VIN002',
-      condition: 'NEW',
-      brand: 'Honda',
-      model: 'Accord',
     });
     expect(items[2]).toEqual({
       itemId: 'VIN003',
       condition: 'USED',
       brand: 'Toyota',
-      model: 'Camry',
     });
   });
 
@@ -275,23 +267,16 @@ describe('getInventory', () => {
     expect(truncated).toBe(false);
   });
 
-  test('handles missing customLabel1 as null', async () => {
-    const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: 'Ford', customLabel1: undefined } },
-    ]));
-    expect(items[0].model).toBeNull();
-  });
-
   test('handles missing brand as null', async () => {
     const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: undefined, customLabel1: 'Civic' } },
+      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: undefined } },
     ]));
     expect(items[0].brand).toBeNull();
   });
 
   test('handles many inventory items without truncation flag', async () => {
     const products = Array.from({ length: 500 }, (_, i) => ({
-      shoppingProduct: { itemId: `VIN${i}`, condition: i % 2 === 0 ? 'NEW' : 'USED', brand: 'Honda', customLabel1: 'Civic' },
+      shoppingProduct: { itemId: `VIN${i}`, condition: i % 2 === 0 ? 'NEW' : 'USED', brand: 'Honda' },
     }));
     const { items, truncated } = await getInventory(fakeCtx(products));
     expect(items).toHaveLength(500);
@@ -300,18 +285,25 @@ describe('getInventory', () => {
 
   test('sets truncated flag when items reach limit', async () => {
     const products = Array.from({ length: 5000 }, (_, i) => ({
-      shoppingProduct: { itemId: `VIN${i}`, condition: 'NEW', brand: 'Honda', customLabel1: 'Civic' },
+      shoppingProduct: { itemId: `VIN${i}`, condition: 'NEW', brand: 'Honda' },
     }));
     const { items, truncated } = await getInventory(fakeCtx(products));
     expect(items).toHaveLength(5000);
     expect(truncated).toBe(true);
   });
 
-  test('handles empty brand and model gracefully', async () => {
+  test('handles empty brand gracefully', async () => {
     const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: '', customLabel1: '' } },
+      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: '' } },
     ]));
     expect(items[0].brand).toBeNull();
-    expect(items[0].model).toBeNull();
+  });
+
+  test('handles null shoppingProduct gracefully', async () => {
+    const { items } = await getInventory(fakeCtx([
+      { shoppingProduct: null },
+    ]));
+    expect(items[0].itemId).toBeNull();
+    expect(items[0].brand).toBeNull();
   });
 });

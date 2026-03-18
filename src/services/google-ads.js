@@ -307,7 +307,7 @@ async function getMonthSpend(restCtx) {
     campaignId: String(row.campaign.id),
     campaignName: row.campaign.name,
     status: normalizeStatus(row.campaign.status),
-    spend: (row.metrics.costMicros ?? 0) / 1_000_000,
+    spend: (row.metrics?.costMicros ?? 0) / 1_000_000,
   }));
 }
 
@@ -370,8 +370,8 @@ async function getImpressionShare(restCtx) {
   return rows.map(row => ({
     campaignId: String(row.campaign.id),
     campaignName: row.campaign.name,
-    impressionShare: row.metrics.searchImpressionShare ?? null,
-    budgetLostShare: row.metrics.searchBudgetLostImpressionShare ?? null,
+    impressionShare: row.metrics?.searchImpressionShare ?? null,
+    budgetLostShare: row.metrics?.searchBudgetLostImpressionShare ?? null,
   }));
 }
 
@@ -386,7 +386,7 @@ async function getInventory(restCtx) {
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand, shopping_product.custom_label_1
+      `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand
        FROM shopping_product
        WHERE shopping_product.status = 'ELIGIBLE'
        LIMIT 5000`,
@@ -395,10 +395,9 @@ async function getInventory(restCtx) {
 
     return {
       items: rows.map(row => ({
-        itemId: row.shoppingProduct.itemId,
-        condition: row.shoppingProduct.condition,
-        brand: row.shoppingProduct.brand || null,
-        model: row.shoppingProduct.customLabel1 || null,
+        itemId: row.shoppingProduct?.itemId || null,
+        condition: row.shoppingProduct?.condition || null,
+        brand: row.shoppingProduct?.brand || null,
       })),
       truncated: rows.length >= 5000,
     };
