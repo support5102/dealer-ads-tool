@@ -684,6 +684,101 @@ async function getAdSchedules(restCtx) {
   }
 }
 
+/**
+ * Fetches campaign-level negative keywords via REST GAQL.
+ * Used by deep scanner to detect negative keyword conflicts.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of negative keyword objects
+ */
+async function getCampaignNegatives(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign_criterion.keyword.text,
+              campaign_criterion.keyword.match_type,
+              campaign_criterion.negative,
+              campaign.name, campaign.id
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'KEYWORD'
+         AND campaign_criterion.negative = TRUE
+         AND campaign.status != 'REMOVED'`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const cc = row.campaignCriterion || row.campaign_criterion || {};
+      const kw = cc.keyword || {};
+      const c = row.campaign || {};
+      return {
+        keyword: kw.text || '',
+        matchType: kw.matchType || kw.match_type || '',
+        campaignName: c.name || '',
+        campaignId: String(c.id || ''),
+      };
+    });
+  } catch (err) {
+    // Non-fatal: some accounts may not have campaign negatives
+    console.warn('getCampaignNegatives failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Counts active RSA ads per ad group via REST GAQL.
+ * Used by deep scanner to detect ad groups missing RSAs.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of ad group ad count objects
+ */
+async function getAdGroupAdCounts(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT ad_group.name, ad_group.id, campaign.name,
+              ad_group_ad.ad.type, ad_group_ad.status,
+              ad_group_ad.policy_summary.approval_status
+       FROM ad_group_ad
+       WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+         AND ad_group.status = 'ENABLED'
+         AND campaign.status = 'ENABLED'`,
+      restCtx.loginCustomerId
+    );
+
+    // Group by ad group, count approved+enabled RSAs
+    const groups = {};
+    for (const row of rows) {
+      const ag = row.adGroup || row.ad_group || {};
+      const c = row.campaign || {};
+      const aga = row.adGroupAd || row.ad_group_ad || {};
+      const key = `${c.name}||${ag.name}`;
+
+      if (!groups[key]) {
+        groups[key] = {
+          adGroupName: ag.name || '',
+          adGroupId: String(ag.id || ''),
+          campaignName: c.name || '',
+          activeRsaCount: 0,
+          totalRsaCount: 0,
+        };
+      }
+
+      groups[key].totalRsaCount++;
+      const isActive = (aga.status === 'ENABLED') &&
+                       (aga.policySummary?.approvalStatus || aga.policy_summary?.approval_status) !== 'DISAPPROVED';
+      if (isActive) groups[key].activeRsaCount++;
+    }
+
+    return Object.values(groups);
+  } catch (err) {
+    // Non-fatal: some accounts may not have ad group ad data
+    console.warn('getAdGroupAdCounts failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -703,4 +798,7 @@ module.exports = {
   getAdCopy,
   getRecommendations,
   getAdSchedules,
+  // Phase 12: Deep Scanner queries
+  getCampaignNegatives,
+  getAdGroupAdCounts,
 };

@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
 **Last Updated:** 2026-03-19
-**Current Phase:** Phase 11: Audit Automation — COMPLETE
+**Current Phase:** Phase 12: Strategy Rules + Deep Scan — COMPLETE
 
 ---
 
@@ -21,6 +21,7 @@
 | 9 | Audit Foundation | ✅ COMPLETE | New GAQL queries, account iterator, scheduler, audit store (543 tests) |
 | 10 | Account Health Auditor | ✅ COMPLETE | 11 strategy-aligned checks, audit routes, dashboard UI (621 tests) |
 | 11 | Audit Automation | ✅ COMPLETE | Scheduled MCC-wide audits, token refresh, concurrency guards (651 tests) |
+| 12 | Strategy Rules + Deep Scan | ✅ COMPLETE | Rules engine, negative keyword analyzer, ad copy analyzer, deep scanner (764 tests) |
 
 ---
 
@@ -87,6 +88,48 @@
 ---
 
 ## Session Log
+
+### 2026-03-19 (session 6) - CLEAN HANDOFF
+
+**Completed:**
+- Fixed security issues + deployed V3 to Railway:
+  - OAuth CSRF: crypto.randomBytes state parameter, validated on callback, single-use
+  - XSS: escapeHtml on all innerHTML interpolations across app.js, pacing-app.js, audit-app.js
+  - Fixed audit-app.js auth routes (/auth/connect → /auth/google, /auth/status → /api/auth/status)
+  - Fixed showConnectedState nav links (was missing Auditor + Builder links)
+  - V3 deployed to Railway: https://dealer-ads-tool-production.up.railway.app (health check OK, all pages 200)
+- Planned full automation roadmap (Phases 12-16, 17 features, 13-15 sessions)
+- Implemented Phase 12: Strategy Rules Engine + Deep Scan
+  - `strategy-rules.js` — Single source of truth: CPC ranges (with HIGH_DEMAND_MODELS list for new_high classification), match type policy, budget splits, ad schedule template, naming patterns, VLA settings, impression share targets, competing makes (with self-filter fallback), URL patterns by platform, universal negatives
+  - `negative-keyword-analyzer.js` — 3 checks: conflict detection (exact/phrase/BROAD match), cannibalization (same keyword in multiple ad groups), traffic sculpting (missing competing-make negatives)
+  - `ad-copy-analyzer.js` — 4 checks: stale year references (2020-currentYear-1), missing RSAs per ad group, headline quality (short/all-caps/missing dealer name), pinning overuse
+  - `deep-scanner.js` — Orchestrates existing 11 audit checks + 7 new analyzer checks = 18 total
+  - 2 new GAQL queries: getCampaignNegatives, getAdGroupAdCounts
+  - New route: POST /api/deep-scan?customerId=X
+- Staff engineer (Opus) review found 2 P0s + 6 P1s + 1 P2, key fixes:
+  1. **P0**: BROAD match negatives silently ignored in doesNegativeBlock — added word-set matching
+  2. **P0**: classifyCampaignType never returned 'new_high' — added HIGH_DEMAND_MODELS list (30+ models)
+  3. **P1**: checkStaleYearReferences used Date.now() making tests time-dependent — added optional currentYear param
+  4. **P2**: getCompetingMakes fallback included dealer's own make — added self-filter with alias handling
+
+**Files Created:**
+- `src/services/strategy-rules.js`, `src/services/negative-keyword-analyzer.js`, `src/services/ad-copy-analyzer.js`, `src/services/deep-scanner.js`
+- `tests/unit/test_strategy_rules.js` (36 tests), `tests/unit/test_negative_keyword_analyzer.js` (27 tests), `tests/unit/test_ad_copy_analyzer.js` (25 tests), `tests/unit/test_deep_scanner.js` (13 tests), `tests/integration/test_deep_scan_routes.js` (8 tests)
+
+**Files Modified:**
+- `src/services/google-ads.js` — added getCampaignNegatives + getAdGroupAdCounts
+- `src/routes/audit.js` — added POST /api/deep-scan route
+- `src/routes/auth.js` — OAuth CSRF state parameter
+- `public/app.js` — escapeHtml + nav links fix
+- `public/audit-app.js` — auth route fixes + escapeHtml
+- `public/pacing-app.js` — escapeHtml fixes
+
+**Test Count:** 655 → 764 (+109 tests)
+
+**Next Session Focus:**
+- Phase 13: Automated Optimization (CPC optimizer, impression share targeting, budget management, recommendation dismissal)
+
+---
 
 ### 2026-03-19 (session 5) - CLEAN HANDOFF
 
@@ -748,14 +791,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-19 — 655 passed, 0 failed
+**Last Run:** 2026-03-19 — 764 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 465 | 0 | 0 |
-| Integration | 146 | 0 | 0 |
+| Unit | 566 | 0 | 0 |
+| Integration | 154 | 0 | 0 |
 
 ---
 
@@ -785,6 +828,8 @@
 | No query timeouts | Medium | ✅ Fixed | 15s timeout on all GAQL queries with timer cleanup |
 | XSS via innerHTML | High | ✅ Fixed | escapeHtml applied to all external data interpolation in app.js, pacing-app.js, audit-app.js |
 | OAuth CSRF | High | ✅ Fixed | crypto.randomBytes state parameter, single-use, validated on callback |
+| Audit-app wrong auth routes | Medium | ✅ Fixed | /auth/connect → /auth/google, /auth/status → /api/auth/status |
+| Missing nav links when connected | Medium | ✅ Fixed | showConnectedState now shows all 3 tool links |
 
 ---
 

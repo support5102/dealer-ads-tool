@@ -153,6 +153,39 @@ function createAuditRouter(config) {
     res.json(status);
   });
 
+  /**
+   * POST /api/deep-scan?customerId=X
+   * Runs a comprehensive deep scan (audit + negative keyword + ad copy analysis).
+   */
+  router.post('/api/deep-scan', requireAuth, async (req, res, next) => {
+    const { customerId } = req.query;
+    if (!customerId) {
+      return res.status(400).json({ error: 'Missing customerId query parameter.' });
+    }
+    const cleanId = customerId.replace(/-/g, '');
+    if (!/^\d{7,10}$/.test(cleanId)) {
+      return res.status(400).json({ error: 'Invalid customerId format.' });
+    }
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      req.session.tokens.access_token = accessToken;
+      const restCtx = {
+        accessToken,
+        developerToken: config.googleAds.developerToken,
+        customerId: cleanId,
+        loginCustomerId: mccId,
+      };
+      const { runDeepScan } = require('../services/deep-scanner');
+      const result = await runDeepScan(restCtx);
+      auditStore.save(cleanId, result);
+      res.json(result);
+    } catch (err) {
+      console.error('Deep scan error:', err.message);
+      next(err);
+    }
+  });
+
   return router;
 }
 
