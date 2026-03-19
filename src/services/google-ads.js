@@ -518,6 +518,8 @@ async function getCampaignPerformance(restCtx) {
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT campaign.id, campaign.name, campaign.status,
             campaign.advertising_channel_type,
+            campaign.bidding_strategy_type,
+            campaign.manual_cpc.enhanced_cpc_enabled,
             metrics.clicks, metrics.impressions, metrics.conversions,
             metrics.conversions_value, metrics.cost_micros, metrics.ctr,
             metrics.average_cpc, metrics.search_impression_share
@@ -535,6 +537,8 @@ async function getCampaignPerformance(restCtx) {
       campaignName: c.name ?? '',
       status: normalizeStatus(c.status),
       channelType: String(c.advertisingChannelType ?? c.advertising_channel_type ?? ''),
+      biddingStrategy: String(c.biddingStrategyType ?? c.bidding_strategy_type ?? ''),
+      ecpcEnabled: c.manualCpc?.enhancedCpcEnabled ?? c.manual_cpc?.enhanced_cpc_enabled ?? false,
       clicks: m.clicks ?? 0,
       impressions: m.impressions ?? 0,
       conversions: m.conversions ?? 0,

@@ -180,6 +180,8 @@ describe('getCampaignPerformance', () => {
       campaignName: 'Honda Civic - Search',
       status: 'ENABLED',
       channelType: 'SEARCH',
+      biddingStrategy: '',
+      ecpcEnabled: false,
       clicks: 250,
       impressions: 4800,
       conversions: 35,

@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
 **Last Updated:** 2026-03-19
-**Current Phase:** Phase 9: Audit Foundation — COMPLETE
+**Current Phase:** Phase 10: Account Health Auditor — COMPLETE
 
 ---
 
@@ -19,6 +19,7 @@
 | 7 | Budget Pacing Dashboard | ✅ COMPLETE | Advisory pacing tool for multi-account budget management |
 | 8 | Campaign Builder Integration | ✅ COMPLETE | Campaign Builder + CSV export + shared CSV utils (475 tests) |
 | 9 | Audit Foundation | ✅ COMPLETE | New GAQL queries, account iterator, scheduler, audit store (543 tests) |
+| 10 | Account Health Auditor | ✅ COMPLETE | 11 strategy-aligned checks, audit routes, dashboard UI (621 tests) |
 
 ---
 
@@ -85,6 +86,56 @@
 ---
 
 ## Session Log
+
+### 2026-03-19 (session 3) - CLEAN HANDOFF
+
+**Completed:**
+- Implemented full Phase 10: Account Health Auditor
+  - `audit-engine.js` — 11 strategy-aligned health checks:
+    1. Non-Manual-CPC bidding (critical)
+    2. Enhanced CPC enabled (warning)
+    3. Broad match keywords (critical)
+    4. Zero-impression keywords (warning)
+    5. Disapproved/limited ads (critical/warning)
+    6. High CPC above $15 (warning)
+    7. Low CTR below 2% (warning)
+    8. Pending recommendations (warning)
+    9. Missing ad schedules (info)
+    10. Zero-spend enabled campaigns (warning)
+    11. Low impression share below 75%/50% (warning/critical)
+    + Naming convention violations (info)
+  - `routes/audit.js` — POST /api/audit/run, GET /api/audit/results, GET /api/audit/results/all
+  - Dashboard UI: `audit.html` + `audit-app.js` + `audit-styles.css`
+  - Nav links added across all pages
+- Staff engineer (Opus) review found 2 P0s + 5 P1s + 4 P2s, all fixed:
+  1. **P0**: `getCampaignPerformance` didn't return `biddingStrategy` — bidding check was non-functional. Added `campaign.bidding_strategy_type` + `campaign.manual_cpc.enhanced_cpc_enabled` to GAQL
+  2. **P0**: Error messages in query failure findings could leak internal details — sanitized
+  3. **P1**: `getCampaignPerformance` had no `.catch()` — entire audit crashed on campaign query failure
+  4. **P1**: No customerId format validation — added regex check
+  5. **P1**: No whitelist on `checks` array — added against known check names
+  6. **P2**: No ECPC check — added as separate warning finding
+  7. **P2**: No impression share check despite 75-90% target — added Check 11 (critical <50%, warning <75%)
+  8. **P2**: Frontend error parsing crashed on non-JSON responses — added try-catch fallback
+
+**Files Created:**
+- `src/services/audit-engine.js`, `src/routes/audit.js`
+- `public/audit.html`, `public/audit-app.js`, `public/audit-styles.css`
+- `tests/unit/test_audit_engine.js` (60 tests), `tests/integration/test_audit_routes.js` (17 tests)
+
+**Files Modified:**
+- `src/services/google-ads.js` — added `bidding_strategy_type` + `enhanced_cpc_enabled` to campaign GAQL
+- `src/server.js` — mounted audit router
+- `public/index.html`, `public/pacing.html` — added Auditor nav link
+- `tests/unit/test_audit_queries.js` — updated expectation for new campaign fields
+
+**Test Count:** 543 → 621 (+78 tests)
+
+**Next Session Focus:**
+- Phase 11: Audit automation (wire scheduler to run audits on interval, email/notification on findings)
+- Or: Deploy V3 to Railway with all 4 tools (Task Manager, Pacing, Builder, Auditor)
+- Or: Fix high-severity PR findings (XSS in app.js innerHTML, OAuth CSRF in auth.js)
+
+---
 
 ### 2026-03-19 (session 2) - CLEAN HANDOFF
 
@@ -630,14 +681,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-19 — 543 passed, 0 failed
+**Last Run:** 2026-03-19 — 621 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 385 | 0 | 0 |
-| Integration | 114 | 0 | 0 |
+| Unit | 446 | 0 | 0 |
+| Integration | 131 | 0 | 0 |
 
 ---
 

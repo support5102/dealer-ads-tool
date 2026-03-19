@@ -22,6 +22,7 @@ const { createChangesRouter }  = require('./routes/changes');
 const { createPacingRouter }   = require('./routes/pacing');
 const { createBuilderRouter }    = require('./routes/builder');
 const { createSchedulerRouter } = require('./routes/scheduler');
+const { createAuditRouter }     = require('./routes/audit');
 const { errorHandler }          = require('./middleware/error-handler');
 
 /**
@@ -67,6 +68,7 @@ function createApp(config) {
   app.use(createPacingRouter(config));
   app.use(createBuilderRouter(config));
   app.use(createSchedulerRouter());
+  app.use(createAuditRouter(config));
 
   // ── Health check ──
   app.get('/health', (req, res) => {
