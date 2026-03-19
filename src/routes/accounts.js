@@ -38,11 +38,11 @@ function createAccountsRouter(config) {
       }
       req.session.mccId = mccId;
 
-      // Query child accounts directly from MCC — no listAccessibleCustomers needed
+      // Query all descendant accounts from MCC (any depth) — filter out managers below
       let accounts = [];
       const rows = await googleAds.queryViaRest(
         accessToken, config.googleAds.developerToken, mccId,
-        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.level = 1',
+        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.status = \'ENABLED\'',
         mccId
       );
 
