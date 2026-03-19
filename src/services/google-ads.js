@@ -452,6 +452,234 @@ async function getDedicatedBudgets(restCtx) {
   return Array.from(budgetMap.values());
 }
 
+// ===========================================================================
+// Audit & Optimization Queries (Phase 9)
+// ===========================================================================
+
+/**
+ * Fetches keyword-level performance metrics for the last 7 days via REST.
+ * Used by audit engine (negative conflicts, impression share) and CPC optimizer.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of keyword performance objects
+ */
+async function getKeywordPerformance(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+            ad_group_criterion.status, ad_group_criterion.negative,
+            ad_group_criterion.cpc_bid_micros,
+            ad_group.name, ad_group.id, campaign.name, campaign.id,
+            metrics.clicks, metrics.impressions, metrics.average_cpc,
+            metrics.ctr, metrics.search_impression_share
+     FROM keyword_view
+     WHERE segments.date DURING LAST_7_DAYS
+       AND campaign.status = 'ENABLED'
+       AND ad_group.status = 'ENABLED'
+     ORDER BY metrics.impressions DESC
+     LIMIT 5000`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => {
+    const kw = row.adGroupCriterion || row.ad_group_criterion || {};
+    const keyword = kw.keyword || {};
+    const m = row.metrics || {};
+    return {
+      keyword: keyword.text || '',
+      matchType: String(keyword.matchType ?? keyword.match_type ?? ''),
+      status: normalizeStatus(kw.status),
+      negative: kw.negative || false,
+      cpcBid: (kw.cpcBidMicros ?? kw.cpc_bid_micros ?? 0) / 1_000_000,
+      adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
+      adGroupId: String(row.adGroup?.id ?? row.ad_group?.id ?? ''),
+      campaignName: row.campaign?.name ?? '',
+      campaignId: String(row.campaign?.id ?? ''),
+      clicks: m.clicks ?? 0,
+      impressions: m.impressions ?? 0,
+      averageCpc: (m.averageCpc ?? m.average_cpc ?? 0) / 1_000_000,
+      ctr: m.ctr ?? 0,
+      searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
+    };
+  });
+}
+
+/**
+ * Fetches campaign-level performance metrics for the last 7 days via REST.
+ * Used by audit engine for performance drop detection and troubleshooting.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of campaign performance objects
+ */
+async function getCampaignPerformance(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, campaign.status,
+            campaign.advertising_channel_type,
+            metrics.clicks, metrics.impressions, metrics.conversions,
+            metrics.conversions_value, metrics.cost_micros, metrics.ctr,
+            metrics.average_cpc, metrics.search_impression_share
+     FROM campaign
+     WHERE segments.date DURING LAST_7_DAYS
+       AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => {
+    const c = row.campaign || {};
+    const m = row.metrics || {};
+    return {
+      campaignId: String(c.id ?? ''),
+      campaignName: c.name ?? '',
+      status: normalizeStatus(c.status),
+      channelType: String(c.advertisingChannelType ?? c.advertising_channel_type ?? ''),
+      clicks: m.clicks ?? 0,
+      impressions: m.impressions ?? 0,
+      conversions: m.conversions ?? 0,
+      conversionValue: m.conversionsValue ?? m.conversions_value ?? 0,
+      cost: (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000,
+      ctr: m.ctr ?? 0,
+      averageCpc: (m.averageCpc ?? m.average_cpc ?? 0) / 1_000_000,
+      searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
+    };
+  });
+}
+
+/**
+ * Fetches RSA ad copy data (headlines, descriptions, final URLs, policy status) via REST.
+ * Used by ad copy analyzer for quality checks and factory offer detection.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of ad copy objects
+ */
+async function getAdCopy(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT ad_group_ad.ad.responsive_search_ad.headlines,
+            ad_group_ad.ad.responsive_search_ad.descriptions,
+            ad_group_ad.ad.final_urls, ad_group_ad.ad.id,
+            ad_group_ad.policy_summary.approval_status,
+            ad_group_ad.policy_summary.policy_topic_entries,
+            ad_group_ad.status,
+            ad_group.name, campaign.name
+     FROM ad_group_ad
+     WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+       AND campaign.status != 'REMOVED'
+       AND ad_group_ad.status != 'REMOVED'
+     LIMIT 2000`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => {
+    const ad = row.adGroupAd || row.ad_group_ad || {};
+    const adInner = ad.ad || {};
+    const rsa = adInner.responsiveSearchAd || adInner.responsive_search_ad || {};
+    const policy = ad.policySummary || ad.policy_summary || {};
+    return {
+      adId: String(adInner.id ?? ''),
+      headlines: (rsa.headlines || []).map(h => ({
+        text: h.text || '',
+        pinnedField: h.pinnedField ?? h.pinned_field ?? null,
+      })),
+      descriptions: (rsa.descriptions || []).map(d => ({
+        text: d.text || '',
+        pinnedField: d.pinnedField ?? d.pinned_field ?? null,
+      })),
+      finalUrls: adInner.finalUrls || adInner.final_urls || [],
+      approvalStatus: policy.approvalStatus ?? policy.approval_status ?? null,
+      policyTopics: (policy.policyTopicEntries ?? policy.policy_topic_entries ?? []).map(e => ({
+        topic: e.topic || '',
+        type: e.type || '',
+      })),
+      status: normalizeStatus(ad.status),
+      adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
+      campaignName: row.campaign?.name ?? '',
+    };
+  });
+}
+
+/**
+ * Fetches pending recommendations for an account via REST.
+ * Used by recommendation dismisser to identify and dismiss unwanted suggestions.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of recommendation objects
+ */
+async function getRecommendations(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT recommendation.resource_name, recommendation.type,
+              recommendation.campaign, recommendation.ad_group
+       FROM recommendation`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const rec = row.recommendation || {};
+      return {
+        resourceName: rec.resourceName ?? rec.resource_name ?? '',
+        type: rec.type ?? '',
+        campaignResourceName: rec.campaign ?? '',
+        adGroupResourceName: rec.adGroup ?? rec.ad_group ?? null,
+      };
+    });
+  } catch (err) {
+    // Non-fatal: some accounts may not have recommendations access
+    console.warn('getRecommendations failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetches ad schedule criteria for all campaigns via REST.
+ * Used by audit engine to check schedule consistency across campaigns.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} Array of ad schedule objects grouped by campaign
+ */
+async function getAdSchedules(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign_criterion.ad_schedule.day_of_week,
+              campaign_criterion.ad_schedule.start_hour,
+              campaign_criterion.ad_schedule.start_minute,
+              campaign_criterion.ad_schedule.end_hour,
+              campaign_criterion.ad_schedule.end_minute,
+              campaign.name, campaign.id
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'AD_SCHEDULE'
+         AND campaign.status != 'REMOVED'
+       ORDER BY campaign.name`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const cc = row.campaignCriterion || row.campaign_criterion || {};
+      const sched = cc.adSchedule || cc.ad_schedule || {};
+      return {
+        campaignName: row.campaign?.name ?? '',
+        campaignId: String(row.campaign?.id ?? ''),
+        dayOfWeek: sched.dayOfWeek ?? sched.day_of_week ?? '',
+        startHour: sched.startHour ?? sched.start_hour ?? 0,
+        startMinute: sched.startMinute ?? sched.start_minute ?? 0,
+        endHour: sched.endHour ?? sched.end_hour ?? 0,
+        endMinute: sched.endMinute ?? sched.end_minute ?? 0,
+      };
+    });
+  } catch (err) {
+    // Non-fatal: some accounts may not have ad schedules
+    console.warn('getAdSchedules failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -465,4 +693,10 @@ module.exports = {
   getDedicatedBudgets,
   getImpressionShare,
   getInventory,
+  // Phase 9: Audit & Optimization queries
+  getKeywordPerformance,
+  getCampaignPerformance,
+  getAdCopy,
+  getRecommendations,
+  getAdSchedules,
 };

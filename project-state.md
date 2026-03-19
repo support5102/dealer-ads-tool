@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
 **Last Updated:** 2026-03-19
-**Current Phase:** Phase 8: Campaign Builder Integration — COMPLETE (all 3 phases)
+**Current Phase:** Phase 9: Audit Foundation — COMPLETE
 
 ---
 
@@ -18,6 +18,7 @@
 | 6 | Feature Expansion | 📋 PLANNED | Change history UI, email notifications, Facebook Ads |
 | 7 | Budget Pacing Dashboard | ✅ COMPLETE | Advisory pacing tool for multi-account budget management |
 | 8 | Campaign Builder Integration | ✅ COMPLETE | Campaign Builder + CSV export + shared CSV utils (475 tests) |
+| 9 | Audit Foundation | ✅ COMPLETE | New GAQL queries, account iterator, scheduler, audit store (543 tests) |
 
 ---
 
@@ -85,7 +86,42 @@
 
 ## Session Log
 
-### 2026-03-19 - CLEAN HANDOFF
+### 2026-03-19 (session 2) - CLEAN HANDOFF
+
+**Completed:**
+- Implemented full Phase 9: Audit Foundation infrastructure
+  - 5 new GAQL query functions in `google-ads.js`: getKeywordPerformance, getCampaignPerformance, getAdCopy, getRecommendations, getAdSchedules
+  - `account-iterator.js`: batch MCC child account iteration with rate limiting, error isolation, progress callbacks
+  - `scheduler.js`: in-memory setInterval-based job scheduler for daily audits
+  - `audit-store.js`: in-memory audit result storage with per-account 7-day rolling history
+  - `routes/scheduler.js`: GET /api/scheduler/status (authenticated), mounted in server.js
+- Staff engineer (Opus) review found 3 P0s + 6 P2s, all fixed:
+  1. **P0**: Scheduler route had no auth — added requireAuth (was leaking error info)
+  2. **P0**: Dead `refreshAccessToken` import in account-iterator — removed
+  3. **P0**: Discovery query used `level <= 1` instead of `status = 'ENABLED'` — aligned with accounts.js, added sub-MCC support
+  4. **P2**: Wrapped `onProgress` in try/catch (prevents callback errors from aborting iteration)
+  5. **P2**: Default undefined callback results to null (JSON-safe)
+  6. **P2**: Added malformed row guard in discoverAccounts (filters rows without id)
+  7. **P2**: Added scheduler concurrency guard test
+
+**Files Created:**
+- `src/services/account-iterator.js`, `src/services/scheduler.js`, `src/services/audit-store.js`
+- `src/routes/scheduler.js`
+- `tests/unit/test_audit_queries.js`, `tests/unit/test_account_iterator.js`, `tests/unit/test_scheduler.js`, `tests/unit/test_audit_store.js`
+- `tests/integration/test_scheduler_routes.js`
+
+**Files Modified:**
+- `src/services/google-ads.js` — added 5 new query functions (getKeywordPerformance, getCampaignPerformance, getAdCopy, getRecommendations, getAdSchedules)
+- `src/server.js` — mounted scheduler router
+
+**Test Count:** 475 → 543 (+68 tests)
+
+**Next Session Focus:**
+- Phase 10: Account Health Auditor (audit-engine.js, audit routes, audit dashboard UI)
+
+---
+
+### 2026-03-19 (session 1) - CLEAN HANDOFF
 
 **Completed:**
 - Fixed production pacing errors (2 bugs):
@@ -594,14 +630,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-19 — 475 passed, 0 failed
+**Last Run:** 2026-03-19 — 543 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 320 | 0 | 0 |
-| Integration | 111 | 0 | 0 |
+| Unit | 385 | 0 | 0 |
+| Integration | 114 | 0 | 0 |
 
 ---
 

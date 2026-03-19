@@ -20,8 +20,9 @@ const { createAuthRouter }     = require('./routes/auth');
 const { createAccountsRouter } = require('./routes/accounts');
 const { createChangesRouter }  = require('./routes/changes');
 const { createPacingRouter }   = require('./routes/pacing');
-const { createBuilderRouter }  = require('./routes/builder');
-const { errorHandler }         = require('./middleware/error-handler');
+const { createBuilderRouter }    = require('./routes/builder');
+const { createSchedulerRouter } = require('./routes/scheduler');
+const { errorHandler }          = require('./middleware/error-handler');
 
 /**
  * Creates a configured Express app.
@@ -65,6 +66,7 @@ function createApp(config) {
   app.use(createChangesRouter(config));
   app.use(createPacingRouter(config));
   app.use(createBuilderRouter(config));
+  app.use(createSchedulerRouter());
 
   // ── Health check ──
   app.get('/health', (req, res) => {
