@@ -9,10 +9,12 @@ const supertest = require('supertest');
 const googleAds = require('../../src/services/google-ads');
 const auditEngine = require('../../src/services/audit-engine');
 const auditStore = require('../../src/services/audit-store');
+const auditScheduler = require('../../src/services/audit-scheduler');
 const { createTestApp, authenticatedAgent } = require('./test-helpers');
 
 jest.mock('../../src/services/google-ads');
 jest.mock('../../src/services/audit-engine');
+jest.mock('../../src/services/audit-scheduler');
 
 const SAMPLE_AUDIT_RESULT = {
   findings: [
@@ -216,5 +218,135 @@ describe('GET /api/audit/results/all', () => {
 
     expect(res.body.total).toBe(2);
     expect(res.body.accounts).toHaveLength(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/audit/schedule/start
+// ─────────────────────────────────────────────────────────────
+describe('POST /api/audit/schedule/start', () => {
+  let app;
+
+  beforeEach(() => {
+    app = createTestApp();
+    jest.clearAllMocks();
+    auditScheduler.startScheduledAudit.mockReturnValue({
+      started: true, jobName: 'mcc-audit', intervalMs: 14400000, mccId: '9999999999',
+    });
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    await supertest(app).post('/api/audit/schedule/start').expect(401);
+  });
+
+  test('starts scheduler and returns result', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent.post('/api/audit/schedule/start').expect(200);
+
+    expect(res.body.started).toBe(true);
+    expect(res.body.jobName).toBe('mcc-audit');
+    expect(auditScheduler.startScheduledAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refreshToken: 'fake-refresh-token',
+      })
+    );
+  });
+
+  test('returns 401 when not authenticated (no refresh token)', async () => {
+    // requireAuth rejects before route handler runs
+    await supertest(app).post('/api/audit/schedule/start').expect(401);
+  });
+
+  test('passes custom intervalMs from body', async () => {
+    const agent = await authenticatedAgent(app);
+    await agent
+      .post('/api/audit/schedule/start')
+      .send({ intervalMs: 3600000 })
+      .expect(200);
+
+    expect(auditScheduler.startScheduledAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ intervalMs: 3600000 })
+    );
+  });
+
+  test('rejects invalid intervalMs', async () => {
+    auditScheduler.startScheduledAudit.mockImplementation(() => {
+      throw new Error('intervalMs must be between');
+    });
+
+    const agent = await authenticatedAgent(app);
+    const res = await agent
+      .post('/api/audit/schedule/start')
+      .send({ intervalMs: 100 })
+      .expect(500);
+    expect(res.body.error).toBeDefined();
+  });
+
+  test('returns 500 when scheduler throws', async () => {
+    auditScheduler.startScheduledAudit.mockImplementation(() => { throw new Error('bad'); });
+
+    const agent = await authenticatedAgent(app);
+    const res = await agent.post('/api/audit/schedule/start').expect(500);
+    expect(res.body.error).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/audit/schedule/stop
+// ─────────────────────────────────────────────────────────────
+describe('POST /api/audit/schedule/stop', () => {
+  let app;
+
+  beforeEach(() => {
+    app = createTestApp();
+    jest.clearAllMocks();
+    auditScheduler.stopScheduledAudit.mockReturnValue({ stopped: true });
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    await supertest(app).post('/api/audit/schedule/stop').expect(401);
+  });
+
+  test('stops scheduler and returns result', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent.post('/api/audit/schedule/stop').expect(200);
+    expect(res.body.stopped).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/audit/schedule/status
+// ─────────────────────────────────────────────────────────────
+describe('GET /api/audit/schedule/status', () => {
+  let app;
+
+  beforeEach(() => {
+    app = createTestApp();
+    jest.clearAllMocks();
+    auditScheduler.getScheduleStatus.mockReturnValue({
+      active: true, running: false, intervalMs: 14400000, mccId: '9999999999',
+      runCount: 5, lastRunAccounts: 10, lastRunFindings: 3,
+    });
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    await supertest(app).get('/api/audit/schedule/status').expect(401);
+  });
+
+  test('returns scheduler status', async () => {
+    const agent = await authenticatedAgent(app);
+    const res = await agent.get('/api/audit/schedule/status').expect(200);
+
+    expect(res.body.active).toBe(true);
+    expect(res.body.mccId).toBe('9999999999');
+    expect(res.body.runCount).toBe(5);
+  });
+
+  test('returns inactive when no schedule exists', async () => {
+    auditScheduler.getScheduleStatus.mockReturnValue({ active: false });
+
+    const agent = await authenticatedAgent(app);
+    const res = await agent.get('/api/audit/schedule/status').expect(200);
+    expect(res.body.active).toBe(false);
   });
 });

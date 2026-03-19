@@ -2,8 +2,11 @@
  * Audit Dashboard — frontend logic for account health auditor.
  *
  * Talks to:
- *   POST /api/audit/run?customerId=X  → runs audit
- *   GET  /api/audit/results?customerId=X → retrieves cached result
+ *   POST /api/audit/run?customerId=X         → runs audit on one account
+ *   GET  /api/audit/results?customerId=X     → retrieves cached result
+ *   POST /api/audit/schedule/start           → starts scheduled MCC-wide audits
+ *   POST /api/audit/schedule/stop            → stops scheduled audits
+ *   GET  /api/audit/schedule/status          → scheduler status
  *   GET  /auth/status → checks auth state
  *   GET  /api/accounts → loads MCC accounts
  */
@@ -207,5 +210,96 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ── Scheduler controls ──
+
+const schedulerControls = document.getElementById('schedulerControls');
+const scheduleBtn = document.getElementById('scheduleBtn');
+const scheduleStatusEl = document.getElementById('scheduleStatus');
+let scheduleActive = false;
+let statusPollTimer = null;
+
+async function loadScheduleStatus() {
+  try {
+    const res = await fetch('/api/audit/schedule/status');
+    if (!res.ok) return;
+    const status = await res.json();
+    scheduleActive = status.active;
+    updateScheduleUI(status);
+  } catch (_) { /* ignore */ }
+}
+
+function updateScheduleUI(status) {
+  if (!schedulerControls) return;
+  schedulerControls.style.display = 'flex';
+
+  if (status.active) {
+    scheduleBtn.textContent = 'Stop Schedule';
+    scheduleBtn.classList.add('btn-stop');
+    const parts = [];
+    if (status.runCount > 0) parts.push(`${status.runCount} runs`);
+    if (status.lastRunAccounts > 0) parts.push(`${status.lastRunAccounts} accounts`);
+    if (status.lastRunFindings > 0) parts.push(`${status.lastRunFindings} findings`);
+    if (status.running) parts.unshift('Running now...');
+    scheduleStatusEl.textContent = parts.length > 0 ? parts.join(' · ') : 'Scheduled';
+  } else {
+    scheduleBtn.textContent = 'Schedule All';
+    scheduleBtn.classList.remove('btn-stop');
+    scheduleStatusEl.textContent = '';
+  }
+}
+
+async function toggleSchedule() {
+  scheduleBtn.disabled = true;
+
+  try {
+    if (scheduleActive) {
+      const res = await fetch('/api/audit/schedule/stop', { method: 'POST' });
+      const data = await res.json();
+      if (data.stopped) {
+        scheduleActive = false;
+        stopStatusPolling();
+      }
+    } else {
+      const res = await fetch('/api/audit/schedule/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runImmediately: true }),
+      });
+      if (!res.ok) {
+        let errMsg = 'Failed to start';
+        try { const err = await res.json(); errMsg = err.error || errMsg; } catch (_) {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      if (data.started) {
+        scheduleActive = true;
+        startStatusPolling();
+      }
+    }
+    await loadScheduleStatus();
+  } catch (err) {
+    alert('Schedule error: ' + err.message);
+  } finally {
+    scheduleBtn.disabled = false;
+  }
+}
+
+function startStatusPolling() {
+  stopStatusPolling();
+  statusPollTimer = setInterval(loadScheduleStatus, 30000); // Poll every 30s
+}
+
+function stopStatusPolling() {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
+}
+
 // ── Init ──
-checkAuth();
+async function init() {
+  await checkAuth();
+  await loadScheduleStatus();
+  if (scheduleActive) startStatusPolling();
+}
+init();

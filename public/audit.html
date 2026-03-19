@@ -41,6 +41,10 @@
     <div class="control-group">
       <button class="btn-primary" id="runAuditBtn" onclick="runAudit()" disabled>Run Audit</button>
     </div>
+    <div class="control-group scheduler-controls" id="schedulerControls" style="display:none;">
+      <button class="btn-schedule" id="scheduleBtn" onclick="toggleSchedule()">Schedule All</button>
+      <span class="schedule-status" id="scheduleStatus"></span>
+    </div>
   </div>
 
   <!-- NOT CONNECTED -->

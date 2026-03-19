@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
 **Last Updated:** 2026-03-19
-**Current Phase:** Phase 10: Account Health Auditor — COMPLETE
+**Current Phase:** Phase 11: Audit Automation — COMPLETE
 
 ---
 
@@ -20,6 +20,7 @@
 | 8 | Campaign Builder Integration | ✅ COMPLETE | Campaign Builder + CSV export + shared CSV utils (475 tests) |
 | 9 | Audit Foundation | ✅ COMPLETE | New GAQL queries, account iterator, scheduler, audit store (543 tests) |
 | 10 | Account Health Auditor | ✅ COMPLETE | 11 strategy-aligned checks, audit routes, dashboard UI (621 tests) |
+| 11 | Audit Automation | ✅ COMPLETE | Scheduled MCC-wide audits, token refresh, concurrency guards (651 tests) |
 
 ---
 
@@ -86,6 +87,47 @@
 ---
 
 ## Session Log
+
+### 2026-03-19 (session 4) - CLEAN HANDOFF
+
+**Completed:**
+- Implemented full Phase 11: Audit Automation
+  - `audit-scheduler.js` — orchestrates scheduled MCC-wide audits:
+    1. Stores refresh token at schedule-start time
+    2. On each cycle: refreshes OAuth token → discovers child accounts → runs audit engine per account → stores results
+    3. Concurrency guard prevents overlapping cycles
+    4. Interval validation (min 30min, max 24h) prevents DoS
+    5. Null-safe state writes handle mid-cycle stop gracefully
+  - 3 new routes in `audit.js`: POST /api/audit/schedule/start, POST /stop, GET /status
+  - Dashboard: scheduler toggle button + status polling (30s interval)
+- Staff engineer (Opus) review found 2 P0s + 3 P1s + 3 P2s, all fixed:
+  1. **P0**: No intervalMs validation — allowed 1ms intervals (DoS). Added min/max enforcement
+  2. **P0**: Refresh token stored but never updated on rotation — documented limitation, added error detection
+  3. **P1**: No concurrency guard on exported `runScheduledAuditCycle` — added `cycleRunning` flag with try/finally
+  4. **P1**: O(n²) `indexOf` in account loop — replaced with standard for-loop index
+  5. **P1**: Re-entrant start could overwrite state mid-cycle — concurrency guard prevents this
+  6. **P2**: Stop during running cycle caused null TypeError — added null guard on state write-back
+  7. **P2**: Missing defensive access on `result.summary.total` — added optional chaining
+
+**Files Created:**
+- `src/services/audit-scheduler.js`
+- `tests/unit/test_audit_scheduler.js` (19 tests)
+
+**Files Modified:**
+- `src/routes/audit.js` — added 3 scheduler control routes
+- `public/audit.html` — added scheduler controls section
+- `public/audit-app.js` — scheduler toggle, status polling, start/stop
+- `public/audit-styles.css` — scheduler button styles
+- `tests/integration/test_audit_routes.js` — added 11 scheduler route tests (28 total)
+
+**Test Count:** 621 → 651 (+30 tests)
+
+**Next Session Focus:**
+- Deploy V3 to Railway with all 5 tools (Task Manager, Pacing, Builder, Auditor, Scheduled Audits)
+- Fix high-severity PR findings (XSS in app.js innerHTML, OAuth CSRF in auth.js)
+- Phase 12+: Freshdesk integration, CPC optimization, factory offer automation
+
+---
 
 ### 2026-03-19 (session 3) - CLEAN HANDOFF
 
@@ -681,14 +723,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-19 — 621 passed, 0 failed
+**Last Run:** 2026-03-19 — 651 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 446 | 0 | 0 |
-| Integration | 131 | 0 | 0 |
+| Unit | 465 | 0 | 0 |
+| Integration | 142 | 0 | 0 |
 
 ---
 

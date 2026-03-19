@@ -15,6 +15,7 @@ const { requireAuth } = require('../middleware/auth');
 const { runAudit } = require('../services/audit-engine');
 const auditStore = require('../services/audit-store');
 const googleAds = require('../services/google-ads');
+const auditScheduler = require('../services/audit-scheduler');
 
 /**
  * Creates audit routes.
@@ -99,6 +100,57 @@ function createAuditRouter(config) {
   router.get('/api/audit/results/all', requireAuth, async (req, res) => {
     const results = auditStore.getAllLatest();
     res.json({ accounts: results, total: results.length });
+  });
+
+  // ── Scheduler control routes ──
+
+  /**
+   * POST /api/audit/schedule/start
+   * Starts scheduled audits across all MCC child accounts.
+   * Stores the user's refresh token for future unattended runs.
+   */
+  router.post('/api/audit/schedule/start', requireAuth, async (req, res, next) => {
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const refreshToken = req.session.tokens && req.session.tokens.refresh_token;
+
+      if (!refreshToken) {
+        return res.status(400).json({ error: 'No refresh token available. Re-connect Google Ads.' });
+      }
+
+      const intervalMs = req.body.intervalMs || undefined; // use default if not provided
+
+      const result = auditScheduler.startScheduledAudit({
+        config: config.googleAds,
+        refreshToken,
+        mccId,
+        intervalMs,
+        runImmediately: req.body.runImmediately || false,
+      });
+
+      res.json(result);
+    } catch (err) {
+      console.error('Audit schedule start error:', err.message);
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/audit/schedule/stop
+   * Stops the scheduled audit job.
+   */
+  router.post('/api/audit/schedule/stop', requireAuth, async (req, res) => {
+    const result = auditScheduler.stopScheduledAudit();
+    res.json(result);
+  });
+
+  /**
+   * GET /api/audit/schedule/status
+   * Returns the current scheduler status.
+   */
+  router.get('/api/audit/schedule/status', requireAuth, async (req, res) => {
+    const status = auditScheduler.getScheduleStatus();
+    res.json(status);
   });
 
   return router;
