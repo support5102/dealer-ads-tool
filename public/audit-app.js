@@ -31,12 +31,12 @@ const findingsSection = document.getElementById('findingsSection');
 // ── Auth / account loading (same pattern as pacing) ──
 
 function connectGoogle() {
-  window.location.href = '/auth/connect';
+  window.location.href = '/auth/google';
 }
 
 async function checkAuth() {
   try {
-    const res = await fetch('/auth/status');
+    const res = await fetch('/api/auth/status');
     const data = await res.json();
     if (data.connected) {
       notConnected.style.display = 'none';
