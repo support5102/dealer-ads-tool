@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dealer Ads Manager</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <div class="logo-text">Dealer Ads Manager</div>
+      <div class="logo-sub">Google Ads API · MCC Connected</div>
+    </div>
+  </div>
+  <div class="header-right" id="headerRight">
+    <a href="/pacing.html" class="nav-link">Pacing</a>
+    <a href="/audit.html" class="nav-link">Auditor</a>
+    <a href="/builder.html" class="nav-link">Campaign Builder</a>
+    <button class="connect-btn" onclick="connectGoogle()">🔗 Connect Google Ads</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Account</div>
+      <select class="account-select" id="accountSelect" onchange="selectAccount(this.value)" disabled>
+        <option value="">— Connect Google Ads first —</option>
+      </select>
+    </div>
+    <div class="tree" id="accountTree">
+      <div class="tree-empty">Connect your Google Ads account to see your campaigns here.</div>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content" id="content">
+    <div class="not-connected" id="notConnected">
+      <div class="not-connected-icon">🔗</div>
+      <h2>Connect Your Google Ads Account</h2>
+      <p>Click "Connect Google Ads" above to sign in. The tool will load all your dealer accounts from your MCC.</p>
+      <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+    </div>
+
+    <div class="task-area" id="taskArea" style="display:none">
+      <div class="section-title">Freshdesk Task</div>
+
+      <div class="task-box">
+        <div class="task-box-header">
+          <div class="task-box-dots">
+            <div class="dot" style="background:#f87171"></div>
+            <div class="dot" style="background:#fbbf24"></div>
+            <div class="dot" style="background:#4ade80"></div>
+          </div>
+          <span style="font-size:11px;color:#334155">Paste task — any format, plain English</span>
+          <span style="font-size:10px;color:#1e3a5f">Ctrl+Enter to analyse</span>
+        </div>
+        <textarea id="taskInput"
+          placeholder="Paste your Freshdesk task here...
+
+Examples:
+• Pause Campaign: Honda Civic - Search Florida
+• Increase budget to $200/day on Toyota Trucks campaign
+• Add negative keyword [free cars] to all campaigns
+• Exclude 20mi radius around (30.064250,-90.069620) from main campaigns
+• Pause all keywords with CPC over $8 in Used Inventory ad group"></textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-primary" id="analyseBtn" onclick="analyseTask()" disabled>
+          🔍 Analyse Task
+        </button>
+        <button class="btn-secondary" onclick="clearTask()">Clear</button>
+        <span style="font-size:11px;color:#334155;margin-left:4px" id="accountLabel"></span>
+      </div>
+
+      <!-- Plan appears here -->
+      <div id="planArea"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast" style="display:none"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
