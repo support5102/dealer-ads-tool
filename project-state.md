@@ -88,6 +88,31 @@
 
 ## Session Log
 
+### 2026-03-19 (session 5) - CLEAN HANDOFF
+
+**Completed:**
+- Fixed 2 high-severity security issues from PR #1 review:
+  1. **OAuth CSRF** (auth.js): Added `state` parameter with crypto.randomBytes(32), validated on callback, single-use (replay prevention). 4 new integration tests.
+  2. **XSS** (app.js): Added `escapeHtml()` function, applied to all 15+ innerHTML interpolation points — campaign names, keyword text, plan summaries, warnings, error messages, result messages.
+- Staff engineer (Opus) review confirmed both target files clean, found P1 in sibling files:
+  - `pacing-app.js`: escaped `formatStatus` default branch + `inv.count`
+  - `audit-app.js`: escaped summary card numbers (defense-in-depth)
+
+**Files Modified:**
+- `src/routes/auth.js` — state parameter generation + validation
+- `public/app.js` — escapeHtml + 15+ innerHTML sanitizations
+- `public/pacing-app.js` — 2 defensive escapes
+- `public/audit-app.js` — 4 defensive escapes
+- `tests/integration/test_auth_routes.js` — 4 new CSRF tests (20 total, was 16)
+
+**Test Count:** 651 → 655 (+4 tests)
+
+**Next Session Focus:**
+- Deploy V3 to Railway (all security fixes now applied)
+- Or: Phase 12+ automation (Freshdesk integration, CPC optimization, factory offers)
+
+---
+
 ### 2026-03-19 (session 4) - CLEAN HANDOFF
 
 **Completed:**
@@ -723,14 +748,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-19 — 651 passed, 0 failed
+**Last Run:** 2026-03-19 — 655 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
 | Unit | 465 | 0 | 0 |
-| Integration | 142 | 0 | 0 |
+| Integration | 146 | 0 | 0 |
 
 ---
 
@@ -758,6 +783,8 @@
 | 500 keyword limit | Low | ✅ Fixed | Raised to 2000 with `keywordsTruncated` flag |
 | No audit trail | Medium | ✅ Fixed | Structured JSON audit logging to stdout (Railway captures) |
 | No query timeouts | Medium | ✅ Fixed | 15s timeout on all GAQL queries with timer cleanup |
+| XSS via innerHTML | High | ✅ Fixed | escapeHtml applied to all external data interpolation in app.js, pacing-app.js, audit-app.js |
+| OAuth CSRF | High | ✅ Fixed | crypto.randomBytes state parameter, single-use, validated on callback |
 
 ---
 

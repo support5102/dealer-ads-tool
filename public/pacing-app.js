@@ -392,7 +392,7 @@ function renderInventory(inv) {
       </div>
       <div class="is-row">
         <span class="is-label">New Vehicles on Lot</span>
-        <span class="is-value">${inv.count != null ? inv.count : '--'}</span>
+        <span class="is-value">${inv.count != null ? esc(String(inv.count)) : '--'}</span>
       </div>
       ${inv.modifier != null ? `
         <div class="is-row">
@@ -420,7 +420,7 @@ function formatStatus(status) {
     case 'under':          return 'Under-Pacing';
     case 'critical_over':  return 'Critical Over';
     case 'critical_under': return 'Critical Under';
-    default:               return status || 'Unknown';
+    default:               return esc(status) || 'Unknown';
   }
 }
 

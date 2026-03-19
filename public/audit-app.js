@@ -124,19 +124,19 @@ function renderResults(result) {
   // Summary cards
   summaryRow.innerHTML = `
     <div class="summary-card summary-total">
-      <div class="summary-number">${result.summary.total}</div>
+      <div class="summary-number">${escapeHtml(result.summary.total)}</div>
       <div class="summary-label">Total Findings</div>
     </div>
     <div class="summary-card summary-critical">
-      <div class="summary-number">${result.summary.critical}</div>
+      <div class="summary-number">${escapeHtml(result.summary.critical)}</div>
       <div class="summary-label">Critical</div>
     </div>
     <div class="summary-card summary-warning">
-      <div class="summary-number">${result.summary.warning}</div>
+      <div class="summary-number">${escapeHtml(result.summary.warning)}</div>
       <div class="summary-label">Warnings</div>
     </div>
     <div class="summary-card summary-info">
-      <div class="summary-number">${result.summary.info}</div>
+      <div class="summary-number">${escapeHtml(result.summary.info)}</div>
       <div class="summary-label">Info</div>
     </div>
   `;

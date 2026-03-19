@@ -13,6 +13,7 @@
 
 const express = require('express');
 const axios   = require('axios');
+const crypto  = require('crypto');
 
 /**
  * Creates auth routes with the given config.
@@ -26,6 +27,10 @@ function createAuthRouter(config) {
   const router = express.Router();
   // Step 1: Redirect user to Google consent screen
   router.get('/auth/google', (req, res) => {
+    // Generate CSRF-protection state token
+    const state = crypto.randomBytes(32).toString('hex');
+    req.session.oauthState = state;
+
     const params = new URLSearchParams({
       client_id:     config.googleAds.clientId,
       redirect_uri:  `${config.app.url}/auth/callback`,
@@ -33,14 +38,22 @@ function createAuthRouter(config) {
       scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly',
       access_type:   'offline',
       prompt:        'consent',
+      state,
     });
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
   });
 
   // Step 2: Exchange code for tokens
   router.get('/auth/callback', async (req, res) => {
-    const { code } = req.query;
+    const { code, state } = req.query;
     if (!code) return res.redirect('/?error=no_code');
+
+    // Validate CSRF state token
+    if (!state || state !== req.session.oauthState) {
+      return res.redirect('/?error=invalid_state');
+    }
+    // Clear state to prevent replay
+    delete req.session.oauthState;
 
     try {
       const { data } = await axios.post('https://oauth2.googleapis.com/token', {

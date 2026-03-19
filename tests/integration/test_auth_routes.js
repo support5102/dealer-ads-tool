@@ -31,6 +31,12 @@ describe('GET /auth/google', () => {
     expect(res.headers.location).toContain('accounts.google.com/o/oauth2');
   });
 
+  test('includes state parameter for CSRF protection', async () => {
+    const res = await supertest(app).get('/auth/google');
+
+    expect(res.headers.location).toMatch(/state=[a-f0-9]{64}/);
+  });
+
   test('includes client_id in redirect URL', async () => {
     const res = await supertest(app).get('/auth/google');
 
@@ -62,6 +68,19 @@ describe('GET /auth/google', () => {
 // ---------------------------------------------------------------------------
 // GET /auth/callback — OAuth token exchange
 // ---------------------------------------------------------------------------
+
+/**
+ * Helper: creates an agent with a valid OAuth state in session.
+ * Hits /auth/google to generate the state, then extracts it from the redirect URL.
+ */
+async function agentWithOAuthState(app) {
+  const agent = supertest.agent(app);
+  const res = await agent.get('/auth/google').expect(302);
+  const url = new URL(res.headers.location);
+  const state = url.searchParams.get('state');
+  return { agent, state };
+}
+
 describe('GET /auth/callback', () => {
   let app;
 
@@ -72,15 +91,13 @@ describe('GET /auth/callback', () => {
 
   test('exchanges code for tokens and redirects to home with connected=true', async () => {
     axios.post.mockResolvedValue({
-      data: {
-        access_token:  'new-access-token',
-        refresh_token: 'new-refresh-token',
-      },
+      data: { access_token: 'new-access-token', refresh_token: 'new-refresh-token' },
     });
     axios.get.mockResolvedValue({ data: { email: 'user@dealer.com' } });
 
-    const res = await supertest(app)
-      .get('/auth/callback?code=test-auth-code')
+    const { agent, state } = await agentWithOAuthState(app);
+    const res = await agent
+      .get(`/auth/callback?code=test-auth-code&state=${state}`)
       .expect(302);
 
     expect(res.headers.location).toBe('/?connected=true');
@@ -92,7 +109,8 @@ describe('GET /auth/callback', () => {
     });
     axios.get.mockResolvedValue({ data: { email: 'user@dealer.com' } });
 
-    await supertest(app).get('/auth/callback?code=my-code');
+    const { agent, state } = await agentWithOAuthState(app);
+    await agent.get(`/auth/callback?code=my-code&state=${state}`);
 
     expect(axios.post).toHaveBeenCalledWith(
       'https://oauth2.googleapis.com/token',
@@ -112,10 +130,9 @@ describe('GET /auth/callback', () => {
     });
     axios.get.mockResolvedValue({ data: { email: 'user@dealer.com' } });
 
-    const agent = supertest.agent(app);
-    await agent.get('/auth/callback?code=test-code');
+    const { agent, state } = await agentWithOAuthState(app);
+    await agent.get(`/auth/callback?code=test-code&state=${state}`);
 
-    // Verify tokens are in session by checking auth status
     const status = await agent.get('/api/auth/status');
     expect(status.body.connected).toBe(true);
   });
@@ -126,8 +143,8 @@ describe('GET /auth/callback', () => {
     });
     axios.get.mockResolvedValue({ data: { email: 'john@dealer.com' } });
 
-    const agent = supertest.agent(app);
-    await agent.get('/auth/callback?code=test-code');
+    const { agent, state } = await agentWithOAuthState(app);
+    await agent.get(`/auth/callback?code=test-code&state=${state}`);
 
     expect(axios.get).toHaveBeenCalledWith(
       'https://www.googleapis.com/oauth2/v2/userinfo',
@@ -144,8 +161,9 @@ describe('GET /auth/callback', () => {
     });
     axios.get.mockRejectedValue(new Error('Userinfo failed'));
 
-    const res = await supertest(app)
-      .get('/auth/callback?code=test-code')
+    const { agent, state } = await agentWithOAuthState(app);
+    const res = await agent
+      .get(`/auth/callback?code=test-code&state=${state}`)
       .expect(302);
 
     expect(res.headers.location).toBe('/?connected=true');
@@ -159,11 +177,44 @@ describe('GET /auth/callback', () => {
     expect(res.headers.location).toBe('/?error=no_code');
   });
 
+  test('rejects callback with missing state (CSRF protection)', async () => {
+    const res = await supertest(app)
+      .get('/auth/callback?code=test-code')
+      .expect(302);
+
+    expect(res.headers.location).toBe('/?error=invalid_state');
+  });
+
+  test('rejects callback with wrong state (CSRF protection)', async () => {
+    const { agent } = await agentWithOAuthState(app);
+    const res = await agent
+      .get('/auth/callback?code=test-code&state=wrong-state-value')
+      .expect(302);
+
+    expect(res.headers.location).toBe('/?error=invalid_state');
+  });
+
+  test('prevents state replay (state cleared after use)', async () => {
+    axios.post.mockResolvedValue({
+      data: { access_token: 'at', refresh_token: 'rt' },
+    });
+    axios.get.mockResolvedValue({ data: { email: 'user@dealer.com' } });
+
+    const { agent, state } = await agentWithOAuthState(app);
+    // First callback succeeds
+    await agent.get(`/auth/callback?code=code1&state=${state}`).expect(302);
+
+    // Replaying same state fails
+    const replay = await agent.get(`/auth/callback?code=code2&state=${state}`).expect(302);
+    expect(replay.headers.location).toBe('/?error=invalid_state');
+  });
+
   test('redirects with error when token exchange fails', async () => {
     axios.post.mockRejectedValue(new Error('Token exchange failed'));
 
-    const res = await supertest(app)
-      .get('/auth/callback?code=bad-code')
+    const { agent, state } = await agentWithOAuthState(app);
+    const res = await agent
+      .get(`/auth/callback?code=bad-code&state=${state}`)
       .expect(302);
 
     expect(res.headers.location).toBe('/?error=oauth_failed');

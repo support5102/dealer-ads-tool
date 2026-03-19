@@ -153,7 +153,7 @@ async function selectAccount(id) {
     document.getElementById('analyseBtn').disabled = false;
     showToast(`Loaded ${data.stats.campaigns} campaigns, ${data.stats.adGroups} ad groups, ${data.stats.keywords} keywords`);
   } catch (err) {
-    tree.innerHTML = `<div class="tree-empty" style="color:#f87171">Error: ${err.message}</div>`;
+    tree.innerHTML = `<div class="tree-empty" style="color:#f87171">Error: ${escapeHtml(err.message)}</div>`;
     showToast(err.message, 'error');
   }
 }
@@ -175,19 +175,19 @@ function renderTree(campaigns) {
 
     const statusClass = camp.status.toLowerCase();
     campDiv.innerHTML = `
-      <div class="tree-camp-header" onclick="toggleCampaign(this)" data-camp="${camp.name}">
+      <div class="tree-camp-header" onclick="toggleCampaign(this)" data-camp="${escapeHtml(camp.name)}">
         <span class="tree-arrow">▶</span>
         <div class="status-dot ${statusClass}"></div>
-        <span class="tree-camp-name">${camp.name}</span>
-        <span class="tree-budget">$${camp.budget}</span>
+        <span class="tree-camp-name">${escapeHtml(camp.name)}</span>
+        <span class="tree-budget">$${escapeHtml(camp.budget)}</span>
       </div>
       <div class="tree-ag-list" style="display:none">
         ${camp.adGroups.map(ag => `
           <div class="tree-ag">
-            <div class="tree-ag-header" onclick="toggleAG(this)" data-ag="${ag.name}">
+            <div class="tree-ag-header" onclick="toggleAG(this)" data-ag="${escapeHtml(ag.name)}">
               <span class="tree-arrow">▶</span>
               <div class="status-dot ${ag.status.toLowerCase()}"></div>
-              <span class="tree-ag-name">📁 ${ag.name}</span>
+              <span class="tree-ag-name">📁 ${escapeHtml(ag.name)}</span>
               <span class="tree-kw-count">🔑${ag.keywords.length}</span>
             </div>
             <div class="tree-keywords" style="display:none">
@@ -197,8 +197,8 @@ function renderTree(campaigns) {
                 return `<div class="tree-kw">
                   <span class="match-badge ${match}">${matchShort}</span>
                   ${kw.negative ? '<span style="color:#f87171;font-size:9px">NEG</span>' : ''}
-                  <span class="kw-text">${kw.text}</span>
-                  ${kw.bid ? `<span style="font-size:10px;color:#475569">$${kw.bid}</span>` : ''}
+                  <span class="kw-text">${escapeHtml(kw.text)}</span>
+                  ${kw.bid ? `<span style="font-size:10px;color:#475569">$${escapeHtml(kw.bid)}</span>` : ''}
                 </div>`;
               }).join('')}
               ${ag.keywords.length > 30 ? `<div class="tree-kw" style="color:#334155;font-size:10px">...and ${ag.keywords.length - 30} more</div>` : ''}
@@ -295,8 +295,8 @@ function renderPlan(plan) {
   let html = `
     <div class="plan-card">
       <div class="plan-header">
-        <div class="plan-summary">${plan.summary || 'Task parsed'}</div>
-        <div class="plan-count">${changes.length} change${changes.length !== 1 ? 's' : ''} · ${state.selectedName}</div>
+        <div class="plan-summary">${escapeHtml(plan.summary || 'Task parsed')}</div>
+        <div class="plan-count">${changes.length} change${changes.length !== 1 ? 's' : ''} · ${escapeHtml(state.selectedName)}</div>
       </div>
       <div class="change-list">
   `;
@@ -304,17 +304,17 @@ function renderPlan(plan) {
   changes.forEach(c => {
     const meta = TYPE_META[c.type] || { label: c.type, color: '#94a3b8', bg: '#1a2035', border: '#334155' };
     let desc = '';
-    if (c.type === 'update_budget') desc = `New budget: $${c.details?.newBudget}/day`;
-    else if (c.type.includes('keyword')) desc = `[${c.details?.matchType || '?'}] "${c.details?.keyword}"`;
-    else if (c.type.includes('radius')) desc = `${c.details?.radius}mi radius around (${c.details?.lat}, ${c.details?.lng})`;
-    else desc = c.adGroupName ? `${c.campaignName} > ${c.adGroupName}` : (c.campaignName || '');
+    if (c.type === 'update_budget') desc = `New budget: $${escapeHtml(c.details?.newBudget)}/day`;
+    else if (c.type.includes('keyword')) desc = `[${escapeHtml(c.details?.matchType || '?')}] "${escapeHtml(c.details?.keyword)}"`;
+    else if (c.type.includes('radius')) desc = `${escapeHtml(c.details?.radius)}mi radius around (${escapeHtml(c.details?.lat)}, ${escapeHtml(c.details?.lng)})`;
+    else desc = c.adGroupName ? `${escapeHtml(c.campaignName)} > ${escapeHtml(c.adGroupName)}` : escapeHtml(c.campaignName || '');
 
     html += `
       <div class="change-item">
         <span class="change-type-badge" style="background:${meta.bg};color:${meta.color};border:1px solid ${meta.border}">${meta.label}</span>
         <div>
           <div class="change-desc">${desc || '—'}</div>
-          <div class="change-campaign">${c.campaignName || ''}${c.adGroupName ? ' > ' + c.adGroupName : ''}</div>
+          <div class="change-campaign">${escapeHtml(c.campaignName || '')}${c.adGroupName ? ' > ' + escapeHtml(c.adGroupName) : ''}</div>
         </div>
       </div>
     `;
@@ -325,7 +325,7 @@ function renderPlan(plan) {
   if (warnings.length) {
     html += `<div class="warnings-box">
       <div class="warnings-title">Review Before Applying</div>
-      ${warnings.map(w => `<div class="warning-item">• ${w}</div>`).join('')}
+      ${warnings.map(w => `<div class="warning-item">• ${escapeHtml(w)}</div>`).join('')}
     </div>`;
   }
 
@@ -399,7 +399,7 @@ function renderResults(data, dryRun) {
       ${data.results.map(r => `
         <div class="result-item">
           <span class="result-icon">${r.success ? '✓' : '✗'}</span>
-          <span class="result-text" style="color:${r.success ? '#94a3b8' : '#f87171'}">${r.result}</span>
+          <span class="result-text" style="color:${r.success ? '#94a3b8' : '#f87171'}">${escapeHtml(r.result)}</span>
         </div>
       `).join('')}
     </div>
@@ -467,6 +467,17 @@ async function exportChangesCSV() {
   } catch (err) {
     showToast('Export error: ' + err.message, 'error');
   }
+}
+
+/**
+ * Escapes HTML special characters to prevent XSS.
+ * @param {string} text - Untrusted text to escape
+ * @returns {string} Safe HTML-escaped string
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = String(text ?? '');
+  return div.innerHTML;
 }
 
 let toastTimer;
