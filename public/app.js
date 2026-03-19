@@ -68,7 +68,9 @@ function logout() {
 function showConnectedState() {
   const hr = document.getElementById('headerRight');
   hr.innerHTML = `
-    <a href="/pacing.html" class="nav-link">Pacing Dashboard</a>
+    <a href="/pacing.html" class="nav-link">Pacing</a>
+    <a href="/audit.html" class="nav-link">Auditor</a>
+    <a href="/builder.html" class="nav-link">Campaign Builder</a>
     <div class="connected-badge">
       <div class="pulse-dot"></div>
       Google Ads Connected
