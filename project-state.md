@@ -1,6 +1,6 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-18
+**Last Updated:** 2026-03-19
 **Current Phase:** Phase 8: Campaign Builder Integration — COMPLETE (all 3 phases)
 
 ---
@@ -84,6 +84,33 @@
 ---
 
 ## Session Log
+
+### 2026-03-19 - CLEAN HANDOFF
+
+**Completed:**
+- Fixed production pacing errors (2 bugs):
+  1. Null guard on `metrics.cost_micros` — campaigns with no spend returned null, causing NaN in pacing calculations
+  2. Removed invalid `campaign_budget.total_amount_micros` from shared budget GAQL query (field doesn't exist in Google Ads API v19)
+- Added sub-MCC account discovery for pacing dashboard:
+  - `listAccessibleCustomers` now recursively discovers child accounts under sub-MCCs (e.g., Savvy Ford 171-200-3420 under PPC Account MCC)
+  - Accounts from sub-MCCs are included in the pacing dashboard account dropdown
+  - Updated tests to cover recursive MCC discovery
+- Pushed to V3 branch (Railway auto-deployed)
+
+**Files Modified:**
+- `src/services/google-ads.js` — null guard on cost_micros, removed invalid GAQL field, recursive sub-MCC discovery
+- `src/routes/accounts.js` — pass-through for sub-MCC accounts
+- `tests/unit/test_pacing_queries.js` — updated for null metrics handling
+- `tests/integration/test_pacing_routes.js` — updated for sub-MCC discovery
+
+**Test Count:** 475 (unchanged)
+
+**Next Session Focus:**
+- Verify Savvy Ford sub-MCC accounts appear in pacing dashboard after Railway deploy
+- Fix high-severity PR findings (XSS in app.js innerHTML, OAuth CSRF in auth.js)
+- Deploy V3 to Railway (env vars + OAuth redirect URI) if not yet done
+
+---
 
 ### 2026-03-18 (session 3) - CLEAN HANDOFF
 
@@ -567,14 +594,14 @@
 
 ## Test Status
 
-**Last Run:** 2026-03-16 — 405 passed, 0 failed
+**Last Run:** 2026-03-19 — 475 passed, 0 failed
 **Environment:** Local
 
 | Tier | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | Config | 44 | 0 | 0 |
-| Unit | 280 | 0 | 0 |
-| Integration | 81 | 0 | 0 |
+| Unit | 320 | 0 | 0 |
+| Integration | 111 | 0 | 0 |
 
 ---
 
