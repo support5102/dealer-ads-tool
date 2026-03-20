@@ -31,9 +31,10 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/api/undo` | POST | Undo a reversible change (by ID or legacy index) |
 | `/api/smart-suggestions` | POST | Claude analyses account and flags issues proactively |
 | `/api/report` | POST | Claude generates natural language performance report |
+| `/api/account/:id/budget-spend` | GET | Daily spend since last budget change (current month) |
 | `/api/freshdesk-webhook` | POST | Accept tasks from Freshdesk webhooks (API key auth) |
 
-## Current Phase: All 9 Phases Complete
+## Current Phase: All 9 Phases + Budget Tracker + Production Deploy Complete
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -124,8 +125,26 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] Claude JSON parse error handling in webhook
 - [x] .gitignore added (node_modules, data/, .env)
 
+### Budget Spend Tracker (completed 2026-03-20)
+- [x] New endpoint `/api/account/:customerId/budget-spend` — daily spend since last budget change
+- [x] Queries change_event for budget modifications this month
+- [x] Daily cost/impressions/clicks/conversions breakdown per campaign
+- [x] Frontend "Budget Tracker" button with visual spend table and bar chart
+- [x] Highlights campaigns with budget changes, shows old → new budget amounts
+
+### Production Deployment Hardening (completed 2026-03-20)
+- [x] `APP_URL` added to required env vars (prevents broken OAuth)
+- [x] `trust proxy` enabled in production (Railway reverse proxy)
+- [x] Secure cookies with `sameSite: 'lax'` in production
+- [x] CORS restricted to APP_URL origin in production
+- [x] Customer ID format validation on budget-spend endpoint
+- [x] 20s timeouts on all budget-spend Google Ads queries
+- [x] Error messages sanitized (no internal details leaked to client)
+- [x] env.example updated to match actual code (APP_URL, not GOOGLE_REDIRECT_URI)
+
 ## Known Issues
 - GAQL queries use string interpolation (parameterized queries preferred long-term)
 - Timeout on apply-changes doesn't cancel in-flight API mutation
 - No integration tests for route endpoints (unit tests only)
 - Frontend undo buttons still send historyIndex (should migrate to historyId)
+- change_event query only detects budget amount changes, not budget reassignment between campaigns

@@ -453,6 +453,78 @@
       animation: slideUp .3s ease-out;
     }
 
+    /* Budget tracker panel */
+    .budget-tracker {
+      background: var(--bg2);
+      border: 1px solid #1e3a5f;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      animation: slideUp .3s ease-out;
+    }
+    .budget-campaign {
+      background: var(--bg3);
+      border: 1px solid #1e3a5f40;
+      border-radius: 8px;
+      padding: 14px;
+      margin-top: 10px;
+    }
+    .budget-campaign-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .budget-change-badge {
+      background: #7c3aed20;
+      border: 1px solid #7c3aed60;
+      color: #a78bfa;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+    }
+    .spend-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      font-family: 'DM Mono', monospace;
+    }
+    .spend-table th {
+      text-align: left;
+      color: var(--text3);
+      padding: 4px 8px;
+      border-bottom: 1px solid #1e3a5f40;
+      font-weight: 500;
+    }
+    .spend-table td {
+      padding: 4px 8px;
+      color: var(--text2);
+      border-bottom: 1px solid #0f1729;
+    }
+    .spend-bar-cell { position: relative; }
+    .spend-bar {
+      position: absolute;
+      left: 0; top: 2px; bottom: 2px;
+      background: #1d4ed830;
+      border-radius: 3px;
+      z-index: 0;
+    }
+    .spend-bar-text { position: relative; z-index: 1; }
+    .budget-summary {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .budget-stat {
+      font-size: 11px;
+      color: var(--text3);
+    }
+    .budget-stat strong {
+      color: var(--text1);
+      font-size: 13px;
+    }
+
     /* Plan card */
     .plan-card {
       background: var(--bg2);
@@ -746,6 +818,7 @@ Examples:
         </button>
         <button class="btn-secondary" onclick="clearTask()">Clear</button>
         <button class="btn-secondary" id="reportBtn" onclick="generateReport()" style="display:none;border-color:#7c3aed40;color:#a78bfa">📊 Report</button>
+        <button class="btn-secondary" id="budgetTrackBtn" onclick="loadBudgetTracker()" style="display:none;border-color:#059669;color:#34d399">💰 Budget Tracker</button>
         <span style="font-size:11px;color:#334155;margin-left:4px" id="accountLabel"></span>
       </div>
 
@@ -754,6 +827,9 @@ Examples:
 
       <!-- Report appears here -->
       <div id="reportArea"></div>
+
+      <!-- Budget tracker appears here -->
+      <div id="budgetTrackerArea"></div>
 
       <!-- History panel -->
       <div id="historyPanel" style="display:none;margin-top:16px">
@@ -943,6 +1019,7 @@ async function selectAccount(id) {
     renderTree(data.campaigns);
     document.getElementById('analyseBtn').disabled = false;
     document.getElementById('reportBtn').style.display = '';
+    document.getElementById('budgetTrackBtn').style.display = '';
     showToast(`📂 Loaded ${data.stats.campaigns} campaigns · ${data.stats.adGroups} ad groups · ${data.stats.keywords} keywords`);
     fetchSmartSuggestions();
   } catch (err) {
@@ -1549,6 +1626,88 @@ async function generateReport() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// BUDGET SPEND TRACKER
+// ─────────────────────────────────────────────────────────────
+async function loadBudgetTracker() {
+  if (!state.selectedId) return;
+  const btn = document.getElementById('budgetTrackBtn');
+  const area = document.getElementById('budgetTrackerArea');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Loading...';
+  area.innerHTML = '';
+
+  try {
+    const acc = state.accounts?.find(a => a.id === state.selectedId);
+    const mccParam = acc?.mccId ? `?mccId=${acc.mccId}` : '';
+    const res = await fetch(`/api/account/${state.selectedId}/budget-spend${mccParam}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderBudgetTracker(data);
+  } catch (err) {
+    area.innerHTML = `<div class="budget-tracker" style="color:#f87171">Budget tracker error: ${esc(err.message)}</div>`;
+    showToast('❌ ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '💰 Budget Tracker';
+  }
+}
+
+function renderBudgetTracker(data) {
+  const area = document.getElementById('budgetTrackerArea');
+  if (!data.campaigns || data.campaigns.length === 0) {
+    area.innerHTML = '<div class="budget-tracker"><div class="suggestions-title">💰 Budget Spend Tracker</div><p style="color:var(--text3);font-size:12px">No spend data found this month.</p></div>';
+    return;
+  }
+
+  let html = `<div class="budget-tracker">
+    <div class="suggestions-title">💰 Budget Spend Tracker — ${esc(state.selectedName)}</div>
+    <p style="color:var(--text3);font-size:11px;margin:4px 0 12px">Daily spend since last budget change (${esc(data.monthStart)} to ${esc(data.today)})</p>`;
+
+  if (data.campaignsWithBudgetChanges > 0) {
+    html += `<p style="color:#a78bfa;font-size:11px;margin-bottom:12px">📌 ${data.campaignsWithBudgetChanges} campaign${data.campaignsWithBudgetChanges > 1 ? 's' : ''} had budget changes this month</p>`;
+  }
+
+  data.campaigns.forEach(camp => {
+    const statusClass = (String(camp.status || '')).toLowerCase().replace('campaign_status_', '');
+    const maxDailyCost = Math.max(...camp.dailySpend.map(d => d.cost), 1);
+
+    html += `<div class="budget-campaign">
+      <div class="budget-campaign-header">
+        <div class="status-dot ${statusClass}"></div>
+        <strong style="color:var(--text1);font-size:13px">${esc(camp.campaignName)}</strong>
+        ${camp.budgetChange ? `<span class="budget-change-badge">Budget changed ${esc(camp.budgetChange.changeDate)}${camp.budgetChange.oldBudget !== null && camp.budgetChange.newBudget !== null ? ` · $${camp.budgetChange.oldBudget.toFixed(2)} → $${camp.budgetChange.newBudget.toFixed(2)}` : ''}</span>` : ''}
+      </div>
+      <div class="budget-summary">
+        <div class="budget-stat">Budget: <strong>${camp.currentBudget !== null ? '$' + camp.currentBudget.toFixed(2) + '/day' : '?'}</strong></div>
+        <div class="budget-stat">Avg daily: <strong>$${camp.avgDailySpend.toFixed(2)}</strong></div>
+        <div class="budget-stat">Total (${camp.daysTracked}d): <strong>$${camp.totalSpend.toFixed(2)}</strong></div>
+        <div class="budget-stat">Clicks: <strong>${camp.totalClicks.toLocaleString()}</strong></div>
+      </div>`;
+
+    if (camp.dailySpend.length > 0) {
+      html += `<table class="spend-table"><thead><tr><th>Date</th><th>Spend</th><th>Imp</th><th>Clicks</th><th>Conv</th><th></th></tr></thead><tbody>`;
+      camp.dailySpend.forEach(d => {
+        const pct = Math.round((d.cost / maxDailyCost) * 100);
+        const overBudget = camp.currentBudget && d.cost > camp.currentBudget * 1.1;
+        html += `<tr${overBudget ? ' style="color:#f87171"' : ''}>
+          <td>${esc(d.date)}</td>
+          <td>$${d.cost.toFixed(2)}</td>
+          <td>${d.impressions.toLocaleString()}</td>
+          <td>${d.clicks.toLocaleString()}</td>
+          <td>${d.conversions}</td>
+          <td class="spend-bar-cell"><div class="spend-bar" style="width:${pct}%"></div><span class="spend-bar-text">${'█'.repeat(Math.max(1, Math.round(pct / 5)))}</span></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  });
+
+  html += '</div>';
+  area.innerHTML = html;
+}
+
 function clearTask() {
   document.getElementById('taskInput').value = '';
   clearPlan();
@@ -1558,6 +1717,7 @@ function clearPlan() {
   state.batchPlan = null;
   document.getElementById('planArea').innerHTML = '';
   document.getElementById('reportArea').innerHTML = '';
+  document.getElementById('budgetTrackerArea').innerHTML = '';
 }
 
 let toastTimer;

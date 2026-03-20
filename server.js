@@ -15,6 +15,7 @@ const { addHistoryEntry, getHistory, updateHistoryEntryById } = require('./lib/h
 // ─────────────────────────────────────────────────────────────
 const REQUIRED_ENV = [
   'SESSION_SECRET',
+  'APP_URL',
   'GOOGLE_ADS_CLIENT_ID',
   'GOOGLE_ADS_CLIENT_SECRET',
   'GOOGLE_ADS_DEVELOPER_TOKEN',
@@ -27,13 +28,15 @@ if (missing.length) {
 }
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) app.set('trust proxy', 1); // Railway runs behind a reverse proxy
 app.use(express.json());
-app.use(cors());
+app.use(cors(isProduction ? { origin: process.env.APP_URL, credentials: true } : undefined));
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  cookie: { secure: isProduction, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 } // 24 hours
 }));
 
 // ─────────────────────────────────────────────────────────────
@@ -999,6 +1002,197 @@ app.post('/api/undo', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Undo failed: ' + err.message });
   }
 });
+
+// ─────────────────────────────────────────────────────────────
+// BUDGET SPEND TRACKER — daily spend since last budget change
+// ─────────────────────────────────────────────────────────────
+app.get('/api/account/:customerId/budget-spend', requireAuth, async (req, res) => {
+  const { customerId } = req.params;
+  const { mccId } = req.query;
+
+  if (!/^\d{3,10}$/.test(customerId)) return res.status(400).json({ error: 'Invalid customer ID format' });
+  if (mccId && !/^\d{3,10}$/.test(mccId)) return res.status(400).json({ error: 'Invalid MCC ID format' });
+
+  try {
+    const customerConfig = {
+      customer_id: customerId,
+      refresh_token: req.session.tokens.refresh_token,
+    };
+    if (mccId) customerConfig.login_customer_id = mccId;
+
+    const client = new GoogleAdsApi({
+      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    }).Customer(customerConfig);
+
+    // Get first day of current month for date range
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    // Fetch budget change events and daily spend in parallel
+    const queryTimeout = (promise, label, ms = 20000) => Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} timed out after ${ms / 1000}s`)), ms)),
+    ]);
+
+    const [changeEvents, dailySpend, budgetRows] = await Promise.all([
+      // Budget change events this month
+      queryTimeout(client.query(`
+        SELECT
+          change_event.change_date_time,
+          change_event.changed_fields,
+          change_event.new_resource,
+          change_event.old_resource,
+          change_event.resource_type,
+          campaign.id,
+          campaign.name
+        FROM change_event
+        WHERE change_event.change_date_time >= '${monthStart} 00:00:00'
+          AND change_event.change_date_time <= '${today} 23:59:59'
+          AND change_event.resource_type = 'CAMPAIGN_BUDGET'
+        ORDER BY change_event.change_date_time DESC
+        LIMIT 100
+      `), 'ChangeEvents').catch(e => {
+        console.warn('Change events query failed:', e.message);
+        return [];
+      }),
+
+      // Daily spend per campaign this month
+      queryTimeout(client.query(`
+        SELECT
+          campaign.id,
+          campaign.name,
+          campaign.status,
+          segments.date,
+          metrics.cost_micros,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.conversions
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND segments.date >= '${monthStart}'
+          AND segments.date <= '${today}'
+        ORDER BY campaign.name, segments.date
+      `), 'DailySpend'),
+
+      // Current budgets
+      queryTimeout(client.query(`
+        SELECT campaign.id, campaign.name, campaign_budget.amount_micros
+        FROM campaign WHERE campaign.status != 'REMOVED'
+      `), 'Budgets').catch(() => []),
+    ]);
+
+    // Build current budget map
+    const budgetMap = {};
+    budgetRows.forEach(row => {
+      const b = row.campaign_budget || row.campaignBudget;
+      const micros = b?.amount_micros || b?.amountMicros;
+      if (micros) budgetMap[String(row.campaign.id)] = Number(micros) / 1_000_000;
+    });
+
+    // Build budget change map: campaignId -> { date, oldBudget, newBudget }
+    const budgetChanges = {};
+    changeEvents.forEach(row => {
+      const campId = String(row.campaign?.id || '');
+      if (!campId) return;
+      // Only keep the most recent budget change per campaign
+      if (budgetChanges[campId]) return;
+      const changeDate = (row.change_event.change_date_time || '').substring(0, 10);
+      const newRes = row.change_event.new_resource || row.change_event.newResource || '';
+      const oldRes = row.change_event.old_resource || row.change_event.oldResource || '';
+      // Parse budget micros from resource strings if available
+      const newMicros = extractBudgetMicros(newRes);
+      const oldMicros = extractBudgetMicros(oldRes);
+      budgetChanges[campId] = {
+        changeDate,
+        oldBudget: oldMicros !== null ? (oldMicros / 1_000_000) : null,
+        newBudget: newMicros !== null ? (newMicros / 1_000_000) : null,
+        changeDateTime: row.change_event.change_date_time,
+      };
+    });
+
+    // Group daily spend by campaign
+    const campaignSpend = {};
+    dailySpend.forEach(row => {
+      const campId = String(row.campaign.id);
+      if (!campaignSpend[campId]) {
+        campaignSpend[campId] = {
+          campaignId: campId,
+          campaignName: row.campaign.name,
+          status: row.campaign.status,
+          currentBudget: budgetMap[campId] || null,
+          budgetChange: budgetChanges[campId] || null,
+          dailySpend: [],
+          totalSpend: 0,
+          totalImpressions: 0,
+          totalClicks: 0,
+          totalConversions: 0,
+          daysTracked: 0,
+        };
+      }
+      const m = row.metrics;
+      const cost = Number(m.cost_micros || m.costMicros || 0) / 1_000_000;
+      const date = row.segments?.date || row.segments?.Date;
+      const entry = {
+        date,
+        cost: Number(cost.toFixed(2)),
+        impressions: Number(m.impressions || m.Impressions || 0),
+        clicks: Number(m.clicks || m.Clicks || 0),
+        conversions: Number(m.conversions || m.Conversions || 0),
+      };
+
+      // If there was a budget change, only include spend from that date onward
+      const bc = budgetChanges[campId];
+      if (bc && date < bc.changeDate) return;
+
+      campaignSpend[campId].dailySpend.push(entry);
+      campaignSpend[campId].totalSpend += entry.cost;
+      campaignSpend[campId].totalImpressions += entry.impressions;
+      campaignSpend[campId].totalClicks += entry.clicks;
+      campaignSpend[campId].totalConversions += entry.conversions;
+    });
+
+    // Calculate averages and days tracked
+    const campaigns = Object.values(campaignSpend).map(c => {
+      c.totalSpend = Number(c.totalSpend.toFixed(2));
+      c.daysTracked = c.dailySpend.length;
+      c.avgDailySpend = c.daysTracked > 0 ? Number((c.totalSpend / c.daysTracked).toFixed(2)) : 0;
+      return c;
+    });
+
+    // Sort: campaigns with budget changes first, then by spend
+    campaigns.sort((a, b) => {
+      if (a.budgetChange && !b.budgetChange) return -1;
+      if (!a.budgetChange && b.budgetChange) return 1;
+      return b.totalSpend - a.totalSpend;
+    });
+
+    res.json({
+      monthStart,
+      today,
+      campaigns,
+      totalCampaigns: campaigns.length,
+      campaignsWithBudgetChanges: campaigns.filter(c => c.budgetChange).length,
+    });
+
+  } catch (err) {
+    console.error('Budget spend tracker error:', err.message);
+    res.status(500).json({ error: 'Failed to load budget spend data. Check server logs for details.' });
+  }
+});
+
+// Helper: extract budget micros from change_event resource string
+function extractBudgetMicros(resourceStr) {
+  if (!resourceStr) return null;
+  // Resource may be JSON-like or contain amount_micros field
+  if (typeof resourceStr === 'object') {
+    return resourceStr.amount_micros || resourceStr.amountMicros || null;
+  }
+  const match = String(resourceStr).match(/amount_micros["\s:]+["']?(\d+)/);
+  return match ? Number(match[1]) : null;
+}
 
 // ─────────────────────────────────────────────────────────────
 // SMART SUGGESTIONS — Claude analyses account and flags issues

@@ -30,4 +30,4 @@ npm test              # run 29 unit tests
 Railway via Nixpacks. Config in `railway.json`. Health check at `/health`.
 
 ## Current state
-All 9 phases complete. Modular architecture with extracted frontend, libraries, and tests. Supports single/multi-account task parsing, batch apply, persistent change history with undo, smart suggestions, NL reporting, task templates, and Freshdesk webhook. See `project-state.md` for full details.
+All 9 phases + budget tracker + production hardening complete. Modular architecture with extracted frontend, libraries, and tests. Supports single/multi-account task parsing, batch apply, persistent change history with undo, smart suggestions, NL reporting, task templates, budget spend tracking, and Freshdesk webhook. Production-ready with secure cookies, CORS restrictions, and trust proxy for Railway. See `project-state.md` for full details.
