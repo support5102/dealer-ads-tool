@@ -9,7 +9,8 @@
  *
  * Supported types: pause_campaign, enable_campaign, update_budget,
  * pause_ad_group, enable_ad_group, pause_keyword, add_keyword,
- * add_negative_keyword, exclude_radius, add_radius
+ * add_negative_keyword, exclude_radius, add_radius, update_keyword_bid,
+ * dismiss_recommendation
  */
 
 const { sanitizeGaqlString, sanitizeGaqlNumber } = require('../utils/sanitize');
@@ -217,8 +218,35 @@ async function applyChange(client, change, dryRun) {
       return `Added ${details.radius}mi radius targeting to ${campaignName}`;
     }
 
+    case 'update_keyword_bid': {
+      const safeCamp = sanitizeGaqlString(campaignName);
+      const safeKw   = sanitizeGaqlString(details.keyword);
+      const safeMatch = sanitizeGaqlString(details.matchType);
+      const rows = await client.query(
+        `SELECT ad_group_criterion.resource_name FROM ad_group_criterion ` +
+        `WHERE campaign.name = '${safeCamp}' ` +
+        `AND ad_group_criterion.keyword.text = '${safeKw}' ` +
+        `AND ad_group_criterion.keyword.match_type = '${safeMatch}' LIMIT 1`
+      );
+      if (!rows.length) throw new Error(`Keyword not found: ${details.keyword}`);
+      const newBidMicros = Math.round(parseFloat(details.newBid) * 1_000_000);
+      await client.adGroupCriteria.update([{
+        resource_name: rows[0].ad_group_criterion.resource_name,
+        cpc_bid_micros: newBidMicros,
+      }]);
+      return `Updated bid for [${details.matchType}] "${details.keyword}" to $${details.newBid}`;
+    }
+
+    case 'dismiss_recommendation': {
+      // Dismiss via REST API — resource name is the full recommendation path
+      await client.recommendations.dismiss([{
+        resource_name: details.resourceName,
+      }]);
+      return `Dismissed recommendation: ${details.resourceName}`;
+    }
+
     default:
-      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius`);
+      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation`);
   }
 }
 

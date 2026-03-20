@@ -687,3 +687,83 @@ describe('applyChange — error cases', () => {
       .rejects.toThrow('Campaign not found');
   });
 });
+
+// ---------------------------------------------------------------------------
+// applyChange — update_keyword_bid
+// ---------------------------------------------------------------------------
+describe('applyChange — update_keyword_bid', () => {
+  let client;
+
+  beforeEach(() => {
+    client = new FakeGoogleAdsClient();
+  });
+
+  test('updates keyword bid with correct micros value', async () => {
+    const change = {
+      type: 'update_keyword_bid',
+      campaignName: 'Honda Civic - Search',
+      details: { keyword: 'honda civic', matchType: 'EXACT', newBid: 2.50 },
+    };
+    const result = await applyChange(client, change, false);
+    expect(result).toContain('Updated bid');
+    expect(result).toContain('honda civic');
+    expect(result).toContain('$2.5');
+    expect(client.mutations).toHaveLength(1);
+    expect(client.mutations[0].type).toBe('adGroupCriteria.update');
+    expect(client.mutations[0].data[0].cpc_bid_micros).toBe(2500000);
+  });
+
+  test('throws when keyword not found', async () => {
+    const change = {
+      type: 'update_keyword_bid',
+      campaignName: 'Honda Civic - Search',
+      details: { keyword: 'nonexistent keyword', matchType: 'EXACT', newBid: 2.00 },
+    };
+    await expect(applyChange(client, change, false))
+      .rejects.toThrow('Keyword not found');
+  });
+
+  test('dry run returns description without executing', async () => {
+    const change = {
+      type: 'update_keyword_bid',
+      campaignName: 'Honda Civic - Search',
+      details: { keyword: 'honda civic', matchType: 'EXACT', newBid: 2.50 },
+    };
+    const result = await applyChange(client, change, true);
+    expect(result).toContain('[DRY RUN]');
+    expect(client.mutations).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyChange — dismiss_recommendation
+// ---------------------------------------------------------------------------
+describe('applyChange — dismiss_recommendation', () => {
+  let client;
+
+  beforeEach(() => {
+    client = new FakeGoogleAdsClient();
+  });
+
+  test('dismisses recommendation by resource name', async () => {
+    const change = {
+      type: 'dismiss_recommendation',
+      details: { resourceName: 'customers/123/recommendations/456' },
+    };
+    const result = await applyChange(client, change, false);
+    expect(result).toContain('Dismissed recommendation');
+    expect(client.mutations).toHaveLength(1);
+    expect(client.mutations[0].type).toBe('recommendations.dismiss');
+    expect(client.mutations[0].data[0].resource_name).toBe('customers/123/recommendations/456');
+  });
+
+  test('dry run returns description without executing', async () => {
+    const change = {
+      type: 'dismiss_recommendation',
+      details: { resourceName: 'customers/123/recommendations/456' },
+    };
+    const result = await applyChange(client, change, true);
+    expect(result).toContain('[DRY RUN]');
+    expect(client.mutations).toHaveLength(0);
+  });
+});

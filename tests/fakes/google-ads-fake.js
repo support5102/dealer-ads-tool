@@ -77,6 +77,7 @@ class FakeGoogleAdsClient {
     };
     this.campaignCriteria = { create: (data) => this._recordMutation('campaignCriteria.create', data) };
     this.campaignBudgets = { update: (data) => this._recordMutation('campaignBudgets.update', data) };
+    this.recommendations = { dismiss: (data) => this._recordMutation('recommendations.dismiss', data) };
   }
 
   /**
