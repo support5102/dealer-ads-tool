@@ -89,21 +89,36 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] XSS fix in suggestions panel (data attributes instead of inline onclick)
 - [x] XSS fix in tree error display
 
+### Phase 7: Security Hardening & Reliability (completed 2026-03-20)
+- [x] Remove hardcoded session secret fallback — require SESSION_SECRET env var
+- [x] Startup validation — exit with clear error if required env vars missing
+- [x] Account ownership verification on both single and batch apply endpoints
+- [x] Concurrency limit on batch API calls (cap at 5 concurrent via chunked loop)
+- [x] gaqlEscape() helper — replaces all inline .replace() calls, validates length/type
+- [x] matchType enum validation (EXACT/PHRASE/BROAD)
+- [x] Timeout warnings returned to client for timed-out mutations
+- [x] Fix env.example (was accidentally HTML)
+- [x] Crypto import moved to top-level
+
+### Phase 8: Modularization (next)
+- [ ] Extract frontend HTML to public/index.html
+- [ ] Extract gadsSearch to lib/gads-search.js
+- [ ] Extract applyChange + gaqlEscape to lib/apply-change.js
+- [ ] Extract Claude prompt builders to lib/claude-prompts.js
+- [ ] Extract route handlers into routes/ directory
+- [ ] server.js shrinks to ~50 lines
+
+### Phase 9: Testing & Webhook Improvement
+- [ ] Add Jest + Supertest test infrastructure
+- [ ] Unit tests for applyChange and gaqlEscape
+- [ ] Unit tests for Claude prompt builders
+- [ ] Integration tests for route validation
+- [ ] Freshdesk webhook: fetch account structure before Claude parse
+- [ ] Persistent history with better-sqlite3
+
 ## Known Issues
 - No test suite
-- Session secret has hardcoded fallback (`'change-this-secret'`)
 - GAQL queries use string interpolation (parameterized queries preferred long-term)
 - Timeout on apply-changes doesn't cancel in-flight API mutation
-- Batch apply does not verify account ownership against session
-- No concurrency limit on parallel batch API calls
 - History is session-only (lost on restart) — needs persistent storage
 - Freshdesk webhook returns plan without account structure context (limited accuracy)
-
-## Deferred Items
-- Account ownership verification in batch apply
-- Concurrency control for batch operations
-- Split monolithic server.js into modules
-- Extract frontend to separate files
-- Extract gadsSearch as reusable module
-- Persistent database for change history
-- Freshdesk webhook: fetch account structure before Claude parse
