@@ -4,7 +4,7 @@
 Node.js/Express app for managing Google Ads campaigns across automotive dealer accounts via an MCC. Integrates Claude AI for natural-language task parsing from Freshdesk tickets. Deployed on Railway.
 
 ## Architecture
-- **Single file:** `server.js` (~2600 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
+- **Single file:** `server.js` (~2900 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
 - **No database** — stateless, session-only storage for OAuth tokens, MCC ID cache, and change history
 - **Stack:** Express, google-ads-api, axios, Anthropic Claude API, express-session
 
@@ -25,8 +25,11 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/api/apply-changes-batch` | POST | Execute changes across multiple accounts in parallel |
 | `/api/history` | GET | Retrieve change history from session |
 | `/api/undo` | POST | Undo a reversible change from history |
+| `/api/smart-suggestions` | POST | Claude analyses account and flags issues proactively |
+| `/api/report` | POST | Claude generates natural language performance report |
+| `/api/freshdesk-webhook` | POST | Accept tasks from Freshdesk webhooks (API key auth) |
 
-## Current Phase: Phase 5 Complete
+## Current Phase: Phase 6 Complete (All Phases Done)
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -78,11 +81,13 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] campMap keyed by campaign ID instead of name (prevents duplicate name collisions)
 - [x] campaign.id added to ad_group, keyword, and location GAQL queries
 
-### Phase 6: Advanced AI Features (next)
-- [ ] Task templates
-- [ ] Smart suggestions (Claude flags issues proactively)
-- [ ] Natural language reporting
-- [ ] Freshdesk integration
+### Phase 6: Advanced AI Features (completed 2026-03-20)
+- [x] Task templates (pause campaign, update budget, add negative KW, pause keywords, exclude radius, enable campaign)
+- [x] Smart suggestions — Claude analyses account structure proactively, flags issues (paused campaigns, $0 spend, high CPC, empty ad groups)
+- [x] Natural language reporting — Claude generates performance summaries on demand
+- [x] Freshdesk webhook endpoint with timing-safe API key auth, account_id validation
+- [x] XSS fix in suggestions panel (data attributes instead of inline onclick)
+- [x] XSS fix in tree error display
 
 ## Known Issues
 - No test suite
@@ -92,10 +97,13 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - Batch apply does not verify account ownership against session
 - No concurrency limit on parallel batch API calls
 - History is session-only (lost on restart) — needs persistent storage
+- Freshdesk webhook returns plan without account structure context (limited accuracy)
 
 ## Deferred Items
-- Account ownership verification in batch apply → future phase
-- Concurrency control for batch operations → future phase
-- Split monolithic server.js into modules → future phase
-- Extract frontend to separate files → future phase
-- Extract gadsSearch as reusable module → future phase
+- Account ownership verification in batch apply
+- Concurrency control for batch operations
+- Split monolithic server.js into modules
+- Extract frontend to separate files
+- Extract gadsSearch as reusable module
+- Persistent database for change history
+- Freshdesk webhook: fetch account structure before Claude parse

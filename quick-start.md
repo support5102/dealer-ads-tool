@@ -21,4 +21,4 @@ npm start             # http://localhost:3000
 Railway via Nixpacks. Config in `railway.json`. Health check at `/health`.
 
 ## Current state
-Phase 5 complete. Supports single and multi-account task parsing, batch apply across accounts, account search/filter, change history with undo, token caching, and campaign ID-based structure mapping. Single-file architecture (`server.js`). No test suite yet. See `project-state.md` for full roadmap.
+All 6 phases complete. Supports single and multi-account task parsing, batch apply, change history with undo, smart suggestions, NL reporting, task templates, and Freshdesk webhook. Single-file architecture (`server.js`). No test suite yet. See `project-state.md` for full details.
