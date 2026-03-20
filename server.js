@@ -10,6 +10,13 @@ const { applyChange } = require('./lib/apply-change');
 const { buildClaudeSystemPrompt, buildUserMessage } = require('./lib/claude-prompts');
 const { addHistoryEntry, getHistory, updateHistoryEntryById } = require('./lib/history');
 
+// Old V2 route modules (pacing, audit, builder)
+const { createPacingRouter }       = require('./src/routes/pacing');
+const { createBuilderRouter }      = require('./src/routes/builder');
+const { createAuditRouter }        = require('./src/routes/audit');
+const { createSchedulerRouter }    = require('./src/routes/scheduler');
+const { createOptimizationRouter } = require('./src/routes/optimization');
+
 // ─────────────────────────────────────────────────────────────
 // STARTUP VALIDATION — fail fast if required env vars are missing
 // ─────────────────────────────────────────────────────────────
@@ -175,7 +182,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
           const resp = await axios.post(
-            'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
+            'https://googleads.googleapis.com/v20/customers/' + customerId + '/googleAds:searchStream',
             { query },
             { headers, timeout: 10000 }
           );
@@ -260,7 +267,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     if (mccId) {
       try {
         const rows = await gadsSearch(mccId,
-          'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.level = 1',
+          'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.status = \'ENABLED\'',
           mccId
         );
         console.log('customer_client rows:', rows.length);
@@ -1399,6 +1406,33 @@ app.post('/api/freshdesk-webhook', async (req, res) => {
     res.status(500).json({ error: 'Failed to process task: ' + e.message });
   }
 });
+
+// ─────────────────────────────────────────────────────────────
+// MOUNT V2 ROUTE MODULES (pacing, audit, builder, optimization)
+// These modules use a config object — construct from env vars
+// ─────────────────────────────────────────────────────────────
+const v2Config = {
+  googleAds: {
+    developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    clientId:       process.env.GOOGLE_ADS_CLIENT_ID,
+    clientSecret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+    mccId:          (process.env.GOOGLE_MANAGER_ACCOUNT_ID || process.env.GOOGLE_ADS_MCC_ID || '').replace(/-/g, ''),
+  },
+  session: { secret: process.env.SESSION_SECRET },
+  app: {
+    url:  process.env.APP_URL || 'http://localhost:3000',
+    port: parseInt(process.env.PORT, 10) || 3000,
+  },
+  claude: {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    model:  process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+  },
+};
+app.use(createPacingRouter(v2Config));
+app.use(createBuilderRouter(v2Config));
+app.use(createSchedulerRouter());
+app.use(createAuditRouter(v2Config));
+app.use(createOptimizationRouter(v2Config));
 
 // ─────────────────────────────────────────────────────────────
 // HEALTH CHECK

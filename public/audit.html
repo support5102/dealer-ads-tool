@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Account Health Auditor</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <link rel="stylesheet" href="/audit-styles.css"/>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">&#x2714;</div>
+    <div>
+      <div class="logo-text">Account Health Auditor</div>
+      <div class="logo-sub">11 Automated Checks &middot; Strategy-Aligned</div>
+    </div>
+  </div>
+  <div class="header-right" id="headerRight">
+    <a href="/" class="nav-link">Task Manager</a>
+    <a href="/pacing.html" class="nav-link">Pacing</a>
+    <a href="/builder.html" class="nav-link">Campaign Builder</a>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="audit-main">
+
+  <!-- CONTROLS -->
+  <div class="audit-controls">
+    <div class="control-group">
+      <label class="sidebar-label">Account</label>
+      <select class="account-select" id="accountSelect" onchange="selectAccount(this.value)" disabled>
+        <option value="">-- Connect Google Ads first --</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <button class="btn-primary" id="runAuditBtn" onclick="runAudit()" disabled>Run Audit</button>
+    </div>
+    <div class="control-group scheduler-controls" id="schedulerControls" style="display:none;">
+      <button class="btn-schedule" id="scheduleBtn" onclick="toggleSchedule()">Schedule All</button>
+      <span class="schedule-status" id="scheduleStatus"></span>
+    </div>
+  </div>
+
+  <!-- NOT CONNECTED -->
+  <div class="not-connected" id="notConnected">
+    <div class="not-connected-icon">&#x2714;</div>
+    <h2>Connect Your Google Ads Account</h2>
+    <p>Sign in to run health audits across your dealer accounts.</p>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+  </div>
+
+  <!-- LOADING -->
+  <div class="audit-loading" id="auditLoading" style="display:none;">
+    <div class="spinner"></div>
+    <p>Running audit checks...</p>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="audit-results" id="auditResults" style="display:none;">
+
+    <!-- SUMMARY CARDS -->
+    <div class="summary-row" id="summaryRow"></div>
+
+    <!-- FINDINGS -->
+    <div class="findings-section" id="findingsSection"></div>
+
+  </div>
+
+  <!-- NO ISSUES -->
+  <div class="audit-clean" id="auditClean" style="display:none;">
+    <div class="clean-icon">&#x2705;</div>
+    <h2>Account looks healthy!</h2>
+    <p>All 11 checks passed with no findings.</p>
+  </div>
+
+</div>
+
+<script src="/audit-app.js"></script>
+</body>
+</html>
