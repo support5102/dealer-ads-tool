@@ -9,6 +9,13 @@ const { GoogleAdsApi } = require('google-ads-api');
 const app = express();
 app.use(express.json());
 app.use(cors());
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'change-this-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+}));
+
 // ─────────────────────────────────────────────────────────────
 // SERVE FRONTEND — HTML embedded directly, no public folder needed
 // ─────────────────────────────────────────────────────────────
@@ -1405,15 +1412,7 @@ app.get('/', (req, res) => {
   res.send(FRONTEND_HTML);
 });
 
-// ─────────────────────────────────────────────────────────────
-// SESSION (stores the OAuth tokens between requests)
-// ─────────────────────────────────────────────────────────────
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-this-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
-}));
+// SESSION middleware moved to top of file (after cors)
 
 // ─────────────────────────────────────────────────────────────
 // GOOGLE ADS CLIENT FACTORY
@@ -1465,6 +1464,7 @@ app.get('/auth/callback', async (req, res) => {
     req.session.tokens = {
       access_token:  data.access_token,
       refresh_token: data.refresh_token,
+      token_expiry:  Date.now() + (data.expires_in || 3600) * 1000,
     };
 
     res.redirect('/?connected=true');
@@ -1501,7 +1501,10 @@ function requireAuth(req, res, next) {
 // ─────────────────────────────────────────────────────────────
 async function getFreshAccessToken(req) {
   const tokens = req.session.tokens;
-  // Refresh the token every time to be safe
+  // Use cached token if it hasn't expired yet (5-minute buffer)
+  if (tokens.access_token && tokens.token_expiry && Date.now() < tokens.token_expiry - 5 * 60 * 1000) {
+    return tokens.access_token;
+  }
   try {
     const { data } = await axios.post('https://oauth2.googleapis.com/token', {
       client_id:     process.env.GOOGLE_ADS_CLIENT_ID,
@@ -1510,11 +1513,12 @@ async function getFreshAccessToken(req) {
       grant_type:    'refresh_token',
     });
     req.session.tokens.access_token = data.access_token;
-    console.log('Token refreshed successfully');
+    // Google tokens typically expire in 3600s; use expires_in if provided
+    req.session.tokens.token_expiry = Date.now() + (data.expires_in || 3600) * 1000;
+    console.log('Token refreshed successfully (cached until expiry)');
     return data.access_token;
   } catch(e) {
     console.error('Token refresh failed:', e.response?.data || e.message);
-    // Fall back to existing token
     return tokens.access_token;
   }
 }
@@ -1740,6 +1744,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
           ad_group.name,
           ad_group.status,
           ad_group.cpc_bid_micros,
+          campaign.id,
           campaign.name
         FROM ad_group
         WHERE campaign.status != 'REMOVED'
@@ -1771,6 +1776,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
           ad_group_criterion.cpc_bid_micros,
           ad_group_criterion.negative,
           ad_group.name,
+          campaign.id,
           campaign.name
         FROM ad_group_criterion
         WHERE ad_group_criterion.type = 'KEYWORD'
@@ -1787,6 +1793,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
           campaign_criterion.location.geo_target_constant,
           campaign_criterion.bid_modifier,
           campaign_criterion.negative,
+          campaign.id,
           campaign.name
         FROM campaign_criterion
         WHERE campaign_criterion.type = 'LOCATION'
@@ -1845,7 +1852,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     campaigns.forEach(row => {
       const c = row.campaign;
       const campId = String(c.id);
-      campMap[c.name] = {
+      campMap[campId] = {
         id:       campId,
         name:     c.name,
         status:   c.status,
@@ -1859,7 +1866,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     });
 
     adGroups.forEach(row => {
-      const camp = campMap[row.campaign.name];
+      const camp = campMap[String(row.campaign.id)];
       if (!camp) return;
       camp.adGroups.push({
         id:         String(row.ad_group.id),
@@ -1872,7 +1879,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     });
 
     keywords.forEach(row => {
-      const camp = campMap[row.campaign.name];
+      const camp = campMap[String(row.campaign.id)];
       if (!camp) return;
       const ag = camp.adGroups.find(a => a.name === row.ad_group.name);
       if (!ag) return;
@@ -1887,7 +1894,7 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
     });
 
     locations.forEach(row => {
-      const camp = campMap[row.campaign.name];
+      const camp = campMap[String(row.campaign.id)];
       if (!camp) return;
       camp.locations.push({
         geoTarget: row.campaign_criterion.location?.geo_target_constant || '',
