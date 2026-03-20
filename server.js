@@ -1221,22 +1221,39 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     const token = await getFreshAccessToken(req);
     const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-    const gadsSearch = async (customerId, query, loginId) => {
+    const gadsSearch = async (customerId, query, loginId, retries = 1) => {
       const headers = {
         'Authorization': 'Bearer ' + token,
         'developer-token': devToken,
         'Content-Type': 'application/json',
       };
       if (loginId) headers['login-customer-id'] = String(loginId);
-      const resp = await axios.post(
-        'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
-        { query },
-        { headers, timeout: 10000 }
-      );
-      const results = [];
-      const data = Array.isArray(resp.data) ? resp.data : [resp.data];
-      data.forEach(chunk => { if (chunk.results) results.push(...chunk.results); });
-      return results;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const resp = await axios.post(
+            'https://googleads.googleapis.com/v19/customers/' + customerId + '/googleAds:searchStream',
+            { query },
+            { headers, timeout: 10000 }
+          );
+          const results = [];
+          const data = Array.isArray(resp.data) ? resp.data : [resp.data];
+          data.forEach(chunk => { if (chunk.results) results.push(...chunk.results); });
+          return results;
+        } catch (e) {
+          const status = e.response?.status;
+          const errMsg = e.response?.data?.error?.message || e.message;
+          console.error(`gadsSearch failed for customer ${customerId} (attempt ${attempt + 1}/${retries + 1}):`, errMsg);
+          // Retry on transient errors (429 rate limit, 500/503 server errors, network failures)
+          const isNetworkError = !e.response && (e.code === 'ECONNABORTED' || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ENOTFOUND');
+          if (attempt < retries && (status === 429 || status === 500 || status === 503 || isNetworkError)) {
+            const delay = (attempt + 1) * 1000;
+            console.log(`Retrying customer ${customerId} in ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw e;
+        }
+      }
     };
 
     // Step 1: Get accessible customer IDs via library
@@ -1247,7 +1264,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     });
     const accessible = await Promise.race([
       api.listAccessibleCustomers(req.session.tokens.refresh_token),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+      new Promise((_, rej) => setTimeout(() => rej(new Error('listAccessibleCustomers timed out after 15s')), 15000))
     ]);
     const resourceNames = accessible.resource_names || accessible.resourceNames || [];
     console.log('Accessible accounts:', resourceNames.length);
@@ -1271,15 +1288,28 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
       r.status === 'fulfilled' ? (r.value.id + ':' + (r.value.isManager ? 'MCC' : 'client')) : 'failed'
     ).join(', '));
 
-    // Find the MCC
-    let mccId = req.session.mccId;
+    // Find the MCC — always re-discover from API results, session is only a fallback
+    let mccId = null;
+    const allMccs = [];
     infoResults.forEach(r => {
       if (r.status === 'fulfilled' && r.value?.isManager) {
-        mccId = r.value.id;
-        req.session.mccId = mccId;
-        console.log('Found MCC:', mccId);
+        allMccs.push(r.value.id);
       }
     });
+    if (allMccs.length > 1) {
+      console.warn('Multiple MCC accounts found:', allMccs.join(', '), '— using first one');
+    }
+    if (allMccs.length > 0) {
+      mccId = allMccs[0];
+      console.log('Using MCC:', mccId);
+    }
+    // Fall back to session cache only if API discovery found nothing
+    if (!mccId && req.session.mccId) {
+      console.log('No MCC found in API results, using cached mccId:', req.session.mccId);
+      mccId = req.session.mccId;
+    }
+    // Update session cache with fresh value
+    req.session.mccId = mccId || null;
 
     // Step 3: Get all client accounts using MCC as login id
     let accounts = [];
@@ -1311,7 +1341,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     // Fallback: use whatever info we got
     if (accounts.length === 0) {
       console.log('Using fallback');
-      infoResults.forEach(r => {
+      infoResults.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value) {
           accounts.push({
             id: r.value.id,
@@ -1322,7 +1352,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
           });
         } else {
           // Still add the account even if query failed
-          const rn = resourceNames[infoResults.indexOf(r)];
+          const rn = resourceNames[idx];
           if (rn) {
             const id = rn.replace('customers/', '');
             accounts.push({ id, name: 'Account ' + id, currency: '', isManager: false, mccId: null });
@@ -1336,8 +1366,9 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     res.json({ accounts });
 
   } catch (err) {
-    console.error('Accounts error:', err.response?.data?.error || err.message);
-    res.status(500).json({ error: 'Failed to load accounts: ' + err.message });
+    const errDetail = err.response?.data?.error?.message || err.response?.data?.error || err.message;
+    console.error('Accounts error:', errDetail);
+    res.status(500).json({ error: 'Failed to load accounts: ' + (typeof errDetail === 'string' ? errDetail : err.message) });
   }
 });
 
@@ -1359,8 +1390,16 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
     }).Customer(customerConfig);
 
+    const withTimeout = (promise, ms, label) => {
+      let timer;
+      return Promise.race([
+        promise.finally(() => clearTimeout(timer)),
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`${label} timed out after ${ms / 1000}s`)), ms); })
+      ]);
+    };
+
     // Fetch campaigns (simplified — no budget join to avoid permission issues)
-    const campaigns = await client.query(`
+    const campaigns = await withTimeout(client.query(`
       SELECT
         campaign.id,
         campaign.name,
@@ -1370,10 +1409,10 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
       FROM campaign
       WHERE campaign.status != 'REMOVED'
       ORDER BY campaign.name
-    `);
+    `), 15000, 'Campaign query');
 
     // Fetch ad groups
-    const adGroups = await client.query(`
+    const adGroups = await withTimeout(client.query(`
       SELECT
         ad_group.id,
         ad_group.name,
@@ -1384,10 +1423,10 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
       WHERE campaign.status != 'REMOVED'
         AND ad_group.status != 'REMOVED'
       ORDER BY campaign.name, ad_group.name
-    `);
+    `), 15000, 'Ad group query');
 
     // Fetch keywords (limit to 500 per account for speed)
-    const keywords = await client.query(`
+    const keywords = await withTimeout(client.query(`
       SELECT
         ad_group_criterion.keyword.text,
         ad_group_criterion.keyword.match_type,
@@ -1403,10 +1442,10 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
         AND ad_group_criterion.status != 'REMOVED'
       ORDER BY campaign.name, ad_group.name
       LIMIT 500
-    `);
+    `), 20000, 'Keyword query');
 
     // Fetch location targets
-    const locations = await client.query(`
+    const locations = await withTimeout(client.query(`
       SELECT
         campaign_criterion.location.geo_target_constant,
         campaign_criterion.bid_modifier,
@@ -1416,7 +1455,10 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
       WHERE campaign_criterion.type = 'LOCATION'
         AND campaign.status != 'REMOVED'
       LIMIT 200
-    `).catch(() => []);
+    `), 15000, 'Location query').catch(e => {
+      console.warn('Location query failed (non-fatal):', e.message);
+      return [];
+    });
 
     // Build structured tree
     const campMap = {};
@@ -1534,44 +1576,56 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
   if (!changes || !customerId) {
     return res.status(400).json({ error: 'Missing changes or customerId' });
   }
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return res.status(400).json({ error: 'Changes must be a non-empty array' });
+  }
+  if (!/^\d+$/.test(String(customerId))) {
+    return res.status(400).json({ error: 'Invalid customerId format' });
+  }
 
   const results  = [];
   const errors   = [];
 
+  let client;
   try {
-    const client = new GoogleAdsApi({
+    const mccId = req.session.mccId;
+    const customerConfig = {
+      customer_id:   customerId,
+      refresh_token: req.session.tokens.refresh_token,
+    };
+    if (mccId) customerConfig.login_customer_id = mccId;
+
+    client = new GoogleAdsApi({
       client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
       client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-    }).Customer({
-      customer_id:       customerId,
-      refresh_token:     req.session.tokens.refresh_token,
-
-    });
-
-    for (const change of changes) {
-      try {
-        const result = await applyChange(client, change, dryRun);
-        results.push({ change, result, success: true });
-      } catch (err) {
-        const msg = err.message || 'Unknown error';
-        errors.push({ change, error: msg });
-        results.push({ change, result: msg, success: false });
-      }
-    }
-
-    res.json({
-      dryRun,
-      applied: results.filter(r => r.success).length,
-      failed:  errors.length,
-      results,
-      errors,
-    });
-
+    }).Customer(customerConfig);
   } catch (err) {
-    console.error('Apply error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('Apply error: failed to initialize Google Ads client:', err.message);
+    return res.status(500).json({ error: 'Failed to initialize Google Ads client: ' + err.message });
   }
+
+  for (const change of changes) {
+    try {
+      const result = await applyChange(client, change, dryRun);
+      results.push({ change, result, success: true });
+      console.log(`Change applied [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
+    } catch (err) {
+      const msg = err.message || 'Unknown error';
+      console.error(`Change failed: ${change.type} — ${change.campaignName || 'N/A'} — ${msg}`);
+      errors.push({ change, error: msg });
+      results.push({ change, result: msg, success: false });
+    }
+  }
+
+  res.json({
+    dryRun,
+    applied: results.filter(r => r.success).length,
+    failed:  errors.length,
+    total:   changes.length,
+    results,
+    errors,
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -1590,7 +1644,7 @@ async function applyChange(client, change, dryRun) {
     const rows = await client.query(`
       SELECT campaign.id, campaign.name
       FROM campaign
-      WHERE campaign.name = '${name.replace(/'/g, "\\'")}'
+      WHERE campaign.name = '${name.replace(/'/g, "''")}'
         AND campaign.status != 'REMOVED'
       LIMIT 1
     `);
@@ -1602,8 +1656,8 @@ async function applyChange(client, change, dryRun) {
     const rows = await client.query(`
       SELECT ad_group.id
       FROM ad_group
-      WHERE campaign.name = '${campName.replace(/'/g, "\\'")}'
-        AND ad_group.name = '${agName.replace(/'/g, "\\'")}'
+      WHERE campaign.name = '${campName.replace(/'/g, "''")}'
+        AND ad_group.name = '${agName.replace(/'/g, "''")}'
         AND ad_group.status != 'REMOVED'
       LIMIT 1
     `);
@@ -1645,8 +1699,7 @@ async function applyChange(client, change, dryRun) {
     }
 
     case 'pause_ad_group': {
-      const campId = await getCampaignId(campaignName);
-      const agId   = await getAdGroupId(campaignName, adGroupName);
+      const agId = await getAdGroupId(campaignName, adGroupName);
       await client.adGroups.update([{
         resource_name: `customers/${client.credentials.customer_id}/adGroups/${agId}`,
         status: 'PAUSED'
@@ -1667,8 +1720,8 @@ async function applyChange(client, change, dryRun) {
       const rows = await client.query(`
         SELECT ad_group_criterion.resource_name
         FROM ad_group_criterion
-        WHERE campaign.name = '${campaignName.replace(/'/g, "\\'")}'
-          AND ad_group_criterion.keyword.text = '${details.keyword.replace(/'/g, "\\'")}'
+        WHERE campaign.name = '${campaignName.replace(/'/g, "''")}'
+          AND ad_group_criterion.keyword.text = '${details.keyword.replace(/'/g, "''")}'
           AND ad_group_criterion.keyword.match_type = '${details.matchType}'
         LIMIT 1
       `);
