@@ -800,7 +800,8 @@ async function selectAccount(id) {
   tree.innerHTML = '<div class="tree-empty" style="color:#334155">Loading account structure...</div>';
 
   try {
-    const res  = await fetch(\`/api/account/\${id}/structure\`);
+    const mccParam = acc?.mccId ? \`?mccId=\${acc.mccId}\` : '';
+    const res  = await fetch(\`/api/account/\${id}/structure\${mccParam}\`);
     const data = await res.json();
 
     if (data.error) throw new Error(data.error);
@@ -836,7 +837,8 @@ function renderTree(campaigns) {
         <span class="tree-arrow">▶</span>
         <div class="status-dot \${statusClass}"></div>
         <span class="tree-camp-name">\${camp.name}</span>
-        <span class="tree-budget">$\${camp.budget}</span>
+        <span class="tree-budget">\${camp.budget !== '?' ? '$' + camp.budget + '/day' : ''}</span>
+        \${camp.metrics ? \`<span class="tree-metrics" style="font-size:9px;color:var(--text3);margin-left:8px">\${Number(camp.metrics.impressions).toLocaleString()} imp · \${Number(camp.metrics.clicks).toLocaleString()} clk · $\${camp.metrics.cost}</span>\` : ''}
       </div>
       <div class="tree-ag-list" style="display:none">
         \${camp.adGroups.map(ag => \`
@@ -1398,79 +1400,153 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
       ]);
     };
 
-    // Fetch campaigns (simplified — no budget join to avoid permission issues)
-    const campaigns = await withTimeout(client.query(`
-      SELECT
-        campaign.id,
-        campaign.name,
-        campaign.status,
-        campaign.advertising_channel_type,
-        campaign.bidding_strategy_type
-      FROM campaign
-      WHERE campaign.status != 'REMOVED'
-      ORDER BY campaign.name
-    `), 15000, 'Campaign query');
+    const timed = async (label, promise, timeoutMs) => {
+      const start = Date.now();
+      try {
+        const result = await withTimeout(promise, timeoutMs, label);
+        console.log(`${label}: ${Date.now() - start}ms (${Array.isArray(result) ? result.length + ' rows' : 'done'})`);
+        return result;
+      } catch (e) {
+        console.error(`${label}: failed after ${Date.now() - start}ms — ${e.message}`);
+        throw e;
+      }
+    };
 
-    // Fetch ad groups
-    const adGroups = await withTimeout(client.query(`
-      SELECT
-        ad_group.id,
-        ad_group.name,
-        ad_group.status,
-        ad_group.cpc_bid_micros,
-        campaign.name
-      FROM ad_group
-      WHERE campaign.status != 'REMOVED'
-        AND ad_group.status != 'REMOVED'
-      ORDER BY campaign.name, ad_group.name
-    `), 15000, 'Ad group query');
+    // Fetch all data in parallel for speed
+    const [campaigns, adGroups, budgets, keywords, locations, metrics] = await Promise.all([
+      // Campaigns
+      timed('Campaigns', client.query(`
+        SELECT
+          campaign.id,
+          campaign.name,
+          campaign.status,
+          campaign.advertising_channel_type,
+          campaign.bidding_strategy_type
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+        ORDER BY campaign.name
+      `), 15000),
 
-    // Fetch keywords (limit to 500 per account for speed)
-    const keywords = await withTimeout(client.query(`
-      SELECT
-        ad_group_criterion.keyword.text,
-        ad_group_criterion.keyword.match_type,
-        ad_group_criterion.status,
-        ad_group_criterion.cpc_bid_micros,
-        ad_group_criterion.negative,
-        ad_group.name,
-        campaign.name
-      FROM ad_group_criterion
-      WHERE ad_group_criterion.type = 'KEYWORD'
-        AND campaign.status != 'REMOVED'
-        AND ad_group.status != 'REMOVED'
-        AND ad_group_criterion.status != 'REMOVED'
-      ORDER BY campaign.name, ad_group.name
-      LIMIT 500
-    `), 20000, 'Keyword query');
+      // Ad groups
+      timed('Ad groups', client.query(`
+        SELECT
+          ad_group.id,
+          ad_group.name,
+          ad_group.status,
+          ad_group.cpc_bid_micros,
+          campaign.name
+        FROM ad_group
+        WHERE campaign.status != 'REMOVED'
+          AND ad_group.status != 'REMOVED'
+        ORDER BY campaign.name, ad_group.name
+      `), 15000).catch(e => {
+        console.warn('Ad groups query failed (non-fatal):', e.message);
+        return [];
+      }),
 
-    // Fetch location targets
-    const locations = await withTimeout(client.query(`
-      SELECT
-        campaign_criterion.location.geo_target_constant,
-        campaign_criterion.bid_modifier,
-        campaign_criterion.negative,
-        campaign.name
-      FROM campaign_criterion
-      WHERE campaign_criterion.type = 'LOCATION'
-        AND campaign.status != 'REMOVED'
-      LIMIT 200
-    `), 15000, 'Location query').catch(e => {
-      console.warn('Location query failed (non-fatal):', e.message);
-      return [];
+      // Budgets — queried separately to avoid permission issues with JOIN
+      timed('Budgets', client.query(`
+        SELECT
+          campaign.id,
+          campaign_budget.amount_micros
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+      `), 15000).catch(e => {
+        console.warn('Budget query failed (non-fatal):', e.message);
+        return [];
+      }),
+
+      // Keywords (limit 1000 per account)
+      timed('Keywords', client.query(`
+        SELECT
+          ad_group_criterion.keyword.text,
+          ad_group_criterion.keyword.match_type,
+          ad_group_criterion.status,
+          ad_group_criterion.cpc_bid_micros,
+          ad_group_criterion.negative,
+          ad_group.name,
+          campaign.name
+        FROM ad_group_criterion
+        WHERE ad_group_criterion.type = 'KEYWORD'
+          AND campaign.status != 'REMOVED'
+          AND ad_group.status != 'REMOVED'
+          AND ad_group_criterion.status != 'REMOVED'
+        ORDER BY campaign.name, ad_group.name
+        LIMIT 1000
+      `), 25000),
+
+      // Location targets
+      timed('Locations', client.query(`
+        SELECT
+          campaign_criterion.location.geo_target_constant,
+          campaign_criterion.bid_modifier,
+          campaign_criterion.negative,
+          campaign.name
+        FROM campaign_criterion
+        WHERE campaign_criterion.type = 'LOCATION'
+          AND campaign.status != 'REMOVED'
+        LIMIT 500
+      `), 15000).catch(e => {
+        console.warn('Location query failed (non-fatal):', e.message);
+        return [];
+      }),
+
+      // Performance metrics — last 30 days
+      timed('Metrics', client.query(`
+        SELECT
+          campaign.id,
+          segments.date,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.cost_micros,
+          metrics.conversions
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND segments.date DURING LAST_30_DAYS
+      `), 20000).catch(e => {
+        console.warn('Metrics query failed (non-fatal):', e.message);
+        return [];
+      }),
+    ]);
+
+    // Build budget lookup by campaign ID
+    const budgetMap = {};
+    budgets.forEach(row => {
+      const campId = String(row.campaign.id);
+      const b = row.campaign_budget || row.campaignBudget;
+      const micros = b?.amount_micros || b?.amountMicros;
+      if (micros) budgetMap[campId] = (micros / 1_000_000).toFixed(2);
     });
+
+    // Build metrics lookup by campaign ID (aggregate across date segments)
+    const metricsMap = {};
+    metrics.forEach(row => {
+      const campId = String(row.campaign.id);
+      if (!metricsMap[campId]) {
+        metricsMap[campId] = { impressions: 0, clicks: 0, cost: 0, conversions: 0 };
+      }
+      const m = row.metrics;
+      metricsMap[campId].impressions += Number(m.impressions || m.Impressions || 0);
+      metricsMap[campId].clicks += Number(m.clicks || m.Clicks || 0);
+      metricsMap[campId].cost += Number(m.cost_micros || m.costMicros || 0);
+      metricsMap[campId].conversions += Number(m.conversions || m.Conversions || 0);
+    });
+    // Convert cost from micros to dollars
+    Object.values(metricsMap).forEach(m => { m.cost = (m.cost / 1_000_000).toFixed(2); });
 
     // Build structured tree
     const campMap = {};
     campaigns.forEach(row => {
       const c = row.campaign;
+      const campId = String(c.id);
       campMap[c.name] = {
-        id:       String(c.id),
+        id:       campId,
         name:     c.name,
         status:   c.status,
         type:     c.advertising_channel_type,
         bidding:  c.bidding_strategy_type,
-        budget:   '?',
+        budget:   budgetMap[campId] || '?',
+        metrics:  metricsMap[campId] || null,
         adGroups: [],
         locations: [],
       };
@@ -1521,6 +1597,9 @@ app.get('/api/account/:customerId/structure', requireAuth, async (req, res) => {
         campaigns: campaigns.length,
         adGroups:  adGroups.length,
         keywords:  keywords.length,
+        locations: locations.length,
+        hasBudgets: budgets.length > 0,
+        hasMetrics: metrics.length > 0,
       }
     });
 
@@ -1607,7 +1686,11 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
 
   for (const change of changes) {
     try {
-      const result = await applyChange(client, change, dryRun);
+      let timer;
+      const result = await Promise.race([
+        applyChange(client, change, dryRun).finally(() => clearTimeout(timer)),
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`Change timed out after 30s: ${change.type}`)), 30000); })
+      ]);
       results.push({ change, result, success: true });
       console.log(`Change applied [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
     } catch (err) {
@@ -1838,10 +1921,14 @@ function buildUserMessage(task, structure, accountName) {
   if (!structure) return task;
 
   const campList = structure.campaigns.map(c => {
-    const ags = c.adGroups.map(ag =>
-      `    📁 "${ag.name}" | ${ag.status} | bid:$${ag.defaultBid} | ${ag.keywords.length} keywords`
-    ).join('\n');
-    return `  📢 "${c.name}" | ${c.status} | $${c.budget}/day | ${c.type}\n${ags}`;
+    const ags = c.adGroups.map(ag => {
+      const kwSample = ag.keywords.slice(0, 20).map(k => k.text).join(', ');
+      const kwExtra = ag.keywords.length > 20 ? ` (+${ag.keywords.length - 20} more)` : '';
+      return `    📁 "${ag.name}" | ${ag.status} | bid:$${ag.defaultBid} | ${ag.keywords.length} keywords: ${kwSample}${kwExtra}`;
+    }).join('\n');
+    const budgetStr = c.budget !== '?' ? `$${c.budget}/day` : 'budget unknown';
+    const metricsStr = c.metrics ? ` | 30d: ${c.metrics.impressions} imp, ${c.metrics.clicks} clk, $${c.metrics.cost} spend` : '';
+    return `  📢 "${c.name}" | ${c.status} | ${budgetStr} | ${c.type}${metricsStr}\n${ags}`;
   }).join('\n');
 
   return `ACCOUNT: ${accountName}
