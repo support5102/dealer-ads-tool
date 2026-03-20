@@ -4,8 +4,8 @@
 Node.js/Express app for managing Google Ads campaigns across automotive dealer accounts via an MCC. Integrates Claude AI for natural-language task parsing from Freshdesk tickets. Deployed on Railway.
 
 ## Architecture
-- **Single file:** `server.js` (~2400 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
-- **No database** — stateless, session-only storage for OAuth tokens and MCC ID cache
+- **Single file:** `server.js` (~2600 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
+- **No database** — stateless, session-only storage for OAuth tokens, MCC ID cache, and change history
 - **Stack:** Express, google-ads-api, axios, Anthropic Claude API, express-session
 
 ## Endpoints
@@ -23,8 +23,10 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/api/parse-task-multi` | POST | Claude parses multi-account task → changes grouped by account |
 | `/api/apply-changes` | POST | Execute changes against single Google Ads account |
 | `/api/apply-changes-batch` | POST | Execute changes across multiple accounts in parallel |
+| `/api/history` | GET | Retrieve change history from session |
+| `/api/undo` | POST | Undo a reversible change from history |
 
-## Current Phase: Phase 3 Complete
+## Current Phase: Phase 5 Complete
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -60,19 +62,23 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] Claude JSON truncation handling
 - [x] Button race condition fix (disable both during either operation)
 
-### Phase 4: Audit Trail & History (next)
-- [ ] Lightweight database for change logs
-- [ ] Undo support for reversible operations
-- [ ] Daily digest
+### Phase 4: Audit Trail & History (completed 2026-03-20)
+- [x] Session-based change history (capped at 50 entries)
+- [x] /api/history endpoint for retrieving change log
+- [x] /api/undo endpoint for reversible operations (pause↔enable campaigns/ad groups/keywords)
+- [x] Added enable_keyword case to applyChange switch
+- [x] History entries include adGroupName and details for undo fidelity
+- [x] Undo idempotency via undone flag
+- [x] Frontend history panel with undo buttons on reversible entries
 
-### Phase 5: UI & UX Improvements
-- [ ] Split monolithic server.js into modules
-- [ ] Extract frontend to separate files
-- [ ] Loading states, keyboard shortcuts, dark mode
-- [ ] campMap keyed by campaign ID instead of name (prevents collisions)
-- [ ] Extract gadsSearch as reusable module
+### Phase 5: UI & UX Improvements (completed 2026-03-20)
+- [x] Session middleware moved before all routes (was registered after / route)
+- [x] Token refresh caching with expiry (skip refresh if token still valid, 5-min buffer)
+- [x] token_expiry set during initial OAuth callback
+- [x] campMap keyed by campaign ID instead of name (prevents duplicate name collisions)
+- [x] campaign.id added to ad_group, keyword, and location GAQL queries
 
-### Phase 6: Advanced AI Features
+### Phase 6: Advanced AI Features (next)
 - [ ] Task templates
 - [ ] Smart suggestions (Claude flags issues proactively)
 - [ ] Natural language reporting
@@ -82,16 +88,14 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - No test suite
 - Session secret has hardcoded fallback (`'change-this-secret'`)
 - GAQL queries use string interpolation (parameterized queries preferred long-term)
-- campMap keyed by campaign name — duplicate names cause collisions
-- Session middleware registered after `/` route (latent bug)
-- Token refresh on every request (could cache expiry)
 - Timeout on apply-changes doesn't cancel in-flight API mutation
 - Batch apply does not verify account ownership against session
 - No concurrency limit on parallel batch API calls
+- History is session-only (lost on restart) — needs persistent storage
 
 ## Deferred Items
-- campMap keyed by name → Phase 5 refactor
-- Token refresh caching → Phase 5
-- Session middleware ordering → Phase 5
-- Account ownership verification in batch apply → Phase 5
-- Concurrency control for batch operations → Phase 5
+- Account ownership verification in batch apply → future phase
+- Concurrency control for batch operations → future phase
+- Split monolithic server.js into modules → future phase
+- Extract frontend to separate files → future phase
+- Extract gadsSearch as reusable module → future phase
