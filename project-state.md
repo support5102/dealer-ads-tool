@@ -4,7 +4,7 @@
 Node.js/Express app for managing Google Ads campaigns across automotive dealer accounts via an MCC. Integrates Claude AI for natural-language task parsing from Freshdesk tickets. Deployed on Railway.
 
 ## Architecture
-- **Single file:** `server.js` (~1950 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
+- **Single file:** `server.js` (~2400 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
 - **No database** — stateless, session-only storage for OAuth tokens and MCC ID cache
 - **Stack:** Express, google-ads-api, axios, Anthropic Claude API, express-session
 
@@ -19,10 +19,12 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/api/auth/status` | GET | Connection status |
 | `/api/accounts` | GET | List all accessible accounts via MCC |
 | `/api/account/:id/structure` | GET | Full account tree (campaigns, ad groups, keywords, locations, budgets, metrics) |
-| `/api/parse-task` | POST | Claude parses Freshdesk task → structured JSON changes |
-| `/api/apply-changes` | POST | Execute changes against Google Ads API |
+| `/api/parse-task` | POST | Claude parses single-account Freshdesk task → structured JSON changes |
+| `/api/parse-task-multi` | POST | Claude parses multi-account task → changes grouped by account |
+| `/api/apply-changes` | POST | Execute changes against single Google Ads account |
+| `/api/apply-changes-batch` | POST | Execute changes across multiple accounts in parallel |
 
-## Current Phase: Phase 2 Complete
+## Current Phase: Phase 3 Complete
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -47,13 +49,18 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] Non-fatal catches on ad groups, budgets, locations, metrics queries
 - [x] camelCase fallbacks for google-ads-api field access
 
-### Phase 3: Multi-Account & Batch Operations (next)
-- [ ] Multi-account task parsing
-- [ ] Batch apply across accounts
-- [ ] Account selector/filter UI
-- [ ] Account groups/labels
+### Phase 3: Multi-Account & Batch Operations (completed 2026-03-20)
+- [x] Account search/filter input (shows when >5 accounts)
+- [x] Multi-account Claude prompt with grouped accountChanges output
+- [x] /api/parse-task-multi endpoint (max 20 accounts, 16384 max_tokens)
+- [x] /api/apply-changes-batch endpoint with parallel per-account execution
+- [x] Frontend: batch analyse, renderBatchPlan, batchApply with per-account results
+- [x] XSS escaping via esc() helper across all innerHTML renders
+- [x] Batch size cap (20 accounts) on both parse and apply endpoints
+- [x] Claude JSON truncation handling
+- [x] Button race condition fix (disable both during either operation)
 
-### Phase 4: Audit Trail & History
+### Phase 4: Audit Trail & History (next)
 - [ ] Lightweight database for change logs
 - [ ] Undo support for reversible operations
 - [ ] Daily digest
@@ -79,8 +86,12 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - Session middleware registered after `/` route (latent bug)
 - Token refresh on every request (could cache expiry)
 - Timeout on apply-changes doesn't cancel in-flight API mutation
+- Batch apply does not verify account ownership against session
+- No concurrency limit on parallel batch API calls
 
-## Deferred from Phase 2 Review
-- campMap keyed by name → Phase 5 refactor (needs campaign.id in all queries)
+## Deferred Items
+- campMap keyed by name → Phase 5 refactor
 - Token refresh caching → Phase 5
 - Session middleware ordering → Phase 5
+- Account ownership verification in batch apply → Phase 5
+- Concurrency control for batch operations → Phase 5
