@@ -4,13 +4,30 @@ const session    = require('express-session');
 const axios      = require('axios');
 const cors       = require('cors');
 const path       = require('path');
+const crypto     = require('crypto');
 const { GoogleAdsApi } = require('google-ads-api');
+
+// ─────────────────────────────────────────────────────────────
+// STARTUP VALIDATION — fail fast if required env vars are missing
+// ─────────────────────────────────────────────────────────────
+const REQUIRED_ENV = [
+  'SESSION_SECRET',
+  'GOOGLE_ADS_CLIENT_ID',
+  'GOOGLE_ADS_CLIENT_SECRET',
+  'GOOGLE_ADS_DEVELOPER_TOKEN',
+  'ANTHROPIC_API_KEY',
+];
+const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missing.length) {
+  console.error(`\n❌ Missing required environment variables:\n   ${missing.join('\n   ')}\n\nSee env.example for details.\n`);
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-this-secret',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
@@ -1864,6 +1881,8 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     }
 
     accounts.sort((a, b) => (a.name||'').localeCompare(b.name||''));
+    // Cache accessible account IDs for ownership verification in batch apply
+    req.session.accessibleAccounts = accounts.map(a => a.id);
     console.log('Returning', accounts.length, 'accounts');
     res.json({ accounts });
 
@@ -2221,62 +2240,33 @@ app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Maximum 20 accounts per batch' });
   }
 
+  // Verify all account IDs are accessible to this user
+  const accessible = req.session.accessibleAccounts || [];
+  if (accessible.length === 0) {
+    return res.status(403).json({ error: 'Account list not loaded. Please refresh accounts first.' });
+  }
+  const unauthorized = accountChanges
+    .map(ac => String(ac.accountId))
+    .filter(id => !accessible.includes(id));
+  if (unauthorized.length > 0) {
+    return res.status(403).json({ error: `Unauthorized account IDs: ${unauthorized.join(', ')}` });
+  }
+
   const mccId = req.session.mccId;
-  const batchResults = await Promise.allSettled(
-    accountChanges.map(async ({ accountId, changes }) => {
-      if (!accountId || !/^\d+$/.test(String(accountId))) {
-        return { accountId, error: 'Invalid accountId', results: [], applied: 0, failed: changes?.length || 0 };
-      }
-      if (!Array.isArray(changes) || changes.length === 0) {
-        return { accountId, results: [], applied: 0, failed: 0, total: 0 };
-      }
 
-      const customerConfig = {
-        customer_id:   accountId,
-        refresh_token: req.session.tokens.refresh_token,
-      };
-      if (mccId) customerConfig.login_customer_id = mccId;
+  // Concurrency limiter — max 5 accounts processed in parallel
+  const CONCURRENCY = 5;
+  const queue = [...accountChanges];
+  const allResults = [];
+  while (queue.length > 0) {
+    const batch = queue.splice(0, CONCURRENCY);
+    const batchRes = await Promise.allSettled(
+      batch.map(async ({ accountId, changes }) => processAccount(req, mccId, accountId, changes, dryRun))
+    );
+    allResults.push(...batchRes);
+  }
 
-      const client = new GoogleAdsApi({
-        client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
-        client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
-        developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-      }).Customer(customerConfig);
-
-      const results = [];
-      const errors = [];
-      for (const change of changes) {
-        try {
-          let timer;
-          const result = await Promise.race([
-            applyChange(client, change, dryRun).finally(() => clearTimeout(timer)),
-            new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`Change timed out after 30s: ${change.type}`)), 30000); })
-          ]);
-          results.push({ change, result, success: true });
-          console.log(`Batch [${accountId}] [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
-        } catch (err) {
-          const msg = err.message || 'Unknown error';
-          console.error(`Batch [${accountId}] failed: ${change.type} — ${msg}`);
-          errors.push({ change, error: msg });
-          results.push({ change, result: msg, success: false });
-        }
-      }
-
-      return {
-        accountId,
-        applied: results.filter(r => r.success).length,
-        failed:  errors.length,
-        total:   changes.length,
-        results,
-        errors,
-      };
-    })
-  );
-
-  const accountResults = batchResults.map((r, i) => {
-    if (r.status === 'fulfilled') return r.value;
-    return { accountId: accountChanges[i]?.accountId, error: r.reason?.message || 'Unknown error', results: [], applied: 0, failed: accountChanges[i]?.changes?.length || 0 };
-  });
+  const accountResults = allResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason?.message || 'Unknown error', results: [], applied: 0, failed: 0 });
 
   const response = {
     dryRun,
@@ -2315,6 +2305,61 @@ app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
   res.json(response);
 });
 
+async function processAccount(req, mccId, accountId, changes, dryRun) {
+  if (!accountId || !/^\d+$/.test(String(accountId))) {
+    return { accountId, error: 'Invalid accountId', results: [], applied: 0, failed: changes?.length || 0 };
+  }
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return { accountId, results: [], applied: 0, failed: 0, total: 0 };
+  }
+
+  const customerConfig = {
+    customer_id:   accountId,
+    refresh_token: req.session.tokens.refresh_token,
+  };
+  if (mccId) customerConfig.login_customer_id = mccId;
+
+  const client = new GoogleAdsApi({
+    client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+    client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+    developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+  }).Customer(customerConfig);
+
+  const results = [];
+  const errors = [];
+  const warnings = [];
+  for (const change of changes) {
+    try {
+      let timer;
+      const result = await Promise.race([
+        applyChange(client, change, dryRun).finally(() => clearTimeout(timer)),
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`Change timed out after 30s: ${change.type}`)), 30000); })
+      ]);
+      results.push({ change, result, success: true });
+      console.log(`Batch [${accountId}] [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
+    } catch (err) {
+      const msg = err.message || 'Unknown error';
+      const isTimeout = msg.includes('timed out');
+      console.error(`Batch [${accountId}] failed: ${change.type} — ${msg}`);
+      if (isTimeout && !dryRun) {
+        warnings.push(`${change.type} on "${change.campaignName || 'unknown'}" timed out — may have still been applied. Verify in Google Ads.`);
+      }
+      errors.push({ change, error: msg });
+      results.push({ change, result: msg, success: false });
+    }
+  }
+
+  return {
+    accountId,
+    applied: results.filter(r => r.success).length,
+    failed:  errors.length,
+    total:   changes.length,
+    results,
+    errors,
+    warnings,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────
 // APPLY CHANGES
 // Receives the structured change list and executes each change
@@ -2330,6 +2375,11 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
   }
   if (!/^\d+$/.test(String(customerId))) {
     return res.status(400).json({ error: 'Invalid customerId format' });
+  }
+  // Verify account ownership
+  const accessible = req.session.accessibleAccounts || [];
+  if (accessible.length > 0 && !accessible.includes(String(customerId))) {
+    return res.status(403).json({ error: 'Unauthorized account ID' });
   }
 
   const results  = [];
@@ -2354,18 +2404,31 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Failed to initialize Google Ads client: ' + err.message });
   }
 
+  const warnings = [];
+
   for (const change of changes) {
     try {
       let timer;
+      let timedOut = false;
       const result = await Promise.race([
         applyChange(client, change, dryRun).finally(() => clearTimeout(timer)),
-        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`Change timed out after 30s: ${change.type}`)), 30000); })
+        new Promise((_, rej) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            rej(new Error(`Change timed out after 30s: ${change.type}`));
+          }, 30000);
+        })
       ]);
       results.push({ change, result, success: true });
       console.log(`Change applied [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
     } catch (err) {
       const msg = err.message || 'Unknown error';
+      const isTimeout = msg.includes('timed out');
       console.error(`Change failed: ${change.type} — ${change.campaignName || 'N/A'} — ${msg}`);
+      if (isTimeout && !dryRun) {
+        warnings.push(`${change.type} on "${change.campaignName || 'unknown'}" timed out — the change may have still been applied server-side. Please verify in Google Ads.`);
+        console.warn(`TIMEOUT WARNING: ${change.type} on ${change.campaignName} — mutation may have completed despite timeout`);
+      }
       errors.push({ change, error: msg });
       results.push({ change, result: msg, success: false });
     }
@@ -2378,6 +2441,7 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
     total:   changes.length,
     results,
     errors,
+    warnings,
   };
 
   // Log to session history (skip dry runs)
@@ -2514,8 +2578,24 @@ app.post('/api/undo', requireAuth, async (req, res) => {
 // CHANGE EXECUTOR
 // Handles each change type against the Google Ads API
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// GAQL ESCAPING — sanitize strings for GAQL interpolation
+// ─────────────────────────────────────────────────────────────
+const VALID_MATCH_TYPES = ['EXACT', 'PHRASE', 'BROAD'];
+
+function gaqlEscape(str) {
+  if (!str || typeof str !== 'string') throw new Error('Empty or invalid GAQL value');
+  if (str.length > 500) throw new Error('GAQL value too long (max 500 chars)');
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "''");
+}
+
 async function applyChange(client, change, dryRun) {
   const { type, campaignName, adGroupName, details } = change;
+
+  // Validate match type if present
+  if (details?.matchType && !VALID_MATCH_TYPES.includes(details.matchType)) {
+    throw new Error(`Invalid match type: ${details.matchType}. Must be EXACT, PHRASE, or BROAD`);
+  }
 
   if (dryRun) {
     return `[DRY RUN] Would ${type} — ${campaignName || ''}${adGroupName ? ' > ' + adGroupName : ''}`;
@@ -2526,7 +2606,7 @@ async function applyChange(client, change, dryRun) {
     const rows = await client.query(`
       SELECT campaign.id, campaign.name
       FROM campaign
-      WHERE campaign.name = '${name.replace(/'/g, "''")}'
+      WHERE campaign.name = '${gaqlEscape(name)}'
         AND campaign.status != 'REMOVED'
       LIMIT 1
     `);
@@ -2538,8 +2618,8 @@ async function applyChange(client, change, dryRun) {
     const rows = await client.query(`
       SELECT ad_group.id
       FROM ad_group
-      WHERE campaign.name = '${campName.replace(/'/g, "''")}'
-        AND ad_group.name = '${agName.replace(/'/g, "''")}'
+      WHERE campaign.name = '${gaqlEscape(campName)}'
+        AND ad_group.name = '${gaqlEscape(agName)}'
         AND ad_group.status != 'REMOVED'
       LIMIT 1
     `);
@@ -2602,8 +2682,8 @@ async function applyChange(client, change, dryRun) {
       const rows = await client.query(`
         SELECT ad_group_criterion.resource_name
         FROM ad_group_criterion
-        WHERE campaign.name = '${campaignName.replace(/'/g, "''")}'
-          AND ad_group_criterion.keyword.text = '${details.keyword.replace(/'/g, "''")}'
+        WHERE campaign.name = '${gaqlEscape(campaignName)}'
+          AND ad_group_criterion.keyword.text = '${gaqlEscape(details.keyword)}'
           AND ad_group_criterion.keyword.match_type = '${details.matchType}'
         LIMIT 1
       `);
@@ -2619,8 +2699,8 @@ async function applyChange(client, change, dryRun) {
       const rows = await client.query(`
         SELECT ad_group_criterion.resource_name
         FROM ad_group_criterion
-        WHERE campaign.name = '${campaignName.replace(/'/g, "''")}'
-          AND ad_group_criterion.keyword.text = '${details.keyword.replace(/'/g, "''")}'
+        WHERE campaign.name = '${gaqlEscape(campaignName)}'
+          AND ad_group_criterion.keyword.text = '${gaqlEscape(details.keyword)}'
           AND ad_group_criterion.keyword.match_type = '${details.matchType}'
         LIMIT 1
       `);
@@ -2899,7 +2979,7 @@ app.post('/api/freshdesk-webhook', async (req, res) => {
   const expectedBuf = Buffer.from(String(expectedKey || ''));
   if (!expectedKey || !api_key || typeof api_key !== 'string' ||
       keyBuf.length !== expectedBuf.length ||
-      !require('crypto').timingSafeEqual(keyBuf, expectedBuf)) {
+      !crypto.timingSafeEqual(keyBuf, expectedBuf)) {
     return res.status(401).json({ error: 'Invalid or missing api_key' });
   }
   if (!task) return res.status(400).json({ error: 'Missing task field' });
