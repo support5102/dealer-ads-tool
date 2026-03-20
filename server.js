@@ -673,6 +673,15 @@ Examples:
 
       <!-- Plan appears here -->
       <div id="planArea"></div>
+
+      <!-- History panel -->
+      <div id="historyPanel" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="section-title" style="margin:0">Change History</div>
+          <button class="btn-secondary" onclick="loadHistory()" style="font-size:10px;padding:4px 10px">Refresh</button>
+        </div>
+        <div id="historyList"></div>
+      </div>
     </div>
   </div>
 
@@ -733,6 +742,7 @@ async function checkAuthStatus() {
       state.connected = true;
       showConnectedState();
       await loadAccounts();
+      loadHistory();
     }
   } catch(e) {
     console.error('Auth check failed:', e);
@@ -1079,6 +1089,7 @@ async function applyChanges(dryRun) {
     renderResults(data, dryRun);
     if (!dryRun) {
       showToast(\`✅ \${data.applied} change\${data.applied !== 1 ? 's' : ''} applied to Google Ads\`);
+      loadHistory();
       // Reload structure to reflect changes
       setTimeout(() => selectAccount(state.selectedId), 2000);
     }
@@ -1108,6 +1119,71 @@ function renderResults(data, dryRun) {
     </div>
   \`;
   area.innerHTML = area.innerHTML + extra;
+}
+
+// ─────────────────────────────────────────────────────────────
+// CHANGE HISTORY
+// ─────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const panel = document.getElementById('historyPanel');
+  const list = document.getElementById('historyList');
+
+  try {
+    const res = await fetch('/api/history');
+    const data = await res.json();
+    const history = data.history || [];
+
+    if (history.length === 0) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    panel.style.display = 'block';
+    list.innerHTML = history.map((entry, idx) => {
+      const time = new Date(entry.timestamp).toLocaleString();
+      const undoLabel = entry.isUndo ? ' (UNDO)' : '';
+      const canUndo = !entry.isUndo && !entry.undone && entry.changes?.some(c => c.success && ['pause_campaign','enable_campaign','pause_ad_group','enable_ad_group','pause_keyword','enable_keyword'].includes(c.type));
+
+      return \`<div style="padding:8px 12px;border-bottom:1px solid var(--border2);font-size:11px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="color:var(--text2)">\${esc(time)}</span>
+            <span style="color:var(--blue);margin-left:6px">\${esc(entry.accountName || entry.customerId)}</span>
+            <span style="color:var(--text3)">\${undoLabel}\${entry.batch ? ' (batch)' : ''}</span>
+          </div>
+          <div>
+            <span style="color:var(--green)">\${entry.applied}✓</span>
+            \${entry.failed ? \`<span style="color:var(--red);margin-left:4px">\${entry.failed}✗</span>\` : ''}
+            \${canUndo ? \`<button onclick="undoHistory(\${idx})" style="margin-left:8px;background:var(--bg3);border:1px solid var(--border);color:var(--orange);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;font-family:inherit">↩ Undo</button>\` : ''}
+          </div>
+        </div>
+        <div style="color:var(--text3);margin-top:2px">\${entry.changes?.slice(0,3).map(c => esc(c.type + ': ' + (c.campaign || ''))).join(' · ')}\${entry.changes?.length > 3 ? \` (+\${entry.changes.length - 3} more)\` : ''}</div>
+      </div>\`;
+    }).join('');
+  } catch (err) {
+    console.error('History load error:', err);
+  }
+}
+
+async function undoHistory(idx) {
+  if (!confirm('Undo these changes? This will reverse the operations.')) return;
+
+  try {
+    const res = await fetch('/api/undo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ historyIndex: idx })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    showToast(\`↩ Undo: \${data.applied} reversed, \${data.failed} failed\`);
+    loadHistory();
+    // Reload structure if viewing an account
+    if (state.selectedId) setTimeout(() => selectAccount(state.selectedId), 1000);
+  } catch (err) {
+    showToast('❌ Undo failed: ' + err.message, 'error');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1286,6 +1362,7 @@ async function batchApply(dryRun) {
 
     if (!dryRun) {
       showToast(\`✅ Batch complete: \${data.totalApplied} applied, \${data.totalFailed} failed\`);
+      loadHistory();
     }
   } catch (err) {
     showToast('❌ ' + err.message, 'error');
@@ -2004,12 +2081,41 @@ app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
     return { accountId: accountChanges[i]?.accountId, error: r.reason?.message || 'Unknown error', results: [], applied: 0, failed: accountChanges[i]?.changes?.length || 0 };
   });
 
-  res.json({
+  const response = {
     dryRun,
     accountResults,
     totalApplied: accountResults.reduce((sum, a) => sum + (a.applied || 0), 0),
     totalFailed:  accountResults.reduce((sum, a) => sum + (a.failed || 0), 0),
-  });
+  };
+
+  // Log batch to session history (skip dry runs)
+  if (!dryRun) {
+    if (!req.session.history) req.session.history = [];
+    accountResults.forEach(ar => {
+      if (ar.applied > 0 || ar.failed > 0) {
+        req.session.history.unshift({
+          timestamp: new Date().toISOString(),
+          customerId: ar.accountId,
+          accountName: ar.accountId,
+          batch: true,
+          applied: ar.applied || 0,
+          failed: ar.failed || 0,
+          total: ar.total || 0,
+          changes: (ar.results || []).map(r => ({
+            type: r.change?.type,
+            campaign: r.change?.campaignName,
+            adGroupName: r.change?.adGroupName || null,
+            details: r.change?.details || null,
+            success: r.success,
+            result: r.result,
+          })),
+        });
+      }
+    });
+    if (req.session.history.length > 50) req.session.history.length = 50;
+  }
+
+  res.json(response);
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -2068,14 +2174,143 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
     }
   }
 
-  res.json({
+  const response = {
     dryRun,
     applied: results.filter(r => r.success).length,
     failed:  errors.length,
     total:   changes.length,
     results,
     errors,
-  });
+  };
+
+  // Log to session history (skip dry runs)
+  if (!dryRun) {
+    if (!req.session.history) req.session.history = [];
+    req.session.history.unshift({
+      timestamp: new Date().toISOString(),
+      customerId,
+      accountName: req.body.accountName || customerId,
+      applied: response.applied,
+      failed:  response.failed,
+      total:   response.total,
+      changes: results.map(r => ({
+        type: r.change.type,
+        campaign: r.change.campaignName,
+        adGroupName: r.change.adGroupName || null,
+        details: r.change.details || null,
+        success: r.success,
+        result: r.result,
+      })),
+    });
+    // Cap history at 50 entries
+    if (req.session.history.length > 50) req.session.history.length = 50;
+  }
+
+  res.json(response);
+});
+
+// ─────────────────────────────────────────────────────────────
+// CHANGE HISTORY
+// ─────────────────────────────────────────────────────────────
+app.get('/api/history', requireAuth, (req, res) => {
+  res.json({ history: req.session.history || [] });
+});
+
+app.post('/api/undo', requireAuth, async (req, res) => {
+  const { historyIndex } = req.body;
+  const history = req.session.history || [];
+
+  if (historyIndex == null || !Number.isInteger(historyIndex) || historyIndex < 0 || historyIndex >= history.length) {
+    return res.status(400).json({ error: 'Invalid history index' });
+  }
+
+  const entry = history[historyIndex];
+  if (entry.undone) {
+    return res.status(400).json({ error: 'This entry has already been undone' });
+  }
+
+  const reversible = {
+    pause_campaign: 'enable_campaign',
+    enable_campaign: 'pause_campaign',
+    pause_ad_group: 'enable_ad_group',
+    enable_ad_group: 'pause_ad_group',
+    pause_keyword: 'enable_keyword',
+    enable_keyword: 'pause_keyword',
+  };
+
+  const undoChanges = [];
+  for (const c of entry.changes) {
+    if (!c.success) continue;
+    const reverseType = reversible[c.type];
+    if (!reverseType) continue;
+    undoChanges.push({
+      type: reverseType,
+      campaignName: c.campaign,
+      adGroupName: c.adGroupName || null,
+      details: c.details || null,
+    });
+  }
+
+  if (undoChanges.length === 0) {
+    return res.status(400).json({ error: 'No reversible changes found in this history entry' });
+  }
+
+  // Apply undo changes
+  const mccId = req.session.mccId;
+  const customerConfig = {
+    customer_id:   entry.customerId,
+    refresh_token: req.session.tokens.refresh_token,
+  };
+  if (mccId) customerConfig.login_customer_id = mccId;
+
+  try {
+    const client = new GoogleAdsApi({
+      client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    }).Customer(customerConfig);
+
+    const results = [];
+    for (const change of undoChanges) {
+      try {
+        const result = await applyChange(client, change, false);
+        results.push({ change, result, success: true });
+      } catch (err) {
+        results.push({ change, result: err.message, success: false });
+      }
+    }
+
+    // Mark original entry as undone
+    entry.undone = true;
+
+    // Log undo to history
+    req.session.history.unshift({
+      timestamp: new Date().toISOString(),
+      customerId: entry.customerId,
+      accountName: entry.accountName,
+      isUndo: true,
+      undoOf: entry.timestamp,
+      applied: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      total: results.length,
+      changes: results.map(r => ({
+        type: r.change.type,
+        campaign: r.change.campaignName || r.change.campaign,
+        success: r.success,
+        result: r.result,
+      })),
+    });
+    if (req.session.history.length > 50) req.session.history.length = 50;
+
+    res.json({
+      applied: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      results,
+    });
+  } catch (err) {
+    console.error('Undo error:', err.message);
+    res.status(500).json({ error: 'Undo failed: ' + err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -2181,6 +2416,23 @@ async function applyChange(client, change, dryRun) {
         status: 'PAUSED'
       }]);
       return `Paused keyword: [${details.matchType}] "${details.keyword}"`;
+    }
+
+    case 'enable_keyword': {
+      const rows = await client.query(`
+        SELECT ad_group_criterion.resource_name
+        FROM ad_group_criterion
+        WHERE campaign.name = '${campaignName.replace(/'/g, "''")}'
+          AND ad_group_criterion.keyword.text = '${details.keyword.replace(/'/g, "''")}'
+          AND ad_group_criterion.keyword.match_type = '${details.matchType}'
+        LIMIT 1
+      `);
+      if (!rows.length) throw new Error(`Keyword not found: ${details.keyword}`);
+      await client.adGroupCriteria.update([{
+        resource_name: rows[0].ad_group_criterion.resource_name,
+        status: 'ENABLED'
+      }]);
+      return `Enabled keyword: [${details.matchType}] "${details.keyword}"`;
     }
 
     case 'add_negative_keyword': {
