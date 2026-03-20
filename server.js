@@ -8,6 +8,7 @@ const crypto     = require('crypto');
 const { GoogleAdsApi } = require('google-ads-api');
 const { applyChange } = require('./lib/apply-change');
 const { buildClaudeSystemPrompt, buildUserMessage } = require('./lib/claude-prompts');
+const { addHistoryEntry, getHistory, updateHistoryEntryById } = require('./lib/history');
 
 // ─────────────────────────────────────────────────────────────
 // STARTUP VALIDATION — fail fast if required env vars are missing
@@ -696,12 +697,11 @@ app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
     totalFailed:  accountResults.reduce((sum, a) => sum + (a.failed || 0), 0),
   };
 
-  // Log batch to session history (skip dry runs)
+  // Log batch to persistent history (skip dry runs)
   if (!dryRun) {
-    if (!req.session.history) req.session.history = [];
     accountResults.forEach(ar => {
       if (ar.applied > 0 || ar.failed > 0) {
-        req.session.history.unshift({
+        addHistoryEntry({
           timestamp: new Date().toISOString(),
           customerId: ar.accountId,
           accountName: ar.accountId,
@@ -720,7 +720,6 @@ app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
         });
       }
     });
-    if (req.session.history.length > 50) req.session.history.length = 50;
   }
 
   res.json(response);
@@ -865,10 +864,9 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
     warnings,
   };
 
-  // Log to session history (skip dry runs)
+  // Log to persistent history (skip dry runs)
   if (!dryRun) {
-    if (!req.session.history) req.session.history = [];
-    req.session.history.unshift({
+    addHistoryEntry({
       timestamp: new Date().toISOString(),
       customerId,
       accountName: req.body.accountName || customerId,
@@ -884,8 +882,6 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
         result: r.result,
       })),
     });
-    // Cap history at 50 entries
-    if (req.session.history.length > 50) req.session.history.length = 50;
   }
 
   res.json(response);
@@ -895,18 +891,28 @@ app.post('/api/apply-changes', requireAuth, async (req, res) => {
 // CHANGE HISTORY
 // ─────────────────────────────────────────────────────────────
 app.get('/api/history', requireAuth, (req, res) => {
-  res.json({ history: req.session.history || [] });
+  res.json({ history: getHistory() });
 });
 
 app.post('/api/undo', requireAuth, async (req, res) => {
-  const { historyIndex } = req.body;
-  const history = req.session.history || [];
+  const { historyId, historyIndex } = req.body;
+  const history = getHistory();
 
-  if (historyIndex == null || !Number.isInteger(historyIndex) || historyIndex < 0 || historyIndex >= history.length) {
-    return res.status(400).json({ error: 'Invalid history index' });
+  // Support both ID-based (preferred) and legacy index-based lookup
+  let entry;
+  let entryId;
+  if (historyId) {
+    entry = history.find(e => e.id === historyId);
+    entryId = historyId;
+  } else if (historyIndex != null && Number.isInteger(historyIndex) && historyIndex >= 0 && historyIndex < history.length) {
+    entry = history[historyIndex];
+    entryId = entry?.id;
   }
 
-  const entry = history[historyIndex];
+  if (!entry || !entryId) {
+    return res.status(400).json({ error: 'History entry not found' });
+  }
+
   if (entry.undone) {
     return res.status(400).json({ error: 'This entry has already been undone' });
   }
@@ -962,11 +968,11 @@ app.post('/api/undo', requireAuth, async (req, res) => {
       }
     }
 
-    // Mark original entry as undone
-    entry.undone = true;
+    // Mark original entry as undone (persistent)
+    updateHistoryEntryById(entryId, { undone: true });
 
-    // Log undo to history
-    req.session.history.unshift({
+    // Log undo to persistent history
+    addHistoryEntry({
       timestamp: new Date().toISOString(),
       customerId: entry.customerId,
       accountName: entry.accountName,
@@ -982,7 +988,6 @@ app.post('/api/undo', requireAuth, async (req, res) => {
         result: r.result,
       })),
     });
-    if (req.session.history.length > 50) req.session.history.length = 50;
 
     res.json({
       applied: results.filter(r => r.success).length,
@@ -1112,6 +1117,7 @@ app.post('/api/freshdesk-webhook', async (req, res) => {
     return res.status(401).json({ error: 'Invalid or missing api_key' });
   }
   if (!task) return res.status(400).json({ error: 'Missing task field' });
+  if (typeof task !== 'string' || task.length > 10000) return res.status(400).json({ error: 'Task must be a string under 10,000 characters' });
   if (!account_id) return res.status(400).json({ error: 'Missing account_id field' });
   const cleanAccountId = String(account_id).replace(/-/g, '');
   if (!/^\d+$/.test(cleanAccountId)) return res.status(400).json({ error: 'Invalid account_id format' });
@@ -1136,9 +1142,41 @@ app.post('/api/freshdesk-webhook', async (req, res) => {
     if (mccId) customerConfig.login_customer_id = mccId;
     const client = api.Customer(customerConfig);
 
+    // Fetch account structure for better Claude accuracy (20s timeout)
+    let structure = null;
+    try {
+      const structureTimeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Structure fetch timeout')), 20000));
+      const structureFetch = (async () => {
+        const [campaigns, adGroups] = await Promise.all([
+          client.query(`
+            SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type
+            FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name
+          `),
+          client.query(`
+            SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros, campaign.id, campaign.name
+            FROM ad_group WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED' ORDER BY campaign.name, ad_group.name
+          `),
+        ]);
+        const campMap = {};
+        campaigns.forEach(row => {
+          const c = row.campaign;
+          campMap[String(c.id)] = { name: c.name, status: c.status, type: c.advertising_channel_type, budget: '?', metrics: null, adGroups: [] };
+        });
+        adGroups.forEach(row => {
+          const camp = campMap[String(row.campaign.id)];
+          if (camp) camp.adGroups.push({ name: row.ad_group.name, status: row.ad_group.status, defaultBid: row.ad_group.cpc_bid_micros ? (row.ad_group.cpc_bid_micros / 1_000_000).toFixed(2) : '?', keywords: [] });
+        });
+        return { campaigns: Object.values(campMap) };
+      })();
+      structure = await Promise.race([structureFetch, structureTimeout]);
+      console.log(`Webhook: fetched structure — ${structure.campaigns.length} campaigns`);
+    } catch (structErr) {
+      console.warn('Webhook: structure fetch failed (proceeding without):', structErr.message);
+    }
+
     // Parse the task via Claude (dry-run only — returns plan, does not apply)
     const systemPrompt = buildClaudeSystemPrompt();
-    const userMsg = `ACCOUNT: ${account_name || account_id}\n\nFRESHDESK TASK:\n${task}`;
+    const userMsg = buildUserMessage(task, structure, account_name || account_id);
     const response = await axios.post('https://api.anthropic.com/v1/messages', {
       model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
       max_tokens: 4096,
@@ -1154,7 +1192,13 @@ app.post('/api/freshdesk-webhook', async (req, res) => {
     });
 
     const raw = response.data?.content?.[0]?.text || '{}';
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error('Claude returned invalid JSON:', raw.substring(0, 500));
+      return res.status(502).json({ error: 'Claude returned invalid JSON', raw: raw.substring(0, 1000) });
+    }
     res.json({ status: 'parsed', plan: parsed });
   } catch (e) {
     console.error('Freshdesk webhook error:', e.response?.data || e.message);

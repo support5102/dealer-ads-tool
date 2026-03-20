@@ -4,14 +4,18 @@
 Node.js/Express app for managing Google Ads campaigns across automotive dealer accounts via an MCC. Integrates Claude AI for natural-language task parsing from Freshdesk tickets. Deployed on Railway.
 
 ## Architecture
-- **Single file:** `server.js` (~2900 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
-- **No database** — stateless, session-only storage for OAuth tokens, MCC ID cache, and change history
+- **server.js** (~1180 lines) — all API routes, change executor orchestration
+- **public/index.html** (~1576 lines) — extracted frontend
+- **lib/apply-change.js** — Google Ads mutation logic + GAQL escaping
+- **lib/claude-prompts.js** — Claude system/user prompt builders
+- **lib/history.js** — file-based persistent history with write locking
+- **tests/** — Jest unit tests (29 tests)
 - **Stack:** Express, google-ads-api, axios, Anthropic Claude API, express-session
 
 ## Endpoints
 | Route | Method | Purpose |
 |-------|--------|---------|
-| `/` | GET | Serves embedded frontend |
+| `/` | GET | Serves frontend from public/ |
 | `/health` | GET | Railway health check |
 | `/auth/google` | GET | OAuth initiation |
 | `/auth/callback` | GET | OAuth callback |
@@ -23,13 +27,13 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/api/parse-task-multi` | POST | Claude parses multi-account task → changes grouped by account |
 | `/api/apply-changes` | POST | Execute changes against single Google Ads account |
 | `/api/apply-changes-batch` | POST | Execute changes across multiple accounts in parallel |
-| `/api/history` | GET | Retrieve change history from session |
-| `/api/undo` | POST | Undo a reversible change from history |
+| `/api/history` | GET | Retrieve persistent change history |
+| `/api/undo` | POST | Undo a reversible change (by ID or legacy index) |
 | `/api/smart-suggestions` | POST | Claude analyses account and flags issues proactively |
 | `/api/report` | POST | Claude generates natural language performance report |
 | `/api/freshdesk-webhook` | POST | Accept tasks from Freshdesk webhooks (API key auth) |
 
-## Current Phase: Phase 6 Complete (All Phases Done)
+## Current Phase: All 9 Phases Complete
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -100,25 +104,28 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] Fix env.example (was accidentally HTML)
 - [x] Crypto import moved to top-level
 
-### Phase 8: Modularization (next)
-- [ ] Extract frontend HTML to public/index.html
-- [ ] Extract gadsSearch to lib/gads-search.js
-- [ ] Extract applyChange + gaqlEscape to lib/apply-change.js
-- [ ] Extract Claude prompt builders to lib/claude-prompts.js
-- [ ] Extract route handlers into routes/ directory
-- [ ] server.js shrinks to ~50 lines
+### Phase 8: Modularization (completed 2026-03-20)
+- [x] Extract frontend HTML to public/index.html (1576 lines), serve via express.static
+- [x] Extract applyChange + gaqlEscape to lib/apply-change.js
+- [x] Extract buildClaudeSystemPrompt + buildUserMessage to lib/claude-prompts.js
+- [x] Remove update_bid from Claude schema (never implemented)
+- [x] server.js reduced from 3048 to 1177 lines (61% reduction)
+- [x] Proper env.example with all required/optional vars
 
-### Phase 9: Testing & Webhook Improvement
-- [ ] Add Jest + Supertest test infrastructure
-- [ ] Unit tests for applyChange and gaqlEscape
-- [ ] Unit tests for Claude prompt builders
-- [ ] Integration tests for route validation
-- [ ] Freshdesk webhook: fetch account structure before Claude parse
-- [ ] Persistent history with better-sqlite3
+### Phase 9: Testing & Webhook Improvement (completed 2026-03-20)
+- [x] Jest test infrastructure (29 tests across 2 test files)
+- [x] Unit tests for applyChange and gaqlEscape (17 tests)
+- [x] Unit tests for Claude prompt builders (12 tests)
+- [x] Freshdesk webhook: fetch account structure before Claude parse (parallel queries, 20s timeout)
+- [x] Persistent file-based history storage (replaces session-only)
+- [x] History entries use unique IDs (not array indices) for safe undo
+- [x] Write lock on history file prevents concurrent read-modify-write races
+- [x] Task length validation on webhook (10K char cap)
+- [x] Claude JSON parse error handling in webhook
+- [x] .gitignore added (node_modules, data/, .env)
 
 ## Known Issues
-- No test suite
 - GAQL queries use string interpolation (parameterized queries preferred long-term)
 - Timeout on apply-changes doesn't cancel in-flight API mutation
-- History is session-only (lost on restart) — needs persistent storage
-- Freshdesk webhook returns plan without account structure context (limited accuracy)
+- No integration tests for route endpoints (unit tests only)
+- Frontend undo buttons still send historyIndex (should migrate to historyId)
