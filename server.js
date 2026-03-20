@@ -191,6 +191,20 @@ const FRONTEND_HTML = `<!DOCTYPE html>
     }
     .account-select:focus { outline: none; border-color: var(--blue); }
 
+    .account-search {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .account-search:focus { outline: none; border-color: var(--blue); }
+    .account-search::placeholder { color: var(--text3); }
+
     /* Account tree */
     .tree { padding: 8px 0; flex: 1; }
     .tree-campaign {
@@ -603,6 +617,7 @@ const FRONTEND_HTML = `<!DOCTYPE html>
   <div class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-label">Account</div>
+      <input class="account-search" id="accountSearch" type="text" placeholder="Search accounts..." oninput="filterAccounts(this.value)" style="display:none" />
       <select class="account-select" id="accountSelect" onchange="selectAccount(this.value)" disabled>
         <option value="">— Connect Google Ads first —</option>
       </select>
@@ -649,6 +664,9 @@ Examples:
         <button class="btn-primary" id="analyseBtn" onclick="analyseTask()" disabled>
           🔍 Analyse Task
         </button>
+        <button class="btn-primary" id="batchBtn" onclick="batchAnalyse()" style="background:#1a2e50;border-color:#1d4ed8;display:none">
+          📋 Batch Analyse (All Accounts)
+        </button>
         <button class="btn-secondary" onclick="clearTask()">Clear</button>
         <span style="font-size:11px;color:#334155;margin-left:4px" id="accountLabel"></span>
       </div>
@@ -665,6 +683,11 @@ Examples:
 
 <script>
 // ─────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s || ''); return d.innerHTML; }
+
+// ─────────────────────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────────────────────
 let state = {
@@ -674,6 +697,7 @@ let state = {
   selectedName: null,
   structure:   null,
   plan:        null,
+  batchPlan:   null,
   loadingAccounts: false,
   loadingStructure: false,
   loadingTask: false,
@@ -741,6 +765,7 @@ function showConnectedState() {
 // ─────────────────────────────────────────────────────────────
 async function loadAccounts() {
   const sel = document.getElementById('accountSelect');
+  const search = document.getElementById('accountSearch');
   sel.disabled = true;
   sel.innerHTML = '<option>Loading accounts...</option>';
 
@@ -751,17 +776,10 @@ async function loadAccounts() {
     if (data.error) throw new Error(data.error);
 
     state.accounts = data.accounts || [];
-    sel.innerHTML  = '<option value="">— Select a dealer account —</option>';
-
-    state.accounts.forEach(acc => {
-      const opt  = document.createElement('option');
-      opt.value  = acc.id;
-      opt.text   = (acc.isManager ? '🏢 ' : '📍 ') + acc.name;
-      if (acc.currency) opt.text += \` (\${acc.currency})\`;
-      sel.appendChild(opt);
-    });
-
+    renderAccountOptions(state.accounts);
     sel.disabled = false;
+    search.style.display = state.accounts.length > 5 ? 'block' : 'none';
+    document.getElementById('batchBtn').style.display = state.accounts.length > 1 ? 'inline-block' : 'none';
 
     if (state.accounts.length === 0) {
       sel.innerHTML = '<option>No accounts found</option>';
@@ -770,6 +788,30 @@ async function loadAccounts() {
     sel.innerHTML = '<option>Error loading accounts</option>';
     showToast('❌ ' + err.message, 'error');
   }
+}
+
+function renderAccountOptions(accounts) {
+  const sel = document.getElementById('accountSelect');
+  sel.innerHTML = '<option value="">— Select a dealer account —</option>';
+  accounts.forEach(acc => {
+    const opt  = document.createElement('option');
+    opt.value  = acc.id;
+    opt.text   = (acc.isManager ? '🏢 ' : '📍 ') + acc.name;
+    if (acc.currency) opt.text += \` (\${acc.currency})\`;
+    sel.appendChild(opt);
+  });
+}
+
+function filterAccounts(query) {
+  const q = query.toLowerCase().trim();
+  if (!q) {
+    renderAccountOptions(state.accounts);
+    return;
+  }
+  const filtered = state.accounts.filter(a =>
+    a.name.toLowerCase().includes(q) || a.id.includes(q)
+  );
+  renderAccountOptions(filtered);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -833,20 +875,20 @@ function renderTree(campaigns) {
 
     const statusClass = (String(camp.status || "")).toLowerCase().replace("campaign_status_","");
     campDiv.innerHTML = \`
-      <div class="tree-camp-header" onclick="toggleCampaign(this)" data-camp="\${camp.name}">
+      <div class="tree-camp-header" onclick="toggleCampaign(this)" data-camp="\${esc(camp.name)}">
         <span class="tree-arrow">▶</span>
         <div class="status-dot \${statusClass}"></div>
-        <span class="tree-camp-name">\${camp.name}</span>
-        <span class="tree-budget">\${camp.budget !== '?' ? '$' + camp.budget + '/day' : ''}</span>
-        \${camp.metrics ? \`<span class="tree-metrics" style="font-size:9px;color:var(--text3);margin-left:8px">\${Number(camp.metrics.impressions).toLocaleString()} imp · \${Number(camp.metrics.clicks).toLocaleString()} clk · $\${camp.metrics.cost}</span>\` : ''}
+        <span class="tree-camp-name">\${esc(camp.name)}</span>
+        <span class="tree-budget">\${camp.budget !== '?' ? '$' + esc(camp.budget) + '/day' : ''}</span>
+        \${camp.metrics ? \`<span class="tree-metrics" style="font-size:9px;color:var(--text3);margin-left:8px">\${Number(camp.metrics.impressions).toLocaleString()} imp · \${Number(camp.metrics.clicks).toLocaleString()} clk · $\${esc(camp.metrics.cost)}</span>\` : ''}
       </div>
       <div class="tree-ag-list" style="display:none">
         \${camp.adGroups.map(ag => \`
           <div class="tree-ag">
-            <div class="tree-ag-header" onclick="toggleAG(this)" data-ag="\${ag.name}">
+            <div class="tree-ag-header" onclick="toggleAG(this)" data-ag="\${esc(ag.name)}">
               <span class="tree-arrow">▶</span>
               <div class="status-dot \${ag.status.toLowerCase()}"></div>
-              <span class="tree-ag-name">📁 \${ag.name}</span>
+              <span class="tree-ag-name">📁 \${esc(ag.name)}</span>
               <span class="tree-kw-count">🔑\${ag.keywords.length}</span>
             </div>
             <div class="tree-keywords" style="display:none">
@@ -856,8 +898,8 @@ function renderTree(campaigns) {
                 return \`<div class="tree-kw">
                   <span class="match-badge \${match}">\${matchShort}</span>
                   \${kw.negative ? '<span style="color:#f87171;font-size:9px">NEG</span>' : ''}
-                  <span class="kw-text">\${kw.text}</span>
-                  \${kw.bid ? \`<span style="font-size:10px;color:#475569">$\${kw.bid}</span>\` : ''}
+                  <span class="kw-text">\${esc(kw.text)}</span>
+                  \${kw.bid ? \`<span style="font-size:10px;color:#475569">$\${esc(kw.bid)}</span>\` : ''}
                 </div>\`;
               }).join('')}
               \${ag.keywords.length > 30 ? \`<div class="tree-kw" style="color:#334155;font-size:10px">...and \${ag.keywords.length - 30} more</div>\` : ''}
@@ -897,6 +939,7 @@ async function analyseTask() {
   if (!state.selectedId) { showToast('Select an account first', 'error'); return; }
 
   document.getElementById('analyseBtn').disabled = true;
+  document.getElementById('batchBtn').disabled = true;
   document.getElementById('analyseBtn').innerHTML = '<span class="spinner"></span> Analysing...';
   document.getElementById('planArea').innerHTML = '';
 
@@ -920,6 +963,7 @@ async function analyseTask() {
     showToast('❌ ' + err.message, 'error');
   } finally {
     document.getElementById('analyseBtn').disabled = false;
+    document.getElementById('batchBtn').disabled = false;
     document.getElementById('analyseBtn').innerHTML = '🔍 Analyse Task';
   }
 }
@@ -954,8 +998,8 @@ function renderPlan(plan) {
   let html = \`
     <div class="plan-card">
       <div class="plan-header">
-        <div class="plan-summary">\${plan.summary || 'Task parsed'}</div>
-        <div class="plan-count">\${changes.length} change\${changes.length !== 1 ? 's' : ''} · \${state.selectedName}</div>
+        <div class="plan-summary">\${esc(plan.summary || 'Task parsed')}</div>
+        <div class="plan-count">\${changes.length} change\${changes.length !== 1 ? 's' : ''} · \${esc(state.selectedName)}</div>
       </div>
       <div class="change-list">
   \`;
@@ -963,17 +1007,17 @@ function renderPlan(plan) {
   changes.forEach(c => {
     const meta = TYPE_META[c.type] || { label: c.type, color:'#94a3b8', bg:'#1a2035', border:'#334155' };
     let desc = '';
-    if (c.type === 'update_budget') desc = \`New budget: $\${c.details?.newBudget}/day\`;
-    else if (c.type.includes('keyword')) desc = \`[\${c.details?.matchType || '?'}] "\${c.details?.keyword}"\`;
-    else if (c.type.includes('radius')) desc = \`\${c.details?.radius}mi radius around (\${c.details?.lat}, \${c.details?.lng})\`;
-    else desc = c.adGroupName ? \`\${c.campaignName} › \${c.adGroupName}\` : (c.campaignName || '');
+    if (c.type === 'update_budget') desc = \`New budget: $\${esc(c.details?.newBudget)}/day\`;
+    else if (c.type.includes('keyword')) desc = \`[\${esc(c.details?.matchType || '?')}] "\${esc(c.details?.keyword)}"\`;
+    else if (c.type.includes('radius')) desc = \`\${esc(c.details?.radius)}mi radius around (\${esc(c.details?.lat)}, \${esc(c.details?.lng)})\`;
+    else desc = c.adGroupName ? \`\${esc(c.campaignName)} › \${esc(c.adGroupName)}\` : esc(c.campaignName || '');
 
     html += \`
       <div class="change-item">
         <span class="change-type-badge" style="background:\${meta.bg};color:\${meta.color};border:1px solid \${meta.border}">\${meta.label}</span>
         <div>
           <div class="change-desc">\${desc || '—'}</div>
-          <div class="change-campaign">\${c.campaignName || ''}\${c.adGroupName ? ' › ' + c.adGroupName : ''}</div>
+          <div class="change-campaign">\${esc(c.campaignName || '')}\${c.adGroupName ? ' › ' + esc(c.adGroupName) : ''}</div>
         </div>
       </div>
     \`;
@@ -984,7 +1028,7 @@ function renderPlan(plan) {
   if (warnings.length) {
     html += \`<div class="warnings-box">
       <div class="warnings-title">⚠ Review Before Applying</div>
-      \${warnings.map(w => \`<div class="warning-item">• \${w}</div>\`).join('')}
+      \${warnings.map(w => \`<div class="warning-item">• \${esc(w)}</div>\`).join('')}
     </div>\`;
   }
 
@@ -1058,12 +1102,196 @@ function renderResults(data, dryRun) {
       \${data.results.map(r => \`
         <div class="result-item">
           <span class="result-icon">\${r.success ? '✓' : '✗'}</span>
-          <span class="result-text" style="color:\${r.success ? '#94a3b8' : '#f87171'}">\${r.result}</span>
+          <span class="result-text" style="color:\${r.success ? '#94a3b8' : '#f87171'}">\${esc(r.result)}</span>
         </div>
       \`).join('')}
     </div>
   \`;
   area.innerHTML = area.innerHTML + extra;
+}
+
+// ─────────────────────────────────────────────────────────────
+// BATCH ANALYSE — parse task across ALL loaded accounts
+// ─────────────────────────────────────────────────────────────
+async function batchAnalyse() {
+  const task = document.getElementById('taskInput').value.trim();
+  if (!task) return;
+  if (state.accounts.length === 0) { showToast('No accounts loaded', 'error'); return; }
+
+  const batchBtn = document.getElementById('batchBtn');
+  const analyseBtn = document.getElementById('analyseBtn');
+  batchBtn.disabled = true;
+  analyseBtn.disabled = true;
+  batchBtn.innerHTML = '<span class="spinner"></span> Loading structures...';
+  document.getElementById('planArea').innerHTML = '';
+
+  try {
+    // Load structures for all non-manager accounts in parallel
+    const clientAccounts = state.accounts.filter(a => !a.isManager);
+    const structureResults = await Promise.allSettled(
+      clientAccounts.map(async acc => {
+        const mccParam = acc.mccId ? \`?mccId=\${acc.mccId}\` : '';
+        const res = await fetch(\`/api/account/\${acc.id}/structure\${mccParam}\`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        return { id: acc.id, name: acc.name, structure: data };
+      })
+    );
+
+    const loadedAccounts = structureResults
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    if (loadedAccounts.length === 0) {
+      showToast('Failed to load any account structures', 'error');
+      return;
+    }
+
+    batchBtn.innerHTML = '<span class="spinner"></span> Analysing across ' + loadedAccounts.length + ' accounts...';
+
+    // Send to Claude for multi-account parsing
+    const res = await fetch('/api/parse-task-multi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, accounts: loadedAccounts })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    state.batchPlan = data;
+    renderBatchPlan(data);
+  } catch (err) {
+    showToast('❌ ' + err.message, 'error');
+  } finally {
+    batchBtn.disabled = false;
+    analyseBtn.disabled = false;
+    batchBtn.innerHTML = '📋 Batch Analyse (All Accounts)';
+  }
+}
+
+function renderBatchPlan(plan) {
+  const area = document.getElementById('planArea');
+  const accountChanges = plan.accountChanges || [];
+  const totalChanges = accountChanges.reduce((s, a) => s + (a.changes?.length || 0), 0);
+
+  let html = \`
+    <div class="plan-card">
+      <div class="plan-header">
+        <div class="plan-summary">\${esc(plan.summary || 'Multi-account task parsed')}</div>
+        <div class="plan-count">\${totalChanges} change\${totalChanges !== 1 ? 's' : ''} across \${accountChanges.length} account\${accountChanges.length !== 1 ? 's' : ''}</div>
+      </div>
+  \`;
+
+  accountChanges.forEach(ac => {
+    const changes = ac.changes || [];
+    const warnings = ac.warnings || [];
+    html += \`<div style="border-top:1px solid var(--border2);padding:10px 16px">
+      <div style="font-size:12px;font-weight:600;color:var(--blue);margin-bottom:6px">📍 \${esc(ac.accountName || ac.accountId)} (\${changes.length} change\${changes.length !== 1 ? 's' : ''})</div>
+      <div class="change-list">\`;
+
+    changes.forEach(c => {
+      const meta = TYPE_META[c.type] || { label: c.type, color:'#94a3b8', bg:'#1a2035', border:'#334155' };
+      let desc = '';
+      if (c.type === 'update_budget') desc = \`New budget: $\${esc(c.details?.newBudget)}/day\`;
+      else if (c.type.includes('keyword')) desc = \`[\${esc(c.details?.matchType || '?')}] "\${esc(c.details?.keyword)}"\`;
+      else if (c.type.includes('radius')) desc = \`\${esc(c.details?.radius)}mi radius\`;
+      else desc = esc(c.campaignName || '');
+
+      html += \`
+        <div class="change-item">
+          <span class="change-type-badge" style="background:\${meta.bg};color:\${meta.color};border:1px solid \${meta.border}">\${meta.label}</span>
+          <div>
+            <div class="change-desc">\${desc || '—'}</div>
+            <div class="change-campaign">\${esc(c.campaignName || '')}\${c.adGroupName ? ' › ' + esc(c.adGroupName) : ''}</div>
+          </div>
+        </div>\`;
+    });
+
+    html += \`</div>\`;
+    if (warnings.length) {
+      html += \`<div style="margin-top:4px">\${warnings.map(w => \`<div style="font-size:10px;color:#fb923c">⚠ \${esc(w)}</div>\`).join('')}</div>\`;
+    }
+    html += \`</div>\`;
+  });
+
+  html += \`</div>\`;
+
+  if (plan.globalWarnings?.length) {
+    html += \`<div class="warnings-box">
+      <div class="warnings-title">⚠ Global Warnings</div>
+      \${plan.globalWarnings.map(w => \`<div class="warning-item">• \${esc(w)}</div>\`).join('')}
+    </div>\`;
+  }
+
+  html += \`
+    <div class="apply-row">
+      <button class="btn-dryrun" onclick="batchApply(true)">🔍 Batch Dry Run</button>
+      <button class="btn-apply" onclick="confirmBatchApply()">✅ Apply All to Google Ads</button>
+      <button class="btn-secondary" onclick="clearPlan()">✕ Cancel</button>
+    </div>
+  \`;
+
+  area.innerHTML = html;
+}
+
+function confirmBatchApply() {
+  const plan = state.batchPlan;
+  if (!plan) return;
+  const total = (plan.accountChanges || []).reduce((s, a) => s + (a.changes?.length || 0), 0);
+  const acctCount = (plan.accountChanges || []).length;
+  if (confirm(\`Apply \${total} change\${total !== 1 ? 's' : ''} across \${acctCount} account\${acctCount !== 1 ? 's' : ''} in Google Ads?\\n\\nThis will make live changes.\`)) {
+    batchApply(false);
+  }
+}
+
+async function batchApply(dryRun) {
+  if (!state.batchPlan) return;
+
+  const btns = document.querySelectorAll('.btn-apply, .btn-dryrun');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const res = await fetch('/api/apply-changes-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountChanges: state.batchPlan.accountChanges,
+        dryRun,
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    // Render batch results
+    const area = document.getElementById('planArea');
+    let html = \`<div class="results-card">
+      <div class="results-header">
+        \${dryRun ? '🔍 Batch Dry Run — no changes were made' : \`✅ Batch Applied — \${data.totalApplied} succeeded, \${data.totalFailed} failed\`}
+      </div>\`;
+
+    (data.accountResults || []).forEach(ar => {
+      html += \`<div style="border-top:1px solid var(--border2);padding:8px 16px">
+        <div style="font-size:11px;font-weight:600;color:var(--blue);margin-bottom:4px">📍 Account \${ar.accountId}: \${ar.applied || 0}/\${ar.total || 0} succeeded</div>\`;
+      (ar.results || []).forEach(r => {
+        html += \`<div class="result-item">
+          <span class="result-icon">\${r.success ? '✓' : '✗'}</span>
+          <span class="result-text" style="color:\${r.success ? '#94a3b8' : '#f87171'}">\${esc(r.result)}</span>
+        </div>\`;
+      });
+      html += \`</div>\`;
+    });
+
+    html += \`</div>\`;
+    area.innerHTML = area.innerHTML + html;
+
+    if (!dryRun) {
+      showToast(\`✅ Batch complete: \${data.totalApplied} applied, \${data.totalFailed} failed\`);
+    }
+  } catch (err) {
+    showToast('❌ ' + err.message, 'error');
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1075,6 +1303,7 @@ function clearTask() {
 }
 function clearPlan() {
   state.plan = null;
+  state.batchPlan = null;
   document.getElementById('planArea').innerHTML = '';
 }
 
@@ -1646,6 +1875,144 @@ app.post('/api/parse-task', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// PARSE TASK — MULTI-ACCOUNT
+// Accepts task + multiple account structures → returns changes grouped by account
+// ─────────────────────────────────────────────────────────────
+app.post('/api/parse-task-multi', requireAuth, async (req, res) => {
+  const { task, accounts } = req.body;
+  if (!task) return res.status(400).json({ error: 'No task provided' });
+  if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
+    return res.status(400).json({ error: 'No accounts provided' });
+  }
+  if (accounts.length > 20) {
+    return res.status(400).json({ error: 'Maximum 20 accounts per batch. Got ' + accounts.length });
+  }
+
+  const systemPrompt = buildClaudeSystemPrompt(true);
+
+  // Build multi-account structure for Claude
+  const accountStructures = accounts.map(a => {
+    const campList = (a.structure?.campaigns || []).map(c => {
+      const ags = c.adGroups.map(ag => {
+        const kwSample = ag.keywords.slice(0, 20).map(k => k.text).join(', ');
+        const kwExtra = ag.keywords.length > 20 ? ` (+${ag.keywords.length - 20} more)` : '';
+        return `    📁 "${ag.name}" | ${ag.status} | bid:$${ag.defaultBid} | ${ag.keywords.length} keywords: ${kwSample}${kwExtra}`;
+      }).join('\n');
+      const budgetStr = c.budget !== '?' ? `$${c.budget}/day` : 'budget unknown';
+      const metricsStr = c.metrics ? ` | 30d: ${c.metrics.impressions} imp, ${c.metrics.clicks} clk, $${c.metrics.cost} spend` : '';
+      return `  📢 "${c.name}" | ${c.status} | ${budgetStr} | ${c.type}${metricsStr}\n${ags}`;
+    }).join('\n');
+    return `ACCOUNT: ${a.name} (ID: ${a.id})\n${campList}`;
+  }).join('\n\n---\n\n');
+
+  const userMessage = `${accountStructures}\n\nFRESHDESK TASK:\n${task}`;
+
+  try {
+    const { data } = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model:      'claude-sonnet-4-20250514',
+        max_tokens: 16384,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: userMessage }],
+      },
+      { headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' } }
+    );
+
+    const raw   = data.content?.[0]?.text || '';
+    const clean = raw.replace(/```json|```/gi, '').trim();
+    try {
+      const parsed = JSON.parse(clean);
+      res.json(parsed);
+    } catch (parseErr) {
+      console.error('Failed to parse Claude multi-account response (possible truncation). Raw length:', raw.length);
+      res.status(500).json({ error: 'Claude response was not valid JSON — it may have been truncated. Try fewer accounts.' });
+    }
+  } catch (err) {
+    console.error('Claude multi-account error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to parse multi-account task: ' + err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// APPLY CHANGES — BATCH (multi-account)
+// Applies changes across multiple accounts in parallel
+// ─────────────────────────────────────────────────────────────
+app.post('/api/apply-changes-batch', requireAuth, async (req, res) => {
+  const { accountChanges, dryRun = true } = req.body;
+  if (!accountChanges || !Array.isArray(accountChanges) || accountChanges.length === 0) {
+    return res.status(400).json({ error: 'No account changes provided' });
+  }
+  if (accountChanges.length > 20) {
+    return res.status(400).json({ error: 'Maximum 20 accounts per batch' });
+  }
+
+  const mccId = req.session.mccId;
+  const batchResults = await Promise.allSettled(
+    accountChanges.map(async ({ accountId, changes }) => {
+      if (!accountId || !/^\d+$/.test(String(accountId))) {
+        return { accountId, error: 'Invalid accountId', results: [], applied: 0, failed: changes?.length || 0 };
+      }
+      if (!Array.isArray(changes) || changes.length === 0) {
+        return { accountId, results: [], applied: 0, failed: 0, total: 0 };
+      }
+
+      const customerConfig = {
+        customer_id:   accountId,
+        refresh_token: req.session.tokens.refresh_token,
+      };
+      if (mccId) customerConfig.login_customer_id = mccId;
+
+      const client = new GoogleAdsApi({
+        client_id:       process.env.GOOGLE_ADS_CLIENT_ID,
+        client_secret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+        developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+      }).Customer(customerConfig);
+
+      const results = [];
+      const errors = [];
+      for (const change of changes) {
+        try {
+          let timer;
+          const result = await Promise.race([
+            applyChange(client, change, dryRun).finally(() => clearTimeout(timer)),
+            new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`Change timed out after 30s: ${change.type}`)), 30000); })
+          ]);
+          results.push({ change, result, success: true });
+          console.log(`Batch [${accountId}] [${dryRun ? 'DRY RUN' : 'LIVE'}]: ${change.type} — ${change.campaignName || 'N/A'}`);
+        } catch (err) {
+          const msg = err.message || 'Unknown error';
+          console.error(`Batch [${accountId}] failed: ${change.type} — ${msg}`);
+          errors.push({ change, error: msg });
+          results.push({ change, result: msg, success: false });
+        }
+      }
+
+      return {
+        accountId,
+        applied: results.filter(r => r.success).length,
+        failed:  errors.length,
+        total:   changes.length,
+        results,
+        errors,
+      };
+    })
+  );
+
+  const accountResults = batchResults.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value;
+    return { accountId: accountChanges[i]?.accountId, error: r.reason?.message || 'Unknown error', results: [], applied: 0, failed: accountChanges[i]?.changes?.length || 0 };
+  });
+
+  res.json({
+    dryRun,
+    accountResults,
+    totalApplied: accountResults.reduce((sum, a) => sum + (a.applied || 0), 0),
+    totalFailed:  accountResults.reduce((sum, a) => sum + (a.failed || 0), 0),
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
 // APPLY CHANGES
 // Receives the structured change list and executes each change
 // via the Google Ads API
@@ -1879,16 +2246,8 @@ async function applyChange(client, change, dryRun) {
 // ─────────────────────────────────────────────────────────────
 // CLAUDE SYSTEM PROMPT BUILDER
 // ─────────────────────────────────────────────────────────────
-function buildClaudeSystemPrompt() {
-  return `You are a Google Ads expert for automotive dealerships. 
-Parse Freshdesk tasks and return structured change instructions.
-
-Return ONLY valid JSON, no markdown, no explanation:
-
-{
-  "summary": "Plain English summary of all changes",
-  "changes": [
-    {
+function buildClaudeSystemPrompt(multiAccount = false) {
+  const changeSchema = `{
       "type": "pause_campaign|enable_campaign|update_budget|pause_ad_group|enable_ad_group|pause_keyword|enable_keyword|add_keyword|add_negative_keyword|exclude_radius|add_radius|update_bid",
       "campaignName": "exact campaign name from account",
       "adGroupName": "exact ad group name if applicable",
@@ -1902,8 +2261,46 @@ Return ONLY valid JSON, no markdown, no explanation:
         "units": "MILES",
         "cpcBid": "1.50"
       }
+    }`;
+
+  if (multiAccount) {
+    return `You are a Google Ads expert for automotive dealerships.
+Parse Freshdesk tasks that may reference MULTIPLE dealer accounts and return structured change instructions grouped by account.
+
+Return ONLY valid JSON, no markdown, no explanation:
+
+{
+  "summary": "Plain English summary of all changes across all accounts",
+  "accountChanges": [
+    {
+      "accountId": "the customer ID",
+      "accountName": "the account name",
+      "changes": [${changeSchema}],
+      "warnings": ["anything to verify for this account"]
     }
   ],
+  "globalWarnings": ["anything that applies across all accounts"]
+}
+
+Rules:
+- Use exact campaign/ad group names from the account structures provided
+- Group changes by account — each account gets its own entry in accountChanges
+- If a task says "all accounts", create changes for every account provided
+- "all campaigns" = one change entry per campaign in that account
+- Budget values: numbers only, no $ sign
+- Match types: EXACT, PHRASE, or BROAD (uppercase)
+- Radius: always include lat, lng, radius, and units
+- If a campaign is not found in an account, add a warning for that account`;
+  }
+
+  return `You are a Google Ads expert for automotive dealerships.
+Parse Freshdesk tasks and return structured change instructions.
+
+Return ONLY valid JSON, no markdown, no explanation:
+
+{
+  "summary": "Plain English summary of all changes",
+  "changes": [${changeSchema}],
   "warnings": ["anything to verify before applying"],
   "affectedCampaigns": ["list of campaign names being changed"]
 }
