@@ -21,4 +21,4 @@ npm start             # http://localhost:3000
 Railway via Nixpacks. Config in `railway.json`. Health check at `/health`.
 
 ## Current state
-Phase 1 (reliability) complete. Single-file architecture (`server.js`). No test suite yet. See `project-state.md` for full roadmap.
+Phase 2 (budget & data gaps) complete. Structure endpoint now returns budgets, 30-day metrics, and runs all queries in parallel. Single-file architecture (`server.js`). No test suite yet. See `project-state.md` for full roadmap.

@@ -4,7 +4,7 @@
 Node.js/Express app for managing Google Ads campaigns across automotive dealer accounts via an MCC. Integrates Claude AI for natural-language task parsing from Freshdesk tickets. Deployed on Railway.
 
 ## Architecture
-- **Single file:** `server.js` (~1800 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
+- **Single file:** `server.js` (~1950 lines) — embedded frontend HTML, all API routes, change executor, Claude prompt builder
 - **No database** — stateless, session-only storage for OAuth tokens and MCC ID cache
 - **Stack:** Express, google-ads-api, axios, Anthropic Claude API, express-session
 
@@ -18,11 +18,11 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 | `/auth/logout` | GET | Destroy session |
 | `/api/auth/status` | GET | Connection status |
 | `/api/accounts` | GET | List all accessible accounts via MCC |
-| `/api/account/:id/structure` | GET | Full account tree (campaigns, ad groups, keywords, locations) |
+| `/api/account/:id/structure` | GET | Full account tree (campaigns, ad groups, keywords, locations, budgets, metrics) |
 | `/api/parse-task` | POST | Claude parses Freshdesk task → structured JSON changes |
 | `/api/apply-changes` | POST | Execute changes against Google Ads API |
 
-## Current Phase: Phase 1 Complete
+## Current Phase: Phase 2 Complete
 
 ### Phase 1: Reliability & Error Handling (completed 2026-03-20)
 - [x] gadsSearch retry logic (1 retry, backoff on 429/500/503/network errors)
@@ -34,13 +34,20 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [x] Removed dead campId variable in pause_ad_group
 - [x] Improved error message extraction
 
-### Phase 2: Budget & Data Gaps (next)
-- [ ] Fix budget display (query campaign_budget separately)
-- [ ] Keyword/location pagination instead of hard limits
-- [ ] Campaign performance metrics (impressions, clicks, spend)
-- [ ] Last-modified timestamps
+### Phase 2: Budget & Data Gaps (completed 2026-03-20)
+- [x] Fix budget display (separate campaign_budget query, mapped by campaign ID)
+- [x] Parallelize all 6 structure queries via Promise.all
+- [x] Campaign performance metrics (impressions, clicks, cost, conversions — last 30 days)
+- [x] Keyword limit increased 500→1000, location limit 200→500
+- [x] Per-change 30s timeout in apply-changes
+- [x] Query latency instrumentation via timed() wrapper
+- [x] Frontend passes mccId to structure endpoint
+- [x] Frontend displays budget ($X.XX/day) and metrics inline
+- [x] Claude prompt includes budget, metrics, truncated keywords (20/ad group)
+- [x] Non-fatal catches on ad groups, budgets, locations, metrics queries
+- [x] camelCase fallbacks for google-ads-api field access
 
-### Phase 3: Multi-Account & Batch Operations
+### Phase 3: Multi-Account & Batch Operations (next)
 - [ ] Multi-account task parsing
 - [ ] Batch apply across accounts
 - [ ] Account selector/filter UI
@@ -55,6 +62,8 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [ ] Split monolithic server.js into modules
 - [ ] Extract frontend to separate files
 - [ ] Loading states, keyboard shortcuts, dark mode
+- [ ] campMap keyed by campaign ID instead of name (prevents collisions)
+- [ ] Extract gadsSearch as reusable module
 
 ### Phase 6: Advanced AI Features
 - [ ] Task templates
@@ -63,15 +72,15 @@ Node.js/Express app for managing Google Ads campaigns across automotive dealer a
 - [ ] Freshdesk integration
 
 ## Known Issues
-- Budget displays as "?" — permission constraints prevent JOIN
-- Keywords capped at 500, locations at 200 (no pagination)
-- Structure queries run sequentially (could be parallelized)
 - No test suite
 - Session secret has hardcoded fallback (`'change-this-secret'`)
 - GAQL queries use string interpolation (parameterized queries preferred long-term)
+- campMap keyed by campaign name — duplicate names cause collisions
+- Session middleware registered after `/` route (latent bug)
+- Token refresh on every request (could cache expiry)
+- Timeout on apply-changes doesn't cancel in-flight API mutation
 
-## Deferred from Phase 1 Review
-- Parallel structure queries → Phase 2
-- Per-change timeout in apply-changes → Phase 2
-- Extract gadsSearch as reusable module → Phase 5
-- Instrument query latencies → Phase 2
+## Deferred from Phase 2 Review
+- campMap keyed by name → Phase 5 refactor (needs campaign.id in all queries)
+- Token refresh caching → Phase 5
+- Session middleware ordering → Phase 5
