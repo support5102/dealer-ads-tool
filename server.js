@@ -397,6 +397,83 @@ const FRONTEND_HTML = `<!DOCTYPE html>
     }
     .btn-secondary:hover { border-color: #2d4a6e; color: var(--text2); }
 
+    /* Task templates */
+    .templates-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .template-btn {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text3);
+      padding: 5px 12px;
+      border-radius: 14px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: 'DM Mono', monospace;
+      transition: all .15s;
+    }
+    .template-btn:hover { border-color: #3b82f6; color: var(--text); background: #1a2e50; }
+
+    /* Smart suggestions */
+    .suggestions-panel {
+      background: linear-gradient(135deg, #1a1a2e, #0f172a);
+      border: 1px solid #7c3aed40;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 14px;
+      animation: slideUp .3s ease-out;
+    }
+    .suggestions-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #a78bfa;
+      margin-bottom: 8px;
+    }
+    .suggestion-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #1e1e3e;
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .suggestion-action {
+      background: none;
+      border: 1px solid #7c3aed40;
+      color: #a78bfa;
+      padding: 3px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 10px;
+      font-family: 'DM Mono', monospace;
+      margin-left: auto;
+      flex-shrink: 0;
+      transition: all .15s;
+    }
+    .suggestion-action:hover { background: #7c3aed20; border-color: #7c3aed; }
+
+    /* Report panel */
+    .report-panel {
+      background: var(--bg2);
+      border: 1px solid #1e3a5f;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--text2);
+      line-height: 1.7;
+      white-space: pre-wrap;
+      animation: slideUp .3s ease-out;
+    }
+
     /* Plan card */
     .plan-card {
       background: var(--bg2);
@@ -646,6 +723,20 @@ const FRONTEND_HTML = `<!DOCTYPE html>
     <div class="task-area" id="taskArea" style="display:none">
       <div class="section-title">Freshdesk Task</div>
 
+      <!-- Smart suggestions (populated after account load) -->
+      <div id="suggestionsPanel" style="display:none"></div>
+
+      <!-- Task templates -->
+      <div class="templates-row" id="templateRow">
+        <span style="font-size:10px;color:var(--text4);margin-right:4px;line-height:24px">Templates:</span>
+        <button class="template-btn" onclick="useTemplate('pause_campaign')">Pause Campaign</button>
+        <button class="template-btn" onclick="useTemplate('update_budget')">Update Budget</button>
+        <button class="template-btn" onclick="useTemplate('add_negative')">Add Negative KW</button>
+        <button class="template-btn" onclick="useTemplate('pause_keywords')">Pause Keywords</button>
+        <button class="template-btn" onclick="useTemplate('exclude_radius')">Exclude Radius</button>
+        <button class="template-btn" onclick="useTemplate('enable_campaign')">Enable Campaign</button>
+      </div>
+
       <div class="task-box">
         <div class="task-box-header">
           <div class="task-box-dots">
@@ -675,11 +766,15 @@ Examples:
           📋 Batch Analyse (All Accounts)
         </button>
         <button class="btn-secondary" onclick="clearTask()">Clear</button>
+        <button class="btn-secondary" id="reportBtn" onclick="generateReport()" style="display:none;border-color:#7c3aed40;color:#a78bfa">📊 Report</button>
         <span style="font-size:11px;color:#334155;margin-left:4px" id="accountLabel"></span>
       </div>
 
       <!-- Plan appears here -->
       <div id="planArea"></div>
+
+      <!-- Report appears here -->
+      <div id="reportArea"></div>
 
       <!-- History panel -->
       <div id="historyPanel" style="display:none;margin-top:16px">
@@ -868,9 +963,11 @@ async function selectAccount(id) {
     state.structure = data;
     renderTree(data.campaigns);
     document.getElementById('analyseBtn').disabled = false;
+    document.getElementById('reportBtn').style.display = '';
     showToast(\`📂 Loaded \${data.stats.campaigns} campaigns · \${data.stats.adGroups} ad groups · \${data.stats.keywords} keywords\`);
+    fetchSmartSuggestions();
   } catch (err) {
-    tree.innerHTML = \`<div class="tree-empty" style="color:#f87171">Error: \${err.message}</div>\`;
+    tree.innerHTML = \`<div class="tree-empty" style="color:#f87171">Error: \${esc(err.message)}</div>\`;
     showToast('❌ ' + err.message, 'error');
   }
 }
@@ -1381,6 +1478,98 @@ async function batchApply(dryRun) {
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// TASK TEMPLATES
+// ─────────────────────────────────────────────────────────────
+const TASK_TEMPLATES = {
+  pause_campaign:  'Pause Campaign: [campaign name]',
+  update_budget:   'Increase budget to $[amount]/day on [campaign name] campaign',
+  add_negative:    'Add negative keyword [keyword] to all campaigns',
+  pause_keywords:  'Pause all keywords with CPC over $[amount] in [ad group name] ad group',
+  exclude_radius:  'Exclude [radius]mi radius around ([lat],[lng]) from [campaign name]',
+  enable_campaign: 'Enable Campaign: [campaign name]',
+};
+
+function useTemplate(key) {
+  const ta = document.getElementById('taskInput');
+  ta.value = TASK_TEMPLATES[key] || '';
+  ta.focus();
+  ta.setSelectionRange(0, ta.value.length);
+}
+
+// ─────────────────────────────────────────────────────────────
+// SMART SUGGESTIONS
+// ─────────────────────────────────────────────────────────────
+async function fetchSmartSuggestions() {
+  if (!state.structure || !state.selectedId) return;
+  const panel = document.getElementById('suggestionsPanel');
+  panel.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/smart-suggestions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: state.selectedId,
+        accountName: state.selectedName,
+        accountStructure: state.structure,
+      })
+    });
+    const data = await res.json();
+    if (data.error || !data.suggestions?.length) return;
+
+    panel.innerHTML = '<div class="suggestions-title">💡 Smart Suggestions</div>' +
+      data.suggestions.map(s => \`
+        <div class="suggestion-item">
+          <span class="suggestion-icon">\${esc(s.icon || '⚠️')}</span>
+          <span>\${esc(s.text)}</span>
+          \${s.action ? \`<button class="suggestion-action" data-action="\${esc(s.action)}">\${esc(s.actionLabel || 'Apply')}</button>\` : ''}
+        </div>
+      \`).join('');
+    panel.querySelectorAll('.suggestion-action[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('taskInput').value = btn.dataset.action;
+        document.getElementById('taskInput').focus();
+      });
+    });
+    panel.style.display = '';
+  } catch (e) {
+    console.log('Smart suggestions failed (non-fatal):', e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// NATURAL LANGUAGE REPORT
+// ─────────────────────────────────────────────────────────────
+async function generateReport() {
+  if (!state.structure || !state.selectedId) return;
+  const btn = document.getElementById('reportBtn');
+  const area = document.getElementById('reportArea');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating...';
+  area.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: state.selectedId,
+        accountName: state.selectedName,
+        accountStructure: state.structure,
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    area.innerHTML = \`<div class="report-panel"><div class="suggestions-title">📊 Account Report — \${esc(state.selectedName)}</div>\${esc(data.report)}</div>\`;
+  } catch (err) {
+    showToast('❌ Report: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '📊 Report';
+  }
+}
+
 function clearTask() {
   document.getElementById('taskInput').value = '';
   clearPlan();
@@ -1389,6 +1578,7 @@ function clearPlan() {
   state.plan = null;
   state.batchPlan = null;
   document.getElementById('planArea').innerHTML = '';
+  document.getElementById('reportArea').innerHTML = '';
 }
 
 let toastTimer;
@@ -2595,6 +2785,173 @@ ${campList}
 FRESHDESK TASK:
 ${task}`;
 }
+
+// ─────────────────────────────────────────────────────────────
+// SMART SUGGESTIONS — Claude analyses account and flags issues
+// ─────────────────────────────────────────────────────────────
+app.post('/api/smart-suggestions', requireAuth, async (req, res) => {
+  const { accountName, accountStructure } = req.body;
+  if (!accountStructure) return res.json({ suggestions: [] });
+
+  try {
+    const userMsg = buildUserMessage('Analyse this account for issues.', accountStructure, accountName);
+    const response = await axios.post('https://api.anthropic.com/v1/messages', {
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: `You are a Google Ads expert for automotive dealerships. Analyse the account structure and return a JSON array of actionable suggestions.
+
+Return ONLY valid JSON, no markdown:
+{
+  "suggestions": [
+    {
+      "icon": "emoji icon",
+      "text": "description of the issue or opportunity",
+      "action": "pre-filled task text the user can apply (optional)",
+      "actionLabel": "short button label (optional)"
+    }
+  ]
+}
+
+Focus on:
+- Paused campaigns that might need re-enabling
+- Campaigns with $0 spend or 0 impressions in 30 days
+- Very high CPC keywords (>$10)
+- Ad groups with no keywords
+- Budgets that seem too low or too high relative to performance
+- Missing negative keywords for common automotive terms
+
+Return max 5 most impactful suggestions. If account looks healthy, return empty array.`,
+      messages: [{ role: 'user', content: userMsg }],
+    }, {
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      timeout: 30000,
+    });
+
+    const raw = response.data?.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw);
+    res.json({ suggestions: parsed.suggestions || [] });
+  } catch (e) {
+    console.warn('Smart suggestions failed:', e.message);
+    res.json({ suggestions: [] });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// NATURAL LANGUAGE REPORT — Claude summarises account performance
+// ─────────────────────────────────────────────────────────────
+app.post('/api/report', requireAuth, async (req, res) => {
+  const { accountName, accountStructure } = req.body;
+  if (!accountStructure) return res.status(400).json({ error: 'No account structure provided' });
+
+  try {
+    const userMsg = buildUserMessage('Generate a performance report.', accountStructure, accountName);
+    const response = await axios.post('https://api.anthropic.com/v1/messages', {
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: `You are a Google Ads expert for automotive dealerships. Generate a concise, actionable performance report for this account.
+
+Return ONLY valid JSON:
+{
+  "report": "plain text report with line breaks"
+}
+
+Include:
+- Overall account health summary (1-2 sentences)
+- Top performing campaigns by clicks/conversions
+- Underperforming campaigns (low CTR, high cost, no conversions)
+- Budget utilisation observations
+- Keyword health (paused vs active ratio, high-bid keywords)
+- 2-3 specific recommendations
+
+Keep it concise — max 300 words. Use plain text with line breaks, no markdown.`,
+      messages: [{ role: 'user', content: userMsg }],
+    }, {
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      timeout: 30000,
+    });
+
+    const raw = response.data?.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw);
+    res.json({ report: parsed.report || 'Unable to generate report.' });
+  } catch (e) {
+    console.error('Report generation failed:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to generate report: ' + e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// FRESHDESK WEBHOOK — accept tasks from Freshdesk
+// ─────────────────────────────────────────────────────────────
+app.post('/api/freshdesk-webhook', async (req, res) => {
+  const { task, account_id, account_name, api_key } = req.body;
+
+  // Timing-safe API key auth for webhook
+  const expectedKey = process.env.FRESHDESK_WEBHOOK_KEY;
+  const keyBuf = Buffer.from(String(api_key || ''));
+  const expectedBuf = Buffer.from(String(expectedKey || ''));
+  if (!expectedKey || !api_key || typeof api_key !== 'string' ||
+      keyBuf.length !== expectedBuf.length ||
+      !require('crypto').timingSafeEqual(keyBuf, expectedBuf)) {
+    return res.status(401).json({ error: 'Invalid or missing api_key' });
+  }
+  if (!task) return res.status(400).json({ error: 'Missing task field' });
+  if (!account_id) return res.status(400).json({ error: 'Missing account_id field' });
+  const cleanAccountId = String(account_id).replace(/-/g, '');
+  if (!/^\d+$/.test(cleanAccountId)) return res.status(400).json({ error: 'Invalid account_id format' });
+
+  console.log(`Freshdesk webhook: account ${account_id}, task: ${task.substring(0, 100)}...`);
+
+  try {
+    // Build a Google Ads API client using env credentials
+    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    if (!refreshToken) return res.status(500).json({ error: 'Server not configured with GOOGLE_REFRESH_TOKEN for webhook mode' });
+
+    const api = new GoogleAdsApi({
+      client_id:     process.env.GOOGLE_ADS_CLIENT_ID,
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    });
+    const mccId = process.env.GOOGLE_MANAGER_ACCOUNT_ID?.replace(/-/g, '');
+    const customerConfig = {
+      customer_id: cleanAccountId,
+      refresh_token: refreshToken,
+    };
+    if (mccId) customerConfig.login_customer_id = mccId;
+    const client = api.Customer(customerConfig);
+
+    // Parse the task via Claude (dry-run only — returns plan, does not apply)
+    const systemPrompt = buildClaudeSystemPrompt();
+    const userMsg = `ACCOUNT: ${account_name || account_id}\n\nFRESHDESK TASK:\n${task}`;
+    const response = await axios.post('https://api.anthropic.com/v1/messages', {
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMsg }],
+    }, {
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      timeout: 30000,
+    });
+
+    const raw = response.data?.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw);
+    res.json({ status: 'parsed', plan: parsed });
+  } catch (e) {
+    console.error('Freshdesk webhook error:', e.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to process task: ' + e.message });
+  }
+});
 
 // ─────────────────────────────────────────────────────────────
 // HEALTH CHECK
