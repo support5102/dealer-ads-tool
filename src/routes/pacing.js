@@ -13,7 +13,7 @@ const axios   = require('axios');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
-const { generateRecommendation } = require('../services/budget-recommender');
+const { generateRecommendation, findISCappedCampaignIds } = require('../services/budget-recommender');
 const { ACCOUNT_OVERRIDES } = require('../services/strategy-rules');
 
 /**
@@ -348,6 +348,38 @@ function createPacingRouter(config, deps = {}) {
         item => item.condition === 'NEW'
       ).length;
 
+      // Geo expansion: fetch proximity targets + geographic performance for IS-capped campaigns
+      let geoTargets = null;
+      const isCappedIds = findISCappedCampaignIds(impressionShare, sharedBudgets);
+      if (isCappedIds.length > 0) {
+        try {
+          const [proximityData, geoPerf] = await Promise.all([
+            googleAds.getCampaignProximityTargets(restCtx, isCappedIds),
+            googleAds.getGeographicPerformance(restCtx, isCappedIds),
+          ]);
+
+          // Build maps keyed by campaignId for easy lookup in recommender
+          const proximityMap = new Map();
+          for (const p of proximityData) {
+            // Keep the one with the largest radius per campaign
+            const existing = proximityMap.get(p.campaignId);
+            if (!existing || p.radiusMiles > existing.radiusMiles) {
+              proximityMap.set(p.campaignId, p);
+            }
+          }
+
+          const nearbyMap = new Map();
+          for (const g of geoPerf) {
+            if (!nearbyMap.has(g.campaignId)) nearbyMap.set(g.campaignId, []);
+            nearbyMap.get(g.campaignId).push(g);
+          }
+
+          geoTargets = { proximity: proximityMap, nearby: nearbyMap };
+        } catch (err) {
+          console.warn('Geo expansion data fetch failed (non-fatal):', err.message);
+        }
+      }
+
       const now = new Date();
       const recommendation = generateRecommendation({
         goal,
@@ -362,6 +394,7 @@ function createPacingRouter(config, deps = {}) {
         dailyBreakdown: dailyBreakdown || undefined,
         changeDate: lastChange.changeDate || undefined,
         excludeCampaigns: excludeNames,
+        geoTargets,
       });
 
       // Per-campaign impression share breakdown for the dashboard

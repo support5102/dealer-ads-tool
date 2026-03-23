@@ -320,7 +320,8 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
             <span class="rec-recommended ${dir}">$${r.recommendedDailyBudget.toFixed(2)}/day</span>
             <span class="rec-change ${dir}">${sign}$${r.change.toFixed(2)}</span>
           </div>
-          <div class="rec-reason"${r.isCapped ? ' style="color:#fbbf24"' : ''}>${r.isCapped ? '⚠ ' : ''}${esc(r.reason)}</div>
+          <div class="rec-reason"${r.isCapped ? ' style="color:#fbbf24"' : ''}>${esc(r.reason)}</div>
+          ${renderGeoExpansion(r.geoExpansion)}
         </div>
       </div>
     `;
@@ -499,6 +500,27 @@ function formatStatus(status) {
 function fmt(n) {
   if (n == null) return '--';
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderGeoExpansion(geo) {
+  if (!geo) return '';
+  const radiusHtml = geo.currentRadiusMiles && geo.recommendedRadiusMiles
+    ? `<div class="geo-radius">
+        <span class="geo-label">Radius:</span>
+        <span class="geo-current">${geo.currentRadiusMiles}mi</span>
+        <span class="geo-arrow">&rarr;</span>
+        <span class="geo-recommended">${geo.recommendedRadiusMiles}mi</span>
+        ${geo.centerCity ? `<span class="geo-center">from ${esc(geo.centerCity)}</span>` : ''}
+      </div>` : '';
+
+  const nearby = (geo.nearbyLocations || []).slice(0, 5);
+  const nearbyHtml = nearby.length > 0
+    ? `<div class="geo-nearby">
+        <span class="geo-label">Nearby areas with volume:</span>
+        ${nearby.map(loc => `<span class="geo-pill">${loc.geoTargetId || 'Area'} (${loc.impressions} imp)</span>`).join('')}
+      </div>` : '';
+
+  return `<div class="geo-expansion">${radiusHtml}${nearbyHtml}</div>`;
 }
 
 function esc(str) {

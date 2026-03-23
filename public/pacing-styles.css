@@ -206,6 +206,56 @@
   margin-top: 4px;
 }
 
+/* Geo expansion */
+.geo-expansion {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 6px;
+}
+.geo-radius {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.geo-label {
+  color: var(--text3);
+  font-size: 11px;
+}
+.geo-current {
+  color: var(--text2);
+  font-weight: 600;
+}
+.geo-arrow {
+  color: var(--text3);
+}
+.geo-recommended {
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 14px;
+}
+.geo-center {
+  color: var(--text3);
+  font-size: 11px;
+}
+.geo-nearby {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.geo-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(251, 191, 36, 0.12);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #fbbf24;
+}
+
 /* Impression share */
 .is-row {
   display: flex;

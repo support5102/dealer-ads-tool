@@ -240,7 +240,7 @@ function actualDailySpend(budget, spendMap, useActualOnly) {
  * @param {Object[]} [params.campaignSpend] - From getMonthSpend
  * @returns {Object} { recommendations, budgetSummary }
  */
-function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend, dailyBreakdown, changeDate, excludeCampaigns }) {
+function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend, dailyBreakdown, changeDate, excludeCampaigns, geoTargets }) {
   if (pacing.daysRemaining === 0) {
     return { recommendations: [], budgetSummary: null };
   }
@@ -523,16 +523,56 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       const direction = change >= 0 ? 'increase' : 'decrease';
 
       let reason;
+      let geoExpansion = null;
+
       if (isCapped && isCap.isBrand) {
         reason = `Brand capped at ${BRAND_MAX_MULTIPLIER}x current spend — brand only needs local coverage`;
+      } else if (isCapped && isCap.maxIS >= GEO_EXPANSION_IS_THRESHOLD) {
+        // IS > 85%: recommend radius expansion with specific data
+        const isPercent = Math.round(isCap.maxIS * 1000) / 10;
+        const geo = geoTargets || {};
+        const campaigns = budget.campaigns || [];
+        // Find proximity data for this budget's campaigns
+        const proxies = campaigns
+          .map(c => geo.proximity?.get?.(String(c.campaignId)))
+          .filter(Boolean);
+        const proxy = proxies.length > 0
+          ? proxies.reduce((best, p) => (p.radiusMiles > best.radiusMiles ? p : best), proxies[0])
+          : null;
+
+        if (proxy && proxy.radiusMiles > 0) {
+          // Calculate recommended radius: area-based scaling
+          const desiredSpend = requiredDailyRate * (currentSpend / (currentSharedSpend || 1));
+          const gapRatio = Math.max((desiredSpend - isCap.cap) / isCap.cap, 0);
+          let newRadius = proxy.radiusMiles * Math.sqrt(1 + gapRatio);
+          // Clamp and round to nearest 5mi
+          newRadius = Math.min(Math.max(newRadius, proxy.radiusMiles + 5), 75);
+          newRadius = Math.round(newRadius / 5) * 5;
+
+          // Get nearby locations for this campaign
+          const nearby = campaigns
+            .flatMap(c => geo.nearby?.get?.(String(c.campaignId)) || [])
+            .sort((a, b) => b.impressions - a.impressions)
+            .slice(0, 5);
+
+          geoExpansion = {
+            currentRadiusMiles: proxy.radiusMiles,
+            recommendedRadiusMiles: newRadius,
+            centerCity: [proxy.city, proxy.state].filter(Boolean).join(', ') || null,
+            nearbyLocations: nearby,
+          };
+          reason = `⚠ IS already ${isPercent}% — expand radius from ${proxy.radiusMiles}mi to ${newRadius}mi to unlock more search volume`;
+        } else {
+          reason = `⚠ IS already ${isPercent}% — increase targeting radius to spend more, then raise budget`;
+        }
       } else if (isCapped) {
         const isPercent = Math.round(isCap.maxIS * 1000) / 10;
-        reason = `IS already ${isPercent}% — increase targeting radius to spend more, then raise budget`;
+        reason = `IS already ${isPercent}% — limited budget headroom`;
       } else {
         reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
       }
 
-      recommendations.push({
+      const rec = {
         type: 'shared_budget',
         target: budget.name,
         resourceName: budget.resourceName,
@@ -543,7 +583,9 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         tier,
         reason,
         isCapped,
-      });
+      };
+      if (geoExpansion) rec.geoExpansion = geoExpansion;
+      recommendations.push(rec);
     });
   }
 
@@ -603,6 +645,7 @@ function generateRecommendation(params) {
     dailyBreakdown,
     changeDate,
     excludeCampaigns,
+    geoTargets,
   } = params;
 
   // Sum all campaign spend
@@ -632,6 +675,7 @@ function generateRecommendation(params) {
     dailyBreakdown,
     changeDate,
     excludeCampaigns,
+    geoTargets,
   });
 
   // Impression share summary
@@ -655,6 +699,42 @@ function generateRecommendation(params) {
   };
 }
 
+/**
+ * Pre-check: find campaign IDs from non-brand shared budgets where IS > 85%.
+ * Used to decide whether to fetch geo data (only when radius expansion is warranted).
+ *
+ * @param {Object[]} impressionShare - Per-campaign IS data
+ * @param {Object[]} sharedBudgets - Shared budget objects with campaigns arrays
+ * @returns {string[]} Campaign IDs that need geo expansion data
+ */
+function findISCappedCampaignIds(impressionShare, sharedBudgets) {
+  if (!impressionShare || !sharedBudgets) return [];
+  const GEO_EXPANSION_THRESHOLD = 0.85;
+
+  const isMap = new Map();
+  for (const item of impressionShare) {
+    isMap.set(String(item.campaignId), item.impressionShare);
+  }
+
+  const campaignIds = [];
+  for (const budget of sharedBudgets) {
+    const tier = getSharedBudgetTier(budget);
+    if (tier === CAMPAIGN_TIERS.BRAND) continue; // brand = local only, no radius expansion
+
+    const campaigns = budget.campaigns || [];
+    for (const c of campaigns) {
+      const is = isMap.get(String(c.campaignId));
+      if (is != null && is > GEO_EXPANSION_THRESHOLD) {
+        campaignIds.push(String(c.campaignId));
+      }
+    }
+  }
+  return campaignIds;
+}
+
+// Threshold for recommending radius expansion (separate from budget IS cap at 50%)
+const GEO_EXPANSION_IS_THRESHOLD = 0.85;
+
 module.exports = {
   generateRecommendation,
   distributeAccountBudget,
@@ -664,6 +744,8 @@ module.exports = {
   getCampaignTier,
   getSharedBudgetTier,
   buildSpendMapFromDaily,
+  findISCappedCampaignIds,
   VLA_IS_TARGET,
   CAMPAIGN_TIERS,
+  GEO_EXPANSION_IS_THRESHOLD,
 };

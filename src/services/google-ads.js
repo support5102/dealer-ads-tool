@@ -855,6 +855,101 @@ async function getDailySpendBreakdown(restCtx) {
   }));
 }
 
+/**
+ * Fetches proximity targeting (radius) for specific campaigns.
+ * Only called for IS-capped campaigns to provide geo expansion recommendations.
+ *
+ * @param {Object} restCtx - REST context
+ * @param {string[]} campaignIds - Campaign IDs to query
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, city, state, radiusMiles, lat, lng }
+ */
+async function getCampaignProximityTargets(restCtx, campaignIds) {
+  if (!campaignIds || campaignIds.length === 0) return [];
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const idList = campaignIds.map(id => `'${id}'`).join(', ');
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign.id, campaign.name,
+              campaign_criterion.proximity.address.city_name,
+              campaign_criterion.proximity.address.province_code,
+              campaign_criterion.proximity.radius,
+              campaign_criterion.proximity.radius_units,
+              campaign_criterion.proximity.geo_point.latitude_in_micro_degrees,
+              campaign_criterion.proximity.geo_point.longitude_in_micro_degrees
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'PROXIMITY'
+         AND campaign.id IN (${idList})
+         AND campaign_criterion.negative = FALSE`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const prox = row.campaignCriterion?.proximity || {};
+      const addr = prox.address || {};
+      const geo = prox.geoPoint || {};
+      const radiusVal = parseFloat(prox.radius) || 0;
+      const units = prox.radiusUnits || 'MILES';
+      // Convert km to miles if needed
+      const radiusMiles = units === 'KILOMETERS' ? Math.round(radiusVal * 0.621371) : Math.round(radiusVal);
+      return {
+        campaignId: String(row.campaign.id),
+        campaignName: row.campaign.name,
+        city: addr.cityName || null,
+        state: addr.provinceCode || null,
+        radiusMiles,
+        lat: geo.latitudeInMicroDegrees ? geo.latitudeInMicroDegrees / 1_000_000 : null,
+        lng: geo.longitudeInMicroDegrees ? geo.longitudeInMicroDegrees / 1_000_000 : null,
+      };
+    });
+  } catch (err) {
+    console.warn('getCampaignProximityTargets failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetches geographic performance data for specific campaigns.
+ * Shows which nearby locations have search volume / demand.
+ *
+ * @param {Object} restCtx - REST context
+ * @param {string[]} campaignIds - Campaign IDs to query
+ * @returns {Promise<Object[]>} Array of { campaignId, geoName, locationType, impressions, clicks, cost }
+ */
+async function getGeographicPerformance(restCtx, campaignIds) {
+  if (!campaignIds || campaignIds.length === 0) return [];
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const idList = campaignIds.map(id => `'${id}'`).join(', ');
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign.id,
+              geographic_view.country_criterion_id,
+              geographic_view.location_type,
+              metrics.impressions, metrics.clicks, metrics.cost_micros
+       FROM geographic_view
+       WHERE campaign.id IN (${idList})
+         AND segments.date DURING THIS_MONTH
+         AND metrics.impressions > 0
+       ORDER BY metrics.impressions DESC
+       LIMIT 50`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => ({
+      campaignId: String(row.campaign.id),
+      geoTargetId: row.geographicView?.countryCriterionId || null,
+      locationType: row.geographicView?.locationType || null,
+      impressions: parseInt(row.metrics?.impressions) || 0,
+      clicks: parseInt(row.metrics?.clicks) || 0,
+      cost: (row.metrics?.costMicros ?? 0) / 1_000_000,
+    }));
+  } catch (err) {
+    console.warn('getGeographicPerformance failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -880,4 +975,7 @@ module.exports = {
   // Pacing: post-change tracking
   getLastBudgetChange,
   getDailySpendBreakdown,
+  // Pacing: geo expansion
+  getCampaignProximityTargets,
+  getGeographicPerformance,
 };
