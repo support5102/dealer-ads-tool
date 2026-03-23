@@ -271,10 +271,14 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     const { requiredDailyRate, currentDailyTotal, totalSetBudget, totalChange } = budgetSummary;
     // Change needed = target rate vs what budgets are set to (what you control)
     const setTotal = totalSetBudget || 0;
-    const gap = requiredDailyRate - setTotal;
-    const gapColor = Math.abs(gap) < 1 ? '#4ade80' : (gap > 0 ? '#4ade80' : '#f87171');
-    const gapLabel = gap > 0 ? 'Under by' : (gap < 0 ? 'Over by' : 'On target');
-    const gapAmount = Math.abs(gap);
+    // Budget setting gap (what you control)
+    const setGap = requiredDailyRate - setTotal;
+    const setGapColor = Math.abs(setGap) < 1 ? '#4ade80' : (setGap > 0 ? '#4ade80' : '#f87171');
+    const setGapLabel = setGap > 0 ? 'Under by' : (setGap < 0 ? 'Over by' : 'On target');
+    // Actual spend gap (what's really happening)
+    const spendGap = requiredDailyRate - currentDailyTotal;
+    const spendGapColor = Math.abs(spendGap) < 1 ? '#4ade80' : (spendGap > 0 ? '#fb923c' : '#f87171');
+    const spendGapLabel = spendGap > 0 ? 'Under by' : (spendGap < 0 ? 'Over by' : 'On target');
     summaryHtml = `
       <div class="budget-summary">
         <div class="budget-summary-item">
@@ -290,8 +294,12 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
           <span class="budget-summary-value">$${(totalSetBudget || 0).toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">
-          <span class="budget-summary-label">Change Needed</span>
-          <span class="budget-summary-value" style="color:${gapColor}">${gapLabel} $${gapAmount.toFixed(2)}/day</span>
+          <span class="budget-summary-label">Budget Change Needed</span>
+          <span class="budget-summary-value" style="color:${setGapColor}">${setGapLabel} $${Math.abs(setGap).toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Actual Spend Change Needed</span>
+          <span class="budget-summary-value" style="color:${spendGapColor}">${spendGapLabel} $${Math.abs(spendGap).toFixed(2)}/day</span>
         </div>
       </div>
     `;
