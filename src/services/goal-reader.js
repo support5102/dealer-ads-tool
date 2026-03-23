@@ -53,8 +53,6 @@ function parseRow(row) {
 
   const dealerName = String(row[0] || '').trim();
   const monthlyBudget = parseNumber(row[2]);
-  const baselineInventory = parseNumber(row[3]);
-
   // Minimum viable: must have dealer name and a valid budget
   if (!dealerName || monthlyBudget == null || monthlyBudget <= 0) {
     return null;
@@ -63,7 +61,7 @@ function parseRow(row) {
   return {
     dealerName,
     monthlyBudget,
-    baselineInventory: (baselineInventory != null && baselineInventory > 0) ? baselineInventory : null,
+    baselineInventory: null,
   };
 }
 
@@ -76,7 +74,7 @@ function parseRow(row) {
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:D') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:C') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
