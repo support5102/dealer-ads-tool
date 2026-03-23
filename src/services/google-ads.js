@@ -357,13 +357,21 @@ async function getSharedBudgets(restCtx) {
  * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object[]>} Array of { campaignId, campaignName, impressionShare, budgetLostShare }
  */
-async function getImpressionShare(restCtx) {
+async function getImpressionShare(restCtx, sinceDate) {
   const doQuery = restCtx._queryFn || queryViaRest;
+  // If a budget change date is provided and falls within this month, narrow the
+  // impression share window to only the post-change period so the numbers reflect
+  // performance after the pacing adjustment — not the full month average.
+  let dateFilter = 'segments.date DURING THIS_MONTH';
+  if (sinceDate) {
+    const today = new Date().toISOString().slice(0, 10);
+    dateFilter = `segments.date BETWEEN '${sinceDate}' AND '${today}'`;
+  }
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share
      FROM campaign
-     WHERE segments.date DURING THIS_MONTH AND campaign.status = 'ENABLED'`,
+     WHERE ${dateFilter} AND campaign.status = 'ENABLED'`,
     restCtx.loginCustomerId
   );
 

@@ -245,8 +245,8 @@ function createPacingRouter(config, deps = {}) {
       // Use injected sheets client (tests) or create one from OAuth token (production)
       const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
-      // Fetch all data in parallel — inventory, dedicated budgets, sheets, and change history are non-fatal
-      const [campaignSpend, sharedBudgets, dedicatedBudgets, impressionShare, inventoryResult, goals, lastChange] =
+      // Phase 1: Fetch all data in parallel — need change date before impression share
+      const [campaignSpend, sharedBudgets, dedicatedBudgets, inventoryResult, goals, lastChange] =
         await Promise.all([
           googleAds.getMonthSpend(restCtx),
           googleAds.getSharedBudgets(restCtx),
@@ -254,7 +254,6 @@ function createPacingRouter(config, deps = {}) {
             console.warn('Dedicated budgets fetch failed (non-fatal):', err.message);
             return [];
           }),
-          googleAds.getImpressionShare(restCtx),
           googleAds.getInventory(restCtx).catch(err => {
             console.warn('Inventory fetch failed (non-fatal):', err.message);
             return { items: [], truncated: false };
@@ -265,6 +264,9 @@ function createPacingRouter(config, deps = {}) {
           }),
           googleAds.getLastBudgetChange(restCtx),
         ]);
+
+      // Phase 2: Impression share — use post-change date range if a budget change exists
+      const impressionShare = await googleAds.getImpressionShare(restCtx, lastChange.changeDate || undefined);
 
       // Find goal matching this account by name (case-insensitive, trimmed)
       const searchName = (accountName || '').trim().toLowerCase();

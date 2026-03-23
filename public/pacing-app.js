@@ -170,8 +170,8 @@ function renderDashboard(data) {
   renderHeader(data);
   renderMetrics(data);
   renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
-  renderImpressionShare(data.impressionShareSummary);
-  renderCampaignIS(data.campaignIS);
+  renderImpressionShare(data.impressionShareSummary, data.changeDate);
+  renderCampaignIS(data.campaignIS, data.changeDate);
   renderInventory(data.inventory);
 }
 
@@ -352,7 +352,7 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   `;
 }
 
-function renderImpressionShare(is) {
+function renderImpressionShare(is, changeDate) {
   const section = document.getElementById('impressionSection');
   if (!is || is.avgImpressionShare == null) {
     section.innerHTML = '';
@@ -374,7 +374,7 @@ function renderImpressionShare(is) {
   section.innerHTML = `
     <div class="dash-section">
       <div class="dash-section-header">
-        <div class="dash-section-title">Impression Share</div>
+        <div class="dash-section-title">Impression Share${changeDate ? ` <span style="font-size:12px;color:#94a3b8;font-weight:400">(since ${changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => m + '/' + d)})</span>` : ''}</div>
       </div>
       <div class="is-row">
         <span class="is-label">Avg Impression Share</span>
@@ -400,7 +400,7 @@ function renderImpressionShare(is) {
   `;
 }
 
-function renderCampaignIS(campaigns) {
+function renderCampaignIS(campaigns, changeDate) {
   const section = document.getElementById('campaignISSection');
   if (!campaigns || campaigns.length === 0) {
     section.innerHTML = '';
@@ -433,7 +433,7 @@ function renderCampaignIS(campaigns) {
   section.innerHTML = `
     <div class="dash-section">
       <div class="dash-section-header">
-        <div class="dash-section-title">Search Impression Share by Campaign</div>
+        <div class="dash-section-title">Search Impression Share by Campaign${changeDate ? ` <span style="font-size:12px;color:#94a3b8;font-weight:400">(since ${changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => m + '/' + d)})</span>` : ''}</div>
         <div class="dash-section-count">${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}</div>
       </div>
       ${rows}
