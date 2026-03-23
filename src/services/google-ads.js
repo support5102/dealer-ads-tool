@@ -788,6 +788,7 @@ async function getAdGroupAdCounts(restCtx) {
 async function getLastBudgetChange(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
   try {
+    // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
       `SELECT change_event.change_date_time
@@ -795,13 +796,27 @@ async function getLastBudgetChange(restCtx) {
        WHERE change_event.change_date_time DURING THIS_MONTH
          AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
        ORDER BY change_event.change_date_time DESC
-       LIMIT 1`,
+       LIMIT 5`,
       restCtx.loginCustomerId
     );
     if (rows.length === 0) return { changeDate: null };
-    const dt = rows[0].changeEvent?.changeDateTime;
-    // changeDateTime is like "2026-03-15 14:30:00" — extract date part
-    return { changeDate: dt ? dt.split(' ')[0] : null };
+
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+    // Find the most recent change that is at least 24 hours old.
+    // Changes < 24h old don't have enough spend data to compute a meaningful daily avg.
+    for (const row of rows) {
+      const dt = row.changeEvent?.changeDateTime;
+      if (!dt) continue;
+      const changeTime = new Date(dt.replace(' ', 'T') + 'Z').getTime();
+      if (now - changeTime >= TWENTY_FOUR_HOURS) {
+        return { changeDate: dt.split(' ')[0] };
+      }
+    }
+
+    // All changes are < 24h old — don't use any
+    return { changeDate: null };
   } catch (err) {
     console.warn('getLastBudgetChange failed (non-fatal):', err.message);
     return { changeDate: null };
