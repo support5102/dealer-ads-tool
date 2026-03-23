@@ -171,6 +171,7 @@ function renderDashboard(data) {
   renderMetrics(data);
   renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
   renderImpressionShare(data.impressionShareSummary);
+  renderCampaignIS(data.campaignIS);
   renderInventory(data.inventory);
 }
 
@@ -395,6 +396,47 @@ function renderImpressionShare(is) {
           ${limited.map(c => `<span style="color:#fb923c;font-size:12px;padding-left:8px">&bull; ${esc(c)}</span>`).join('')}
         </div>
       ` : ''}
+    </div>
+  `;
+}
+
+function renderCampaignIS(campaigns) {
+  const section = document.getElementById('campaignISSection');
+  if (!campaigns || campaigns.length === 0) {
+    section.innerHTML = '';
+    return;
+  }
+
+  let rows = '';
+  campaigns.forEach(c => {
+    const is = c.impressionShare;
+    let isColor = '#4ade80';
+    if (is < 50) isColor = '#f87171';
+    else if (is < 75) isColor = '#fbbf24';
+
+    const blsText = c.budgetLostShare != null && c.budgetLostShare > 0
+      ? `<span style="color:#fb923c;font-size:11px;margin-left:8px">${c.budgetLostShare}% lost to budget</span>`
+      : '';
+
+    rows += `
+      <div class="is-row" style="gap:8px">
+        <span class="is-label" style="flex:2;font-size:12px">${esc(c.campaignName)}</span>
+        <div class="is-bar-container" style="flex:1">
+          <div class="is-bar" style="width:${is}%;background:${isColor}"></div>
+        </div>
+        <span class="is-value" style="color:${isColor}">${is}%</span>
+        ${blsText}
+      </div>
+    `;
+  });
+
+  section.innerHTML = `
+    <div class="dash-section">
+      <div class="dash-section-header">
+        <div class="dash-section-title">Search Impression Share by Campaign</div>
+        <div class="dash-section-count">${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}</div>
+      </div>
+      ${rows}
     </div>
   `;
 }

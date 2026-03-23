@@ -41,6 +41,20 @@ function createSheetsClient(accessToken) {
             throw err;
           }
         },
+        async update({ spreadsheetId, range, valueInputOption, resource }) {
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=${valueInputOption || 'RAW'}`;
+          try {
+            const res = await axios.put(url, resource, {
+              headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            });
+            return { data: res.data };
+          } catch (err) {
+            if (err.response) {
+              console.error(`[SheetsClient] HTTP ${err.response.status} for update "${range}":`, JSON.stringify(err.response.data));
+            }
+            throw err;
+          }
+        },
       },
     },
   };
@@ -121,6 +135,50 @@ function computePostChangeAvg(dailyBreakdown, changeDate, excludeCampaigns) {
 }
 
 /**
+ * Writes per-campaign search impression share data to the Google Sheet.
+ * Finds the row matching the account name and writes IS data to column E onward.
+ *
+ * Column E: campaign IS summary (e.g., "Brand: 45.2% | VLA: 62.1%")
+ *
+ * @param {Object} sheetsClient - Sheets API client with values.update
+ * @param {string} spreadsheetId - Google Sheets spreadsheet ID
+ * @param {string} accountName - Lowercase account name to match
+ * @param {Object[]} goals - Parsed goals (to find the row index)
+ * @param {Object[]} campaignIS - Per-campaign IS data
+ */
+async function writeImpressionShareToSheet(sheetsClient, spreadsheetId, accountName, goals, campaignIS) {
+  if (!sheetsClient?.spreadsheets?.values?.update || !spreadsheetId || !campaignIS?.length) return;
+
+  // Find which row this account is in (goals array is 0-indexed, sheet rows start at 2)
+  const rowIndex = goals.findIndex(g => g.dealerName.toLowerCase() === accountName);
+  if (rowIndex < 0) return;
+
+  const sheetRow = rowIndex + 2; // Row 1 is header, data starts at row 2
+
+  // Build summary string: "Campaign: IS% (BLS%)" for each campaign
+  const summary = campaignIS
+    .map(c => {
+      const bls = c.budgetLostShare != null ? ` (${c.budgetLostShare}% lost)` : '';
+      return `${c.campaignName}: ${c.impressionShare}%${bls}`;
+    })
+    .join(' | ');
+
+  const range = `PPC Spend Pace!E${sheetRow}`;
+
+  try {
+    await sheetsClient.spreadsheets.values.update({
+      spreadsheetId,
+      range,
+      valueInputOption: 'RAW',
+      resource: { values: [[summary]] },
+    });
+  } catch (err) {
+    // Log but don't throw — this is non-fatal
+    console.warn(`[IS Write] Failed to write IS to row ${sheetRow}:`, err.message);
+  }
+}
+
+/**
  * Creates pacing routes with the given config.
  *
  * @param {Object} config - App configuration from config.js
@@ -186,7 +244,7 @@ function createPacingRouter(config, deps = {}) {
 
       if (!goal) {
         const hint = goals.length === 0
-          ? 'Could not load goals from spreadsheet. Check Sheets permissions (re-login to grant spreadsheets.readonly scope).'
+          ? 'Could not load goals from spreadsheet. Check Sheets permissions (re-login to grant spreadsheets scope).'
           : `No goal found for "${accountName || customerId}" in the spreadsheet. Available: ${goals.slice(0, 5).map(g => g.dealerName).join(', ')}${goals.length > 5 ? '...' : ''}`;
         return res.status(404).json({ error: hint, customerId, goalsLoaded: goals.length });
       }
@@ -273,13 +331,27 @@ function createPacingRouter(config, deps = {}) {
         excludeCampaigns: excludeNames,
       });
 
-      const response = { customerId: customerId.replace(/-/g, ''), ...recommendation };
+      // Per-campaign impression share breakdown for the dashboard
+      const campaignIS = (impressionShare || [])
+        .filter(d => d.impressionShare != null)
+        .map(d => ({
+          campaignName: d.campaignName,
+          impressionShare: Math.round(d.impressionShare * 1000) / 10,
+          budgetLostShare: d.budgetLostShare != null ? Math.round(d.budgetLostShare * 1000) / 10 : null,
+        }))
+        .sort((a, b) => a.impressionShare - b.impressionShare);
+
+      const response = { customerId: customerId.replace(/-/g, ''), ...recommendation, campaignIS };
       if (postChangeAvg && postChangeAvg.daysTracked > 0) {
         response.postChangeAvg = postChangeAvg;
       }
       if (postChangeWarning) {
         response.postChangeWarning = postChangeWarning;
       }
+
+      // Write impression share back to Google Sheet (non-blocking, non-fatal)
+      writeImpressionShareToSheet(activeSheets, spreadsheetId, searchName, goals, campaignIS)
+        .catch(err => console.warn('IS sheet write failed (non-fatal):', err.message));
 
       res.json(response);
     } catch (err) {
