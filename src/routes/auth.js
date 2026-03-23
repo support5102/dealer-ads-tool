@@ -38,6 +38,7 @@ function createAuthRouter(config) {
       scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly',
       access_type:   'offline',
       prompt:        'consent',
+      include_granted_scopes: 'true',
       state,
     });
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
