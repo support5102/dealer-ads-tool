@@ -426,11 +426,20 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     }
 
     // First pass: compute baseline values
-    // Brand budgets are local-radius only — no IS cap or radius expansion suggestion
+    // Brand budgets are local-radius only — cap at 2x current spend (not IS-based).
+    // They should capture branded searches but never absorb massive surplus.
+    const BRAND_MAX_MULTIPLIER = 2.0;
     const sharedAllocations = budgets.map(budget => {
       const currentSpend = actualDailySpend(budget, spendMap, actualOnly);
       const tier = getSharedBudgetTier(budget);
-      const isCap = tier === CAMPAIGN_TIERS.BRAND ? null : getISCap(budget, currentSpend);
+      let isCap;
+      if (tier === CAMPAIGN_TIERS.BRAND) {
+        // Brand gets a spend-based cap, not IS-based — no radius suggestion
+        const brandCap = Math.max(currentSpend * BRAND_MAX_MULTIPLIER, budget.dailyBudget || 0);
+        isCap = { cap: brandCap, maxIS: null, isBrand: true };
+      } else {
+        isCap = getISCap(budget, currentSpend);
+      }
       return { budget, currentSpend, tier, isCap, recommended: currentSpend, isCapped: false };
     });
 
@@ -512,7 +521,9 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       const direction = change >= 0 ? 'increase' : 'decrease';
 
       let reason;
-      if (isCapped) {
+      if (isCapped && isCap.isBrand) {
+        reason = `Brand capped at ${BRAND_MAX_MULTIPLIER}x current spend — brand only needs local coverage`;
+      } else if (isCapped) {
         const isPercent = Math.round(isCap.maxIS * 1000) / 10;
         reason = `IS already ${isPercent}% — increase targeting radius to spend more, then raise budget`;
       } else {
