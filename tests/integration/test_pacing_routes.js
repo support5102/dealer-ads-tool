@@ -70,6 +70,7 @@ function setupMocks() {
   googleAds.getDedicatedBudgets.mockResolvedValue(SAMPLE_DEDICATED_BUDGETS);
   googleAds.getImpressionShare.mockResolvedValue(SAMPLE_IMPRESSION_SHARE);
   googleAds.getInventory.mockResolvedValue(SAMPLE_INVENTORY);
+  googleAds.getLastBudgetChange.mockResolvedValue({ changeDate: null });
   goalReader.readGoals.mockResolvedValue(SAMPLE_GOALS);
 }
 

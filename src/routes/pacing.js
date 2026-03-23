@@ -14,6 +14,7 @@ const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
 const { generateRecommendation } = require('../services/budget-recommender');
+const { ACCOUNT_OVERRIDES } = require('../services/strategy-rules');
 
 /**
  * Creates a lightweight Google Sheets client from an OAuth access token.
@@ -43,6 +44,80 @@ function createSheetsClient(accessToken) {
       },
     },
   };
+}
+
+/**
+ * Applies ACCOUNT_OVERRIDES to campaign spend data.
+ * - Source accounts: excluded campaigns are filtered out
+ * - Target accounts: excluded campaigns' spend is added in
+ *
+ * @param {Object[]} campaignSpend - Campaign spend array from getMonthSpend
+ * @param {string} accountName - Current account name (lowercase)
+ * @param {Object|null} redirectedSpend - Spend from source account to add (for target accounts)
+ * @returns {Object[]} Filtered campaign spend
+ */
+function applySpendOverrides(campaignSpend, accountName, redirectedSpend) {
+  const override = ACCOUNT_OVERRIDES[accountName];
+  let filtered = campaignSpend;
+
+  // Source account: remove excluded campaigns
+  if (override && override.excludeCampaigns) {
+    const excludeSet = new Set(override.excludeCampaigns.map(n => n.toLowerCase()));
+    filtered = campaignSpend.filter(c => !excludeSet.has(c.campaignName.toLowerCase()));
+  }
+
+  // Target account: add redirected spend
+  if (redirectedSpend && redirectedSpend.length > 0) {
+    filtered = [...filtered, ...redirectedSpend];
+  }
+
+  return filtered;
+}
+
+/**
+ * Finds campaigns that should be redirected TO the given account name.
+ * Scans all overrides for redirectSpendTo matching the target account.
+ *
+ * @param {string} targetName - Lowercase account name
+ * @returns {{ sourceAccount: string, campaignNames: string[] }[]}
+ */
+function findRedirectsTo(targetName) {
+  const redirects = [];
+  for (const [source, override] of Object.entries(ACCOUNT_OVERRIDES)) {
+    if (override.redirectSpendTo === targetName && override.excludeCampaigns) {
+      redirects.push({ sourceAccount: source, campaignNames: override.excludeCampaigns });
+    }
+  }
+  return redirects;
+}
+
+/**
+ * Computes post-change daily average spend from daily breakdown data.
+ *
+ * @param {Object[]} dailyBreakdown - From getDailySpendBreakdown
+ * @param {string} changeDate - YYYY-MM-DD of the last budget change
+ * @param {string[]} [excludeCampaigns] - Campaign names to exclude (lowercase)
+ * @returns {{ changeDate: string, dailyAvg: number, daysTracked: number }}
+ */
+function computePostChangeAvg(dailyBreakdown, changeDate, excludeCampaigns) {
+  const excludeSet = new Set((excludeCampaigns || []).map(n => n.toLowerCase()));
+
+  // Include only days on or after the change date
+  const postChangeRows = dailyBreakdown.filter(
+    r => r.date >= changeDate && !excludeSet.has(r.campaignName.toLowerCase())
+  );
+
+  // Group by date to count distinct days and total spend
+  const dayTotals = new Map();
+  for (const row of postChangeRows) {
+    dayTotals.set(row.date, (dayTotals.get(row.date) || 0) + row.spend);
+  }
+
+  const daysTracked = dayTotals.size;
+  const totalSpend = [...dayTotals.values()].reduce((s, v) => s + v, 0);
+  const dailyAvg = daysTracked > 0 ? Math.round((totalSpend / daysTracked) * 100) / 100 : 0;
+
+  return { changeDate, dailyAvg, daysTracked };
 }
 
 /**
@@ -84,8 +159,8 @@ function createPacingRouter(config, deps = {}) {
       // Use injected sheets client (tests) or create one from OAuth token (production)
       const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
-      // Fetch all data in parallel — inventory, dedicated budgets, and sheets are non-fatal
-      const [campaignSpend, sharedBudgets, dedicatedBudgets, impressionShare, inventoryResult, goals] =
+      // Fetch all data in parallel — inventory, dedicated budgets, sheets, and change history are non-fatal
+      const [campaignSpend, sharedBudgets, dedicatedBudgets, impressionShare, inventoryResult, goals, lastChange] =
         await Promise.all([
           googleAds.getMonthSpend(restCtx),
           googleAds.getSharedBudgets(restCtx),
@@ -102,6 +177,7 @@ function createPacingRouter(config, deps = {}) {
             console.warn('Goals fetch failed:', err.message);
             return [];
           }),
+          googleAds.getLastBudgetChange(restCtx),
         ]);
 
       // Find goal matching this account by name (case-insensitive, trimmed)
@@ -115,6 +191,43 @@ function createPacingRouter(config, deps = {}) {
         return res.status(404).json({ error: hint, customerId, goalsLoaded: goals.length });
       }
 
+      // Apply spend overrides — exclude/redirect campaigns between accounts
+      const redirects = findRedirectsTo(searchName);
+      let redirectedSpend = [];
+      if (redirects.length > 0) {
+        // Fetch spend from source accounts to capture redirected campaigns
+        const accounts = req.session.accounts || [];
+        for (const redirect of redirects) {
+          const sourceAcct = accounts.find(a => (a.name || '').toLowerCase() === redirect.sourceAccount);
+          if (sourceAcct) {
+            const sourceCtx = { ...restCtx, customerId: sourceAcct.id.replace(/-/g, '') };
+            try {
+              const sourceSpend = await googleAds.getMonthSpend(sourceCtx);
+              const nameSet = new Set(redirect.campaignNames.map(n => n.toLowerCase()));
+              const matched = sourceSpend.filter(c => nameSet.has(c.campaignName.toLowerCase()));
+              redirectedSpend.push(...matched);
+            } catch (err) {
+              console.warn(`Redirect spend fetch from ${redirect.sourceAccount} failed (non-fatal):`, err.message);
+            }
+          }
+        }
+      }
+
+      const adjustedSpend = applySpendOverrides(campaignSpend, searchName, redirectedSpend);
+
+      // Compute post-change daily average if a budget was changed this month
+      let postChangeAvg = null;
+      if (lastChange.changeDate) {
+        try {
+          const dailyBreakdown = await googleAds.getDailySpendBreakdown(restCtx);
+          const override = ACCOUNT_OVERRIDES[searchName];
+          const excludeNames = override ? override.excludeCampaigns : [];
+          postChangeAvg = computePostChangeAvg(dailyBreakdown, lastChange.changeDate, excludeNames);
+        } catch (err) {
+          console.warn('Daily breakdown fetch failed (non-fatal):', err.message);
+        }
+      }
+
       // Count new vehicle inventory
       const items = (inventoryResult && inventoryResult.items) || [];
       const newVehicleCount = items.filter(
@@ -124,7 +237,7 @@ function createPacingRouter(config, deps = {}) {
       const now = new Date();
       const recommendation = generateRecommendation({
         goal,
-        campaignSpend,
+        campaignSpend: adjustedSpend,
         sharedBudgets,
         dedicatedBudgets,
         impressionShare,
@@ -134,7 +247,12 @@ function createPacingRouter(config, deps = {}) {
         currentDay: now.getDate(),
       });
 
-      res.json({ customerId: customerId.replace(/-/g, ''), ...recommendation });
+      const response = { customerId: customerId.replace(/-/g, ''), ...recommendation };
+      if (postChangeAvg) {
+        response.postChangeAvg = postChangeAvg;
+      }
+
+      res.json(response);
     } catch (err) {
       console.error('Pacing error:', err.message);
       next(err);
@@ -144,4 +262,4 @@ function createPacingRouter(config, deps = {}) {
   return router;
 }
 
-module.exports = { createPacingRouter };
+module.exports = { createPacingRouter, applySpendOverrides, findRedirectsTo, computePostChangeAvg };

@@ -60,6 +60,8 @@ function createAccountsRouter(config) {
       });
 
       accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      // Cache in session for cross-account lookups (e.g. spend redirects in pacing)
+      req.session.accounts = accounts;
       res.json({ accounts });
 
     } catch (err) {

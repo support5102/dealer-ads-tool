@@ -238,6 +238,21 @@ function detectDealerMake(campaignName) {
   return null;
 }
 
+/**
+ * Per-account spend overrides — campaigns whose spend should be excluded
+ * from one account's pacing and credited to another.
+ *
+ * Keys are lowercase account names.
+ * excludeCampaigns: campaign names to remove from this account's spend.
+ * redirectSpendTo: lowercase account name that should receive the excluded spend.
+ */
+const ACCOUNT_OVERRIDES = {
+  'alan jay auto': {
+    excludeCampaigns: ['Pmax- Used VLA - Allstar Car Sales'],
+    redirectSpendTo: 'allstar car sales',
+  },
+};
+
 module.exports = {
   CPC_RANGES,
   MATCH_TYPE_POLICY,
@@ -255,4 +270,5 @@ module.exports = {
   getCompetingMakes,
   detectDealerMake,
   HIGH_DEMAND_MODELS,
+  ACCOUNT_OVERRIDES,
 };

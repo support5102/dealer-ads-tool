@@ -199,6 +199,19 @@ function renderMetrics(data) {
   const spendProgress = p.monthlyBudget > 0 ? (data.totalSpend / p.monthlyBudget) * 100 : 0;
   const color = data.statusColor || 'gray';
 
+  // Post-change average card (only shown when a budget change happened this month)
+  let postChangeCard = '';
+  if (data.postChangeAvg && data.postChangeAvg.daysTracked > 0) {
+    const pca = data.postChangeAvg;
+    const changeLabel = pca.changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => `${m}/${d}`);
+    postChangeCard = `
+    <div class="metric-card">
+      <div class="metric-label">Post-Change Daily Avg</div>
+      <div class="metric-value">$${fmt(pca.dailyAvg)}</div>
+      <div class="metric-sub">Since ${changeLabel} (${pca.daysTracked} day${pca.daysTracked !== 1 ? 's' : ''})</div>
+    </div>`;
+  }
+
   document.getElementById('metricsRow').innerHTML = `
     <div class="metric-card">
       <div class="metric-label">Monthly Budget</div>
@@ -222,6 +235,7 @@ function renderMetrics(data) {
       <div class="metric-value">$${fmt(p.requiredDailyRate)}</div>
       <div class="metric-sub">${p.daysRemaining} days remaining</div>
     </div>
+    ${postChangeCard}
   `;
 }
 

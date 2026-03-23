@@ -779,6 +779,59 @@ async function getAdGroupAdCounts(restCtx) {
   }
 }
 
+/**
+ * Fetches the most recent budget change event this month.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<{changeDate: string|null}>} Date string (YYYY-MM-DD) or null
+ */
+async function getLastBudgetChange(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT change_event.change_date_time
+       FROM change_event
+       WHERE change_event.change_date_time DURING THIS_MONTH
+         AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
+       ORDER BY change_event.change_date_time DESC
+       LIMIT 1`,
+      restCtx.loginCustomerId
+    );
+    if (rows.length === 0) return { changeDate: null };
+    const dt = rows[0].changeEvent?.changeDateTime;
+    // changeDateTime is like "2026-03-15 14:30:00" — extract date part
+    return { changeDate: dt ? dt.split(' ')[0] : null };
+  } catch (err) {
+    console.warn('getLastBudgetChange failed (non-fatal):', err.message);
+    return { changeDate: null };
+  }
+}
+
+/**
+ * Fetches per-day, per-campaign spend breakdown for the current month.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { date, campaignId, campaignName, spend }
+ */
+async function getDailySpendBreakdown(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros
+     FROM campaign
+     WHERE segments.date DURING THIS_MONTH AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => ({
+    date: row.segments.date,
+    campaignId: String(row.campaign.id),
+    campaignName: row.campaign.name,
+    spend: (row.metrics?.costMicros ?? 0) / 1_000_000,
+  }));
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -801,4 +854,7 @@ module.exports = {
   // Phase 12: Deep Scanner queries
   getCampaignNegatives,
   getAdGroupAdCounts,
+  // Pacing: post-change tracking
+  getLastBudgetChange,
+  getDailySpendBreakdown,
 };
