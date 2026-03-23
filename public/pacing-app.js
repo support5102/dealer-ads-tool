@@ -268,9 +268,8 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   // Budget allocation summary bar
   let summaryHtml = '';
   if (budgetSummary) {
-    const { requiredDailyRate, currentDailyTotal, totalChange } = budgetSummary;
+    const { requiredDailyRate, currentDailyTotal, totalSetBudget, totalChange } = budgetSummary;
     const gap = requiredDailyRate - currentDailyTotal;
-    const gapSign = gap >= 0 ? '+' : '';
     const gapColor = Math.abs(gap) < 1 ? '#4ade80' : (gap > 0 ? '#4ade80' : '#f87171');
     const gapLabel = gap > 0 ? 'Under by' : (gap < 0 ? 'Over by' : 'On target');
     const gapAmount = Math.abs(gap);
@@ -283,6 +282,10 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
         <div class="budget-summary-item">
           <span class="budget-summary-label">Current Daily Spend</span>
           <span class="budget-summary-value">$${currentDailyTotal.toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Set Budget Total</span>
+          <span class="budget-summary-value">$${(totalSetBudget || 0).toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">
           <span class="budget-summary-label">Change Needed</span>

@@ -544,10 +544,15 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
   const totalChange = Math.round((recommendedTotal - currentTotal) * 100) / 100;
 
+  // Sum of all set daily budgets (VLA + shared) — what Google is configured to spend
+  const totalSetBudget = vlaCampaigns.reduce((s, c) => s + (c.dailyBudget || 0), 0)
+    + budgets.reduce((s, b) => s + (b.dailyBudget || 0), 0);
+
   const budgetSummary = {
     requiredDailyRate: Math.round(requiredDailyRate * 100) / 100,
     currentDailyTotal: Math.round(currentTotal * 100) / 100,
     recommendedDailyTotal: Math.round(recommendedTotal * 100) / 100,
+    totalSetBudget: Math.round(totalSetBudget * 100) / 100,
     totalChange,
   };
 
