@@ -269,7 +269,9 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   let summaryHtml = '';
   if (budgetSummary) {
     const { requiredDailyRate, currentDailyTotal, totalSetBudget, totalChange } = budgetSummary;
-    const gap = requiredDailyRate - currentDailyTotal;
+    // Change needed = target rate vs what budgets are set to (what you control)
+    const setTotal = totalSetBudget || 0;
+    const gap = requiredDailyRate - setTotal;
     const gapColor = Math.abs(gap) < 1 ? '#4ade80' : (gap > 0 ? '#4ade80' : '#f87171');
     const gapLabel = gap > 0 ? 'Under by' : (gap < 0 ? 'Over by' : 'On target');
     const gapAmount = Math.abs(gap);

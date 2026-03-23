@@ -389,14 +389,15 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // VLA recs
   vlaAllocations.forEach(v => {
     if (!v.reason) return;
-    const change = Math.round((v.recommended - v.currentSpend) * 100) / 100;
+    const setBudget = v.budgetSetting || 0;
+    const change = Math.round((v.recommended - setBudget) * 100) / 100;
     if (Math.abs(change) < 0.01) return;
 
     recommendations.push({
       type: 'campaign_budget',
       target: v.campaign.campaignName,
       resourceName: v.campaign.resourceName,
-      budgetSetting: Math.round(v.budgetSetting * 100) / 100,
+      budgetSetting: Math.round(setBudget * 100) / 100,
       currentDailyBudget: Math.round(v.currentSpend * 100) / 100,
       recommendedDailyBudget: v.recommended,
       change,
@@ -513,7 +514,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       recommended = Math.round(recommended * 100) / 100;
       recommendedSharedTotal += recommended;
 
-      const change = Math.round((recommended - currentSpend) * 100) / 100;
+      const setBudget = budget.dailyBudget || 0;
+      const change = Math.round((recommended - setBudget) * 100) / 100;
       if (Math.abs(change) < 0.01 && !isCapped) return;
 
       const tierLabel = tier === CAMPAIGN_TIERS.GENERAL_REGIONAL ? ' (low priority — general/regional)'
@@ -550,14 +552,14 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     ? findPausableCampaigns(budgets, spendMap)
     : [];
 
-  // Budget allocation summary — uses actual spend rates, not budget settings
-  const currentTotal = currentVlaSpend + currentSharedSpend + nonVlaDedicatedSpend;
-  const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
-  const totalChange = Math.round((recommendedTotal - currentTotal) * 100) / 100;
-
   // Sum of all set daily budgets (VLA + shared) — what Google is configured to spend
   const totalSetBudget = vlaCampaigns.reduce((s, c) => s + (c.dailyBudget || 0), 0)
     + budgets.reduce((s, b) => s + (b.dailyBudget || 0), 0);
+
+  // Budget allocation summary — change is relative to set budgets (what you control)
+  const currentTotal = currentVlaSpend + currentSharedSpend + nonVlaDedicatedSpend;
+  const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
+  const totalChange = Math.round((recommendedTotal - totalSetBudget) * 100) / 100;
 
   const budgetSummary = {
     requiredDailyRate: Math.round(requiredDailyRate * 100) / 100,
