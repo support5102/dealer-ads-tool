@@ -430,7 +430,27 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         recommended = remainingForShared / budgets.length;
       }
 
-      if (!accountOverPacing) {
+      // IS-aware cap: if campaigns under this budget already have high impression
+      // share, there isn't enough search volume to absorb a big budget increase.
+      // Cap the recommendation based on how much headroom the IS shows.
+      if (!accountOverPacing && currentSpend > 0) {
+        const budgetCampaigns = budget.campaigns || [];
+        const budgetISValues = budgetCampaigns
+          .map(c => isMap.get(String(c.campaignId))?.impressionShare)
+          .filter(v => v != null);
+        if (budgetISValues.length > 0) {
+          // Use the highest IS among campaigns in this budget
+          const maxIS = Math.max(...budgetISValues);
+          // If IS is already 80%, the campaign can realistically grow ~25% more
+          // (to reach ~100% IS). Below 50% IS there's lots of room — no cap.
+          if (maxIS > 0.50) {
+            const headroom = Math.max((1 - maxIS) / maxIS, 0.10); // min 10% growth
+            const isCap = currentSpend * (1 + headroom);
+            if (recommended > isCap) {
+              recommended = isCap;
+            }
+          }
+        }
         recommended = Math.max(recommended, 1);
       }
       recommended = Math.max(recommended, 0.01);
