@@ -94,7 +94,7 @@ describe('applySpendOverrides', () => {
   ];
 
   test('filters excluded campaigns from source account', () => {
-    const result = applySpendOverrides(spend, 'alan jay auto', []);
+    const result = applySpendOverrides(spend, 'alan jay automotive group', []);
     expect(result).toHaveLength(2);
     expect(result.find(c => c.campaignName.includes('Allstar'))).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe('applySpendOverrides', () => {
     const mixed = [
       { campaignId: '200', campaignName: 'pmax- used vla - allstar car sales', spend: 30 },
     ];
-    const result = applySpendOverrides(mixed, 'alan jay auto', []);
+    const result = applySpendOverrides(mixed, 'alan jay automotive group', []);
     expect(result).toHaveLength(0);
   });
 });
@@ -128,7 +128,7 @@ describe('findRedirectsTo', () => {
   test('finds overrides that redirect to allstar car sales', () => {
     const redirects = findRedirectsTo('allstar car sales');
     expect(redirects).toHaveLength(1);
-    expect(redirects[0].sourceAccount).toBe('alan jay auto');
+    expect(redirects[0].sourceAccount).toBe('alan jay automotive group');
     expect(redirects[0].campaignNames).toContain('Pmax- Used VLA - Allstar Car Sales');
   });
 

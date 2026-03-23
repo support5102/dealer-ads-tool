@@ -287,14 +287,21 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   let sharedOverPacingRatio = 1;
   if (accountOverPacing) {
     if (currentVlaSpend > 0 && currentSharedSpend > 0) {
-      // Solve: VlaSpend * vlaR + SharedSpend * sharedR = target
-      // With:  (1 - vlaR) = VLA_PROTECTION * (1 - sharedR)
-      //   → sharedR = (target - VlaSpend * (1 - VLA_PROTECTION)) / (VlaSpend * VLA_PROTECTION + SharedSpend)
-      const numerator = targetForAdjustable - currentVlaSpend * (1 - VLA_PROTECTION);
-      const denominator = currentVlaSpend * VLA_PROTECTION + currentSharedSpend;
-      sharedOverPacingRatio = denominator > 0 ? Math.max(numerator / denominator, 0) : 0;
-      vlaOverPacingRatio = 1 - VLA_PROTECTION * (1 - sharedOverPacingRatio);
-      vlaOverPacingRatio = Math.max(vlaOverPacingRatio, 0);
+      // Guard: if both are very low (<$1/day each), the denominator collapses
+      // and VLA_PROTECTION breaks down. Use fixed ratios that preserve intent.
+      if (currentVlaSpend < 1 && currentSharedSpend < 1) {
+        vlaOverPacingRatio = 0.95;
+        sharedOverPacingRatio = Math.max(targetForAdjustable / currentAdjustableSpend, 0);
+      } else {
+        // Solve: VlaSpend * vlaR + SharedSpend * sharedR = target
+        // With:  (1 - vlaR) = VLA_PROTECTION * (1 - sharedR)
+        //   → sharedR = (target - VlaSpend * (1 - VLA_PROTECTION)) / (VlaSpend * VLA_PROTECTION + SharedSpend)
+        const numerator = targetForAdjustable - currentVlaSpend * (1 - VLA_PROTECTION);
+        const denominator = currentVlaSpend * VLA_PROTECTION + currentSharedSpend;
+        sharedOverPacingRatio = denominator > 0 ? Math.max(numerator / denominator, 0) : 0;
+        vlaOverPacingRatio = 1 - VLA_PROTECTION * (1 - sharedOverPacingRatio);
+        vlaOverPacingRatio = Math.max(vlaOverPacingRatio, 0);
+      }
     } else if (currentAdjustableSpend > 0) {
       // Only one type exists — it absorbs everything
       const ratio = targetForAdjustable / currentAdjustableSpend;
@@ -342,7 +349,9 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       // Under-pacing: IS-driven allocation
       recommended = currentSpend;
       if (is != null && is < VLA_IS_TARGET.min) {
-        const boost = Math.min(VLA_IS_TARGET.min / Math.max(is, 0.01), 2.0);
+        // Uncapped IS-driven boost — if IS is 25% and target is 75%, boost = 3x.
+        // Allows dealers to fully capture available VLA traffic.
+        const boost = VLA_IS_TARGET.min / Math.max(is, 0.01);
         recommended = currentSpend * boost;
         reason = `IS ${(is * 100).toFixed(1)}% below 75% target`
           + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')

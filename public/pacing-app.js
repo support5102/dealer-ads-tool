@@ -212,6 +212,16 @@ function renderMetrics(data) {
     </div>`;
   }
 
+  // Warning when post-change data couldn't be loaded
+  let postChangeWarning = '';
+  if (data.postChangeWarning) {
+    postChangeWarning = `
+    <div class="metric-card" style="border-color:#92400e">
+      <div class="metric-label" style="color:#fbbf24">⚠ Data Note</div>
+      <div class="metric-sub" style="color:#fbbf24">${esc(data.postChangeWarning)}</div>
+    </div>`;
+  }
+
   document.getElementById('metricsRow').innerHTML = `
     <div class="metric-card">
       <div class="metric-label">Monthly Budget</div>
@@ -236,6 +246,7 @@ function renderMetrics(data) {
       <div class="metric-sub">${p.daysRemaining} days remaining</div>
     </div>
     ${postChangeCard}
+    ${postChangeWarning}
   `;
 }
 

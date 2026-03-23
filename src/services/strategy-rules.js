@@ -247,7 +247,7 @@ function detectDealerMake(campaignName) {
  * redirectSpendTo: lowercase account name that should receive the excluded spend.
  */
 const ACCOUNT_OVERRIDES = {
-  'alan jay auto': {
+  'alan jay automotive group': {
     excludeCampaigns: ['Pmax- Used VLA - Allstar Car Sales'],
     redirectSpendTo: 'allstar car sales',
   },

@@ -194,6 +194,7 @@ function createPacingRouter(config, deps = {}) {
       // Apply spend overrides — exclude/redirect campaigns between accounts
       const redirects = findRedirectsTo(searchName);
       let redirectedSpend = [];
+      let redirectedDailyRows = [];
       if (redirects.length > 0) {
         // Fetch spend from source accounts to capture redirected campaigns
         const accounts = req.session.accounts || [];
@@ -201,13 +202,21 @@ function createPacingRouter(config, deps = {}) {
           const sourceAcct = accounts.find(a => (a.name || '').toLowerCase() === redirect.sourceAccount);
           if (sourceAcct) {
             const sourceCtx = { ...restCtx, customerId: sourceAcct.id.replace(/-/g, '') };
+            const nameSet = new Set(redirect.campaignNames.map(n => n.toLowerCase()));
             try {
               const sourceSpend = await googleAds.getMonthSpend(sourceCtx);
-              const nameSet = new Set(redirect.campaignNames.map(n => n.toLowerCase()));
               const matched = sourceSpend.filter(c => nameSet.has(c.campaignName.toLowerCase()));
               redirectedSpend.push(...matched);
             } catch (err) {
               console.warn(`Redirect spend fetch from ${redirect.sourceAccount} failed (non-fatal):`, err.message);
+            }
+            // Also fetch daily breakdown from source for post-change tracking
+            try {
+              const sourceDaily = await googleAds.getDailySpendBreakdown(sourceCtx);
+              const matchedDaily = sourceDaily.filter(r => nameSet.has(r.campaignName.toLowerCase()));
+              redirectedDailyRows.push(...matchedDaily);
+            } catch (err) {
+              console.warn(`Redirect daily breakdown from ${redirect.sourceAccount} failed (non-fatal):`, err.message);
             }
           }
         }
@@ -219,15 +228,26 @@ function createPacingRouter(config, deps = {}) {
       // the post-change avg card AND to rebase "Current Daily Spend" to post-change rates
       let dailyBreakdown = null;
       let postChangeAvg = null;
+      let postChangeWarning = null;
       const override = ACCOUNT_OVERRIDES[searchName];
       const excludeNames = override ? override.excludeCampaigns : [];
 
       if (lastChange.changeDate) {
         try {
           dailyBreakdown = await googleAds.getDailySpendBreakdown(restCtx);
+          // Merge in redirected daily rows (e.g., Allstar gets Pmax VLA daily data from Alan Jay)
+          if (redirectedDailyRows.length > 0) {
+            dailyBreakdown = [...dailyBreakdown, ...redirectedDailyRows];
+          }
           postChangeAvg = computePostChangeAvg(dailyBreakdown, lastChange.changeDate, excludeNames);
+          // If post-change data has zero days tracked, warn — data may not be available yet
+          if (postChangeAvg && postChangeAvg.daysTracked === 0) {
+            postChangeWarning = `Budget changed on ${lastChange.changeDate} but no spend data available yet — using full-month averages`;
+            dailyBreakdown = null; // fall back to full-month in generateRecommendation
+          }
         } catch (err) {
           console.warn('Daily breakdown fetch failed (non-fatal):', err.message);
+          postChangeWarning = `Budget changed on ${lastChange.changeDate} but daily breakdown unavailable — using full-month averages`;
         }
       }
 
@@ -254,8 +274,11 @@ function createPacingRouter(config, deps = {}) {
       });
 
       const response = { customerId: customerId.replace(/-/g, ''), ...recommendation };
-      if (postChangeAvg) {
+      if (postChangeAvg && postChangeAvg.daysTracked > 0) {
         response.postChangeAvg = postChangeAvg;
+      }
+      if (postChangeWarning) {
+        response.postChangeWarning = postChangeWarning;
       }
 
       res.json(response);

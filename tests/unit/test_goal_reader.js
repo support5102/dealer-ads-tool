@@ -5,7 +5,7 @@
  * Tier 2 (unit): uses google-sheets-fake, no real API calls.
  *
  * Column layout matches PPC Spend Pace sheet:
- * A: Account (dealer name) | B: Cost (USD) | C: Total Budget
+ * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory
  */
 
 const { readGoals, parseRow, parseNumber, cleanCustomerId } = require('../../src/services/goal-reader');
@@ -111,16 +111,27 @@ describe('cleanCustomerId', () => {
 });
 
 // ===========================================================================
-// parseRow (new layout: A=Name, B=Cost, C=Budget)
+// parseRow (layout: A=Name, B=Cost, C=Budget, D=Baseline Inventory)
 // ===========================================================================
 
 describe('parseRow', () => {
   test('parses complete row into DealerGoal', () => {
+    const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00', '200']);
+
+    expect(goal).toEqual({
+      dealerName: 'Honda of Springfield',
+      monthlyBudget: 15000,
+      baselineInventory: 200,
+    });
+  });
+
+  test('parses row without baseline inventory', () => {
     const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00']);
 
     expect(goal).toEqual({
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
+      baselineInventory: null,
     });
   });
 
@@ -170,10 +181,11 @@ describe('parseRow', () => {
     expect(goal.dealerName).toBe('Honda of Springfield');
   });
 
-  test('ignores extra columns beyond expected three', () => {
-    const goal = parseRow(['Honda', '$12,000', '$15,000', '91%', '16', '31']);
+  test('ignores extra columns beyond expected four', () => {
+    const goal = parseRow(['Honda', '$12,000', '$15,000', '200', '91%', '16']);
     expect(goal).not.toBeNull();
     expect(goal.monthlyBudget).toBe(15000);
+    expect(goal.baselineInventory).toBe(200);
   });
 
   test('cost column (B) does not affect parsing', () => {
@@ -196,6 +208,7 @@ describe('readGoals', () => {
     expect(goals[0]).toEqual({
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
+      baselineInventory: 200,
     });
     expect(goals[1].dealerName).toBe('Toyota of Shelbyville');
     expect(goals[2].dealerName).toBe('Ford of Capital City');
@@ -234,7 +247,7 @@ describe('readGoals', () => {
     };
 
     await readGoals(client, 'my-sheet-id');
-    expect(capturedParams.range).toBe('PPC Spend Pace!A2:C');
+    expect(capturedParams.range).toBe('PPC Spend Pace!A2:D');
   });
 
   test('skips invalid rows and returns only valid goals', async () => {
