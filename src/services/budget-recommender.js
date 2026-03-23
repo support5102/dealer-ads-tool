@@ -412,76 +412,112 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
 
   let recommendedSharedTotal = 0;
   if (budgets.length > 0) {
-    // First pass: compute tier-weighted recommended values
+    // Compute IS headroom cap for each budget (max spend before IS saturates)
+    function getISCap(budget, currentSpend) {
+      const budgetCampaigns = budget.campaigns || [];
+      const budgetISValues = budgetCampaigns
+        .map(c => isMap.get(String(c.campaignId))?.impressionShare)
+        .filter(v => v != null);
+      if (budgetISValues.length === 0 || currentSpend <= 0) return null; // no IS data — uncapped
+      const maxIS = Math.max(...budgetISValues);
+      if (maxIS <= 0.50) return null; // plenty of room — uncapped
+      const headroom = Math.max((1 - maxIS) / maxIS, 0.10);
+      return { cap: currentSpend * (1 + headroom), maxIS };
+    }
+
+    // First pass: compute baseline values
     const sharedAllocations = budgets.map(budget => {
       const currentSpend = actualDailySpend(budget, spendMap, actualOnly);
-      let recommended;
-      if (accountOverPacing) {
-        // Apply tier-weighted cut: lower-tier budgets decrease more
-        const tier = getSharedBudgetTier(budget);
-        const tierWeight = TIER_CUT_WEIGHTS[tier] || 1.0;
-        const baseCut = 1 - sharedOverPacingRatio; // base cut percentage
-        const tierCut = Math.min(baseCut * tierWeight, 1); // cap at 100% cut
-        recommended = currentSpend * (1 - tierCut);
-      } else if (currentSharedSpend > 0) {
-        const proportion = currentSpend / currentSharedSpend;
-        recommended = remainingForShared * proportion;
-      } else {
-        recommended = remainingForShared / budgets.length;
-      }
-
-      // IS-aware cap: if campaigns under this budget already have high impression
-      // share, there isn't enough search volume to absorb a big budget increase.
-      // Cap the recommendation based on how much headroom the IS shows.
-      if (!accountOverPacing && currentSpend > 0) {
-        const budgetCampaigns = budget.campaigns || [];
-        const budgetISValues = budgetCampaigns
-          .map(c => isMap.get(String(c.campaignId))?.impressionShare)
-          .filter(v => v != null);
-        if (budgetISValues.length > 0) {
-          // Use the highest IS among campaigns in this budget
-          const maxIS = Math.max(...budgetISValues);
-          // If IS is already 80%, the campaign can realistically grow ~25% more
-          // (to reach ~100% IS). Below 50% IS there's lots of room — no cap.
-          if (maxIS > 0.50) {
-            const headroom = Math.max((1 - maxIS) / maxIS, 0.10); // min 10% growth
-            const isCap = currentSpend * (1 + headroom);
-            if (recommended > isCap) {
-              recommended = isCap;
-            }
-          }
-        }
-        recommended = Math.max(recommended, 1);
-      }
-      recommended = Math.max(recommended, 0.01);
-      return { budget, currentSpend, recommended };
+      const tier = getSharedBudgetTier(budget);
+      const isCap = getISCap(budget, currentSpend);
+      return { budget, currentSpend, tier, isCap, recommended: currentSpend, isCapped: false };
     });
 
-    // Normalize: tier weighting may over/under-shoot the target.
-    // Scale all shared recs so their total matches what shared should be.
     if (accountOverPacing) {
+      // Over-pacing: tier-weighted cuts
+      sharedAllocations.forEach(a => {
+        const tierWeight = TIER_CUT_WEIGHTS[a.tier] || 1.0;
+        const baseCut = 1 - sharedOverPacingRatio;
+        const tierCut = Math.min(baseCut * tierWeight, 1);
+        a.recommended = a.currentSpend * (1 - tierCut);
+      });
+
+      // Normalize to hit exact target
       const rawTotal = sharedAllocations.reduce((s, a) => s + a.recommended, 0);
       const sharedTarget = currentSharedSpend * sharedOverPacingRatio;
       if (rawTotal > 0 && Math.abs(rawTotal - sharedTarget) > 0.01) {
         const normFactor = sharedTarget / rawTotal;
+        sharedAllocations.forEach(a => { a.recommended = Math.max(a.recommended * normFactor, 0.01); });
+      }
+    } else {
+      // Under-pacing: distribute the needed change, respecting IS caps.
+      // changeNeeded can be positive (need more spend) or negative (VLA took enough)
+      let changeNeeded = remainingForShared - currentSharedSpend;
+      if (changeNeeded <= 0) {
+        // VLA allocation consumed enough — shared decreases proportionally
         sharedAllocations.forEach(a => {
-          a.recommended = Math.max(a.recommended * normFactor, 0.01);
+          const proportion = currentSharedSpend > 0 ? (a.currentSpend / currentSharedSpend) : (1 / sharedAllocations.length);
+          a.recommended = Math.max(remainingForShared * proportion, 0.01);
         });
+      } else {
+        // Pass 1: distribute proportionally, cap by IS, track surplus
+        let surplus = 0;
+        const uncappedIndices = [];
+        sharedAllocations.forEach((a, i) => {
+          const proportion = currentSharedSpend > 0 ? (a.currentSpend / currentSharedSpend) : (1 / sharedAllocations.length);
+          const share = changeNeeded * proportion;
+          const desired = a.currentSpend + share;
+          if (a.isCap && desired > a.isCap.cap) {
+            a.recommended = a.isCap.cap;
+            a.isCapped = true;
+            surplus += desired - a.isCap.cap;
+          } else {
+            a.recommended = desired;
+            uncappedIndices.push(i);
+          }
+        });
+
+        // Pass 2: redistribute surplus to uncapped budgets
+        if (surplus > 0 && uncappedIndices.length > 0) {
+          const uncappedSpend = uncappedIndices.reduce((s, i) => s + sharedAllocations[i].currentSpend, 0);
+          uncappedIndices.forEach(i => {
+            const a = sharedAllocations[i];
+            const extraProportion = uncappedSpend > 0 ? (a.currentSpend / uncappedSpend) : (1 / uncappedIndices.length);
+            const extra = surplus * extraProportion;
+            const desired = a.recommended + extra;
+            if (a.isCap && desired > a.isCap.cap) {
+              a.recommended = a.isCap.cap;
+              a.isCapped = true;
+              // Any remaining surplus is truly unabsorbable — stays as gap
+            } else {
+              a.recommended = desired;
+            }
+          });
+        }
       }
     }
 
     // Round and build recommendations
-    sharedAllocations.forEach(({ budget, currentSpend, recommended }) => {
+    sharedAllocations.forEach(({ budget, currentSpend, recommended, tier, isCapped, isCap }) => {
+      recommended = Math.max(recommended, accountOverPacing ? 0.01 : 1);
       recommended = Math.round(recommended * 100) / 100;
       recommendedSharedTotal += recommended;
 
       const change = Math.round((recommended - currentSpend) * 100) / 100;
-      if (Math.abs(change) < 0.01) return;
+      if (Math.abs(change) < 0.01 && !isCapped) return;
 
-      const tier = getSharedBudgetTier(budget);
       const tierLabel = tier === CAMPAIGN_TIERS.GENERAL_REGIONAL ? ' (low priority — general/regional)'
         : tier === CAMPAIGN_TIERS.BRAND ? ' (brand — protected)' : '';
       const direction = change >= 0 ? 'increase' : 'decrease';
+
+      let reason;
+      if (isCapped) {
+        const isPercent = Math.round(isCap.maxIS * 1000) / 10;
+        reason = `IS already ${isPercent}% — increase targeting radius to spend more, then raise budget`;
+      } else {
+        reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
+      }
+
       recommendations.push({
         type: 'shared_budget',
         target: budget.name,
@@ -491,7 +527,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         recommendedDailyBudget: recommended,
         change,
         tier,
-        reason: `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`,
+        reason,
+        isCapped,
       });
     });
   }

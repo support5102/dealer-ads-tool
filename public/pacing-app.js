@@ -315,7 +315,7 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
             <span class="rec-recommended ${dir}">$${r.recommendedDailyBudget.toFixed(2)}/day</span>
             <span class="rec-change ${dir}">${sign}$${r.change.toFixed(2)}</span>
           </div>
-          <div class="rec-reason">${esc(r.reason)}</div>
+          <div class="rec-reason"${r.isCapped ? ' style="color:#fbbf24"' : ''}>${r.isCapped ? '⚠ ' : ''}${esc(r.reason)}</div>
         </div>
       </div>
     `;
