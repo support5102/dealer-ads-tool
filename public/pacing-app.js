@@ -273,7 +273,7 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     const setTotal = totalSetBudget || 0;
     // Budget setting gap (what you control)
     const setGap = requiredDailyRate - setTotal;
-    const setGapColor = Math.abs(setGap) < 1 ? '#4ade80' : (setGap > 0 ? '#4ade80' : '#f87171');
+    const setGapColor = Math.abs(setGap) < 1 ? '#4ade80' : (setGap > 0 ? '#fb923c' : '#f87171');
     const setGapLabel = setGap > 0 ? 'Under by' : (setGap < 0 ? 'Over by' : 'On target');
     // Actual spend gap (what's really happening)
     const spendGap = requiredDailyRate - currentDailyTotal;

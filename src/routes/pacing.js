@@ -408,6 +408,9 @@ function createPacingRouter(config, deps = {}) {
         .sort((a, b) => a.impressionShare - b.impressionShare);
 
       const response = { customerId: customerId.replace(/-/g, ''), ...recommendation, campaignIS };
+      if (lastChange.changeDate) {
+        response.changeDate = lastChange.changeDate;
+      }
       if (postChangeAvg && postChangeAvg.daysTracked > 0) {
         response.postChangeAvg = postChangeAvg;
       }

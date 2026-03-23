@@ -349,13 +349,18 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       // Under-pacing: IS-driven allocation
       recommended = currentSpend;
       if (is != null && is < VLA_IS_TARGET.min) {
-        // Uncapped IS-driven boost — if IS is 25% and target is 75%, boost = 3x.
-        // Allows dealers to fully capture available VLA traffic.
-        const boost = VLA_IS_TARGET.min / Math.max(is, 0.01);
+        // IS-driven boost capped at 3x current spend.
+        // Beyond 3x, the campaign likely has feed/targeting issues, not just budget.
+        const MAX_VLA_BOOST = 3.0;
+        const rawBoost = VLA_IS_TARGET.min / Math.max(is, 0.01);
+        const boost = Math.min(rawBoost, MAX_VLA_BOOST);
         recommended = currentSpend * boost;
         reason = `IS ${(is * 100).toFixed(1)}% below 75% target`
           + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')
           + ` — increase to capture more VLA traffic`;
+        if (rawBoost > MAX_VLA_BOOST) {
+          reason += ` (capped at ${MAX_VLA_BOOST}x — check feed/targeting if IS remains low)`;
+        }
       } else if (is != null && is > VLA_IS_TARGET.max) {
         const scale = VLA_IS_TARGET.max / is;
         recommended = currentSpend * scale;
@@ -374,7 +379,20 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     return { campaign, recommended, reason, currentSpend, budgetSetting: campaign.dailyBudget };
   });
 
-  const totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
+  let totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
+
+  // Guard: VLA total can't exceed the account's required daily rate.
+  // If VLAs want more than the whole account needs, scale them down proportionally
+  // so shared/brand budgets still get reasonable allocations.
+  if (!accountOverPacing && totalVlaRecommended > requiredDailyRate && totalVlaRecommended > 0) {
+    const scaleFactor = requiredDailyRate * 0.70 / totalVlaRecommended; // VLAs get max 70% of target
+    for (const v of vlaAllocations) {
+      v.recommended = Math.round(v.recommended * scaleFactor * 100) / 100;
+      if (!v.reason) continue;
+      v.reason += ' (scaled — VLA total exceeded account target)';
+    }
+    totalVlaRecommended = vlaAllocations.reduce((s, v) => s + v.recommended, 0);
+  }
 
   // --- Step 2: Shared budgets ---
   // Over-pacing: larger proportional decrease (absorbs more of the cut).
@@ -510,6 +528,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
 
     // Round and build recommendations
     sharedAllocations.forEach(({ budget, currentSpend, recommended, tier, isCapped, isCap }) => {
+      // Brand floor: never cut brand below its set budget during under-pacing.
+      // Brand needs to maintain local branded search coverage.
+      if (!accountOverPacing && tier === CAMPAIGN_TIERS.BRAND) {
+        recommended = Math.max(recommended, budget.dailyBudget || currentSpend);
+      }
       recommended = Math.max(recommended, accountOverPacing ? 0.01 : 1);
       recommended = Math.round(recommended * 100) / 100;
       recommendedSharedTotal += recommended;

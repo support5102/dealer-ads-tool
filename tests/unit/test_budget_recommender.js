@@ -355,7 +355,7 @@ describe('distributeAccountBudget', () => {
     expect(sharedRec.recommendedDailyBudget).toBeGreaterThan(20);
   });
 
-  test('VLA boost is IS-driven without arbitrary cap', () => {
+  test('VLA boost is IS-driven, capped at 3x current spend', () => {
     const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 });
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
@@ -369,9 +369,10 @@ describe('distributeAccountBudget', () => {
     });
 
     const vlaRec = recommendations.find(r => r.isVla);
-    // 0.75 / 0.10 = 7.5x → $50 * 7.5 = $375 (uncapped, IS-driven)
-    expect(vlaRec.recommendedDailyBudget).toBe(375);
+    // 0.75 / 0.10 = 7.5x raw, capped at 3x → $50 * 3 = $150
+    expect(vlaRec.recommendedDailyBudget).toBe(150);
     expect(vlaRec.reason).toMatch(/below 75% target/);
+    expect(vlaRec.reason).toMatch(/capped at 3x/);
   });
 
   test('skips non-VLA dedicated campaigns (not adjusted)', () => {
