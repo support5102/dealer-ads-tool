@@ -426,10 +426,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     }
 
     // First pass: compute baseline values
+    // Brand budgets are local-radius only — no IS cap or radius expansion suggestion
     const sharedAllocations = budgets.map(budget => {
       const currentSpend = actualDailySpend(budget, spendMap, actualOnly);
       const tier = getSharedBudgetTier(budget);
-      const isCap = getISCap(budget, currentSpend);
+      const isCap = tier === CAMPAIGN_TIERS.BRAND ? null : getISCap(budget, currentSpend);
       return { budget, currentSpend, tier, isCap, recommended: currentSpend, isCapped: false };
     });
 
