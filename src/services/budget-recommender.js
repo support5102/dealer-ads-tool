@@ -194,29 +194,29 @@ function buildSpendMapFromDaily(dailyBreakdown, changeDate, excludeCampaigns) {
 
 /**
  * Calculates actual daily spend for a budget by summing linked campaign spend.
- * Falls back to dailyBudget setting if no spend data is available.
+ * Falls back to dailyBudget setting if no spend data is available — UNLESS
+ * useActualOnly is true (post-change mode), where $0 means the campaign
+ * genuinely spent nothing since the change, not that data is missing.
+ *
  * @param {Object} budget - Budget with campaigns array and dailyBudget
  * @param {Map<string, number>} spendMap - campaignId → daily spend rate
+ * @param {boolean} [useActualOnly] - When true, never fall back to budget setting
  * @returns {number} Actual daily spend rate (or budget setting as fallback)
  */
-function actualDailySpend(budget, spendMap) {
+function actualDailySpend(budget, spendMap, useActualOnly) {
   if (spendMap.size === 0) {
-    // No spend data available — fall back to budget setting
-    return budget.dailyBudget || 0;
+    return useActualOnly ? 0 : (budget.dailyBudget || 0);
   }
   const campaigns = budget.campaigns || [];
   if (campaigns.length === 0 && budget.campaignId) {
-    // Dedicated budget with single campaignId (legacy shape)
     const spend = spendMap.get(String(budget.campaignId));
-    return spend != null ? spend : (budget.dailyBudget || 0);
+    return spend != null ? spend : (useActualOnly ? 0 : (budget.dailyBudget || 0));
   }
   if (campaigns.length === 0) {
-    // Shared budget with no linked campaigns — fall back to budget setting
-    return budget.dailyBudget || 0;
+    return useActualOnly ? 0 : (budget.dailyBudget || 0);
   }
   const totalSpend = campaigns.reduce((sum, c) => sum + (spendMap.get(String(c.campaignId)) || 0), 0);
-  // If none of the linked campaigns had spend data, fall back to budget setting
-  return totalSpend > 0 ? totalSpend : (budget.dailyBudget || 0);
+  return totalSpend > 0 ? totalSpend : (useActualOnly ? 0 : (budget.dailyBudget || 0));
 }
 
 /**
@@ -251,22 +251,27 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // Use post-change daily averages when a budget change happened this month,
   // so "Current Daily Spend" reflects actual spend since the change — not the
   // full-month average which would be skewed by pre-change rates.
-  const spendMap = (dailyBreakdown && changeDate)
+  const hasPostChangeData = !!(dailyBreakdown && changeDate);
+  const spendMap = hasPostChangeData
     ? buildSpendMapFromDaily(dailyBreakdown, changeDate, excludeCampaigns)
     : buildSpendMap(campaignSpend, daysElapsed);
+
+  // When using post-change data, $0 in the spendMap means the campaign genuinely
+  // spent nothing since the change — don't fall back to budget settings.
+  const actualOnly = hasPostChangeData;
 
   // Separate VLA vs non-VLA dedicated campaigns
   const allDedicated = dedicatedBudgets || [];
   const vlaCampaigns = allDedicated.filter(isVlaCampaign);
   const nonVlaDedicated = allDedicated.filter(c => !isVlaCampaign(c));
-  const nonVlaDedicatedSpend = nonVlaDedicated.reduce((s, c) => s + actualDailySpend(c, spendMap), 0);
+  const nonVlaDedicatedSpend = nonVlaDedicated.reduce((s, c) => s + actualDailySpend(c, spendMap, actualOnly), 0);
 
   // Budget available for VLA + shared (subtract non-VLA dedicated which we don't adjust)
   const targetForAdjustable = Math.max(requiredDailyRate - nonVlaDedicatedSpend, 0);
 
-  const currentVlaSpend = vlaCampaigns.reduce((s, c) => s + actualDailySpend(c, spendMap), 0);
+  const currentVlaSpend = vlaCampaigns.reduce((s, c) => s + actualDailySpend(c, spendMap, actualOnly), 0);
   const budgets = sharedBudgets || [];
-  const currentSharedSpend = budgets.reduce((s, b) => s + actualDailySpend(b, spendMap), 0);
+  const currentSharedSpend = budgets.reduce((s, b) => s + actualDailySpend(b, spendMap, actualOnly), 0);
   const currentAdjustableSpend = currentVlaSpend + currentSharedSpend;
 
   // Over-pacing: current actual spend exceeds the target.
@@ -309,7 +314,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     const campIS = isMap.get(campaign.campaignId);
     const is = campIS?.impressionShare;
     const bls = campIS?.budgetLostShare;
-    const currentSpend = actualDailySpend(campaign, spendMap);
+    const currentSpend = actualDailySpend(campaign, spendMap, actualOnly);
 
     let recommended;
     let reason;
@@ -400,7 +405,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   if (budgets.length > 0) {
     // First pass: compute tier-weighted recommended values
     const sharedAllocations = budgets.map(budget => {
-      const currentSpend = actualDailySpend(budget, spendMap);
+      const currentSpend = actualDailySpend(budget, spendMap, actualOnly);
       let recommended;
       if (accountOverPacing) {
         // Apply tier-weighted cut: lower-tier budgets decrease more
