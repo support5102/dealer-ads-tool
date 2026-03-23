@@ -215,13 +215,16 @@ function createPacingRouter(config, deps = {}) {
 
       const adjustedSpend = applySpendOverrides(campaignSpend, searchName, redirectedSpend);
 
-      // Compute post-change daily average if a budget was changed this month
+      // Fetch daily breakdown if a budget was changed this month — used for both
+      // the post-change avg card AND to rebase "Current Daily Spend" to post-change rates
+      let dailyBreakdown = null;
       let postChangeAvg = null;
+      const override = ACCOUNT_OVERRIDES[searchName];
+      const excludeNames = override ? override.excludeCampaigns : [];
+
       if (lastChange.changeDate) {
         try {
-          const dailyBreakdown = await googleAds.getDailySpendBreakdown(restCtx);
-          const override = ACCOUNT_OVERRIDES[searchName];
-          const excludeNames = override ? override.excludeCampaigns : [];
+          dailyBreakdown = await googleAds.getDailySpendBreakdown(restCtx);
           postChangeAvg = computePostChangeAvg(dailyBreakdown, lastChange.changeDate, excludeNames);
         } catch (err) {
           console.warn('Daily breakdown fetch failed (non-fatal):', err.message);
@@ -245,6 +248,9 @@ function createPacingRouter(config, deps = {}) {
         year: now.getFullYear(),
         month: now.getMonth() + 1,
         currentDay: now.getDate(),
+        dailyBreakdown: dailyBreakdown || undefined,
+        changeDate: lastChange.changeDate || undefined,
+        excludeCampaigns: excludeNames,
       });
 
       const response = { customerId: customerId.replace(/-/g, ''), ...recommendation };

@@ -152,6 +152,47 @@ function buildSpendMap(campaignSpend, daysElapsed) {
 }
 
 /**
+ * Builds a spend map from daily breakdown data, only counting days on or after
+ * the last budget change. This gives the actual daily spend rate since the
+ * change was made, not the full-month average.
+ *
+ * @param {Object[]} dailyBreakdown - From getDailySpendBreakdown (date, campaignId, campaignName, spend)
+ * @param {string} changeDate - YYYY-MM-DD of the last budget change
+ * @param {string[]} [excludeCampaigns] - Campaign names to exclude (lowercase)
+ * @returns {Map<string, number>} campaignId → post-change daily spend rate
+ */
+function buildSpendMapFromDaily(dailyBreakdown, changeDate, excludeCampaigns) {
+  const map = new Map();
+  if (!dailyBreakdown || !changeDate) return map;
+
+  const excludeSet = new Set((excludeCampaigns || []).map(n => n.toLowerCase()));
+
+  // Filter to post-change rows and exclude overridden campaigns
+  const postChangeRows = dailyBreakdown.filter(
+    r => r.date >= changeDate && !excludeSet.has((r.campaignName || '').toLowerCase())
+  );
+
+  // Count distinct days to compute average
+  const allDates = new Set(postChangeRows.map(r => r.date));
+  const daysTracked = allDates.size;
+  if (daysTracked === 0) return map;
+
+  // Sum spend per campaign across post-change days
+  const campaignTotals = new Map();
+  for (const row of postChangeRows) {
+    const id = String(row.campaignId);
+    campaignTotals.set(id, (campaignTotals.get(id) || 0) + (row.spend || 0));
+  }
+
+  // Convert to daily average
+  for (const [id, total] of campaignTotals) {
+    map.set(id, total / daysTracked);
+  }
+
+  return map;
+}
+
+/**
  * Calculates actual daily spend for a budget by summing linked campaign spend.
  * Falls back to dailyBudget setting if no spend data is available.
  * @param {Object} budget - Budget with campaigns array and dailyBudget
@@ -199,14 +240,20 @@ function actualDailySpend(budget, spendMap) {
  * @param {Object[]} [params.campaignSpend] - From getMonthSpend
  * @returns {Object} { recommendations, budgetSummary }
  */
-function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend }) {
+function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend, dailyBreakdown, changeDate, excludeCampaigns }) {
   if (pacing.daysRemaining === 0) {
     return { recommendations: [], budgetSummary: null };
   }
 
   const requiredDailyRate = pacing.remainingBudget / pacing.daysRemaining;
   const daysElapsed = pacing.daysElapsed || 1;
-  const spendMap = buildSpendMap(campaignSpend, daysElapsed);
+
+  // Use post-change daily averages when a budget change happened this month,
+  // so "Current Daily Spend" reflects actual spend since the change — not the
+  // full-month average which would be skewed by pre-change rates.
+  const spendMap = (dailyBreakdown && changeDate)
+    ? buildSpendMapFromDaily(dailyBreakdown, changeDate, excludeCampaigns)
+    : buildSpendMap(campaignSpend, daysElapsed);
 
   // Separate VLA vs non-VLA dedicated campaigns
   const allDedicated = dedicatedBudgets || [];
@@ -463,6 +510,9 @@ function generateRecommendation(params) {
     month,
     currentDay,
     dayWeights,
+    dailyBreakdown,
+    changeDate,
+    excludeCampaigns,
   } = params;
 
   // Sum all campaign spend
@@ -489,6 +539,9 @@ function generateRecommendation(params) {
     sharedBudgets,
     impressionShareData: impressionShare,
     campaignSpend,
+    dailyBreakdown,
+    changeDate,
+    excludeCampaigns,
   });
 
   // Impression share summary
@@ -520,6 +573,7 @@ module.exports = {
   isVlaCampaign,
   getCampaignTier,
   getSharedBudgetTier,
+  buildSpendMapFromDaily,
   VLA_IS_TARGET,
   CAMPAIGN_TIERS,
 };
