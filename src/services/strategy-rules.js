@@ -246,12 +246,7 @@ function detectDealerMake(campaignName) {
  * excludeCampaigns: campaign names to remove from this account's spend.
  * redirectSpendTo: lowercase account name that should receive the excluded spend.
  */
-const ACCOUNT_OVERRIDES = {
-  'alan jay auto group': {
-    excludeCampaigns: ['Pmax- Used VLA - Allstar Car Sales'],
-    redirectSpendTo: 'allstar car sales',
-  },
-};
+const ACCOUNT_OVERRIDES = {};
 
 module.exports = {
   CPC_RANGES,
