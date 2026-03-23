@@ -299,7 +299,7 @@ async function getMonthSpend(restCtx) {
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros
      FROM campaign
-     WHERE segments.date DURING THIS_MONTH AND campaign.status = 'ENABLED'`,
+     WHERE segments.date DURING THIS_MONTH AND campaign.status != 'REMOVED'`,
     restCtx.loginCustomerId
   );
 
@@ -820,7 +820,7 @@ async function getDailySpendBreakdown(restCtx) {
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros
      FROM campaign
-     WHERE segments.date DURING THIS_MONTH AND campaign.status = 'ENABLED'`,
+     WHERE segments.date DURING THIS_MONTH AND campaign.status != 'REMOVED'`,
     restCtx.loginCustomerId
   );
 

@@ -118,6 +118,18 @@ describe('applySpendOverrides', () => {
     const result = applySpendOverrides(mixed, 'alan jay auto group', []);
     expect(result).toHaveLength(0);
   });
+
+  test('flexible match: account name contains override key', () => {
+    const result = applySpendOverrides(spend, 'alan jay auto group - main', []);
+    expect(result).toHaveLength(2);
+    expect(result.find(c => c.campaignName.includes('Allstar'))).toBeUndefined();
+  });
+
+  test('flexible match: override key contains account name', () => {
+    const result = applySpendOverrides(spend, 'alan jay auto', []);
+    expect(result).toHaveLength(2);
+    expect(result.find(c => c.campaignName.includes('Allstar'))).toBeUndefined();
+  });
 });
 
 // ===========================================================================
@@ -130,6 +142,11 @@ describe('findRedirectsTo', () => {
     expect(redirects).toHaveLength(1);
     expect(redirects[0].sourceAccount).toBe('alan jay auto group');
     expect(redirects[0].campaignNames).toContain('Pmax- Used VLA - Allstar Car Sales');
+  });
+
+  test('flexible match: finds redirect when target name is partial', () => {
+    const redirects = findRedirectsTo('allstar car');
+    expect(redirects).toHaveLength(1);
   });
 
   test('returns empty for accounts with no redirects', () => {

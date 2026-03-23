@@ -61,6 +61,30 @@ function createSheetsClient(accessToken) {
 }
 
 /**
+ * Finds the override entry for an account name using flexible matching.
+ * Matches if the override key is contained in the account name or vice versa.
+ * This handles variations like "Alan Jay Auto" vs "Alan Jay Auto Group"
+ * vs "Alan Jay Automotive Group" in Google Ads account names.
+ *
+ * @param {string} accountName - Lowercase account name
+ * @returns {{ key: string, override: Object }|null}
+ */
+function findOverride(accountName) {
+  if (!accountName) return null;
+  // Exact match first
+  if (ACCOUNT_OVERRIDES[accountName]) {
+    return { key: accountName, override: ACCOUNT_OVERRIDES[accountName] };
+  }
+  // Flexible match: account name contains override key or vice versa
+  for (const [key, override] of Object.entries(ACCOUNT_OVERRIDES)) {
+    if (accountName.includes(key) || key.includes(accountName)) {
+      return { key, override };
+    }
+  }
+  return null;
+}
+
+/**
  * Applies ACCOUNT_OVERRIDES to campaign spend data.
  * - Source accounts: excluded campaigns are filtered out
  * - Target accounts: excluded campaigns' spend is added in
@@ -71,12 +95,12 @@ function createSheetsClient(accessToken) {
  * @returns {Object[]} Filtered campaign spend
  */
 function applySpendOverrides(campaignSpend, accountName, redirectedSpend) {
-  const override = ACCOUNT_OVERRIDES[accountName];
+  const match = findOverride(accountName);
   let filtered = campaignSpend;
 
   // Source account: remove excluded campaigns
-  if (override && override.excludeCampaigns) {
-    const excludeSet = new Set(override.excludeCampaigns.map(n => n.toLowerCase()));
+  if (match && match.override.excludeCampaigns) {
+    const excludeSet = new Set(match.override.excludeCampaigns.map(n => n.toLowerCase()));
     filtered = campaignSpend.filter(c => !excludeSet.has(c.campaignName.toLowerCase()));
   }
 
@@ -91,6 +115,7 @@ function applySpendOverrides(campaignSpend, accountName, redirectedSpend) {
 /**
  * Finds campaigns that should be redirected TO the given account name.
  * Scans all overrides for redirectSpendTo matching the target account.
+ * Uses flexible matching for both source and target account names.
  *
  * @param {string} targetName - Lowercase account name
  * @returns {{ sourceAccount: string, campaignNames: string[] }[]}
@@ -98,7 +123,10 @@ function applySpendOverrides(campaignSpend, accountName, redirectedSpend) {
 function findRedirectsTo(targetName) {
   const redirects = [];
   for (const [source, override] of Object.entries(ACCOUNT_OVERRIDES)) {
-    if (override.redirectSpendTo === targetName && override.excludeCampaigns) {
+    if (!override.excludeCampaigns || !override.redirectSpendTo) continue;
+    const target = override.redirectSpendTo;
+    // Flexible match: target contains redirectSpendTo or vice versa
+    if (target === targetName || targetName.includes(target) || target.includes(targetName)) {
       redirects.push({ sourceAccount: source, campaignNames: override.excludeCampaigns });
     }
   }
@@ -257,7 +285,10 @@ function createPacingRouter(config, deps = {}) {
         // Fetch spend from source accounts to capture redirected campaigns
         const accounts = req.session.accounts || [];
         for (const redirect of redirects) {
-          const sourceAcct = accounts.find(a => (a.name || '').toLowerCase() === redirect.sourceAccount);
+          const sourceAcct = accounts.find(a => {
+            const n = (a.name || '').toLowerCase();
+            return n === redirect.sourceAccount || n.includes(redirect.sourceAccount) || redirect.sourceAccount.includes(n);
+          });
           if (sourceAcct) {
             const sourceCtx = { ...restCtx, customerId: sourceAcct.id.replace(/-/g, '') };
             const nameSet = new Set(redirect.campaignNames.map(n => n.toLowerCase()));
@@ -287,8 +318,8 @@ function createPacingRouter(config, deps = {}) {
       let dailyBreakdown = null;
       let postChangeAvg = null;
       let postChangeWarning = null;
-      const override = ACCOUNT_OVERRIDES[searchName];
-      const excludeNames = override ? override.excludeCampaigns : [];
+      const overrideMatch = findOverride(searchName);
+      const excludeNames = overrideMatch ? overrideMatch.override.excludeCampaigns : [];
 
       if (lastChange.changeDate) {
         try {
@@ -363,4 +394,4 @@ function createPacingRouter(config, deps = {}) {
   return router;
 }
 
-module.exports = { createPacingRouter, applySpendOverrides, findRedirectsTo, computePostChangeAvg };
+module.exports = { createPacingRouter, applySpendOverrides, findRedirectsTo, findOverride, computePostChangeAvg };
