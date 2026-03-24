@@ -370,10 +370,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       } else {
         reason = null;
       }
-      // If losing impressions to budget, never recommend less than the current
-      // set budget — the campaign is already budget-constrained, cutting it
-      // would only worsen IS.
-      if (bls != null && bls > 0.05 && recommended < (campaign.dailyBudget || 0)) {
+      // Under-pacing: floor VLA at set budget unless IS > 90% (where reducing
+      // is intentional to curb CPC inflation). An under-pacing account should
+      // never cut VLA budgets that are performing at or below target IS.
+      const isAboveCeiling = is != null && is > VLA_IS_TARGET.max;
+      if (!isAboveCeiling && recommended < (campaign.dailyBudget || 0)) {
         recommended = campaign.dailyBudget;
       }
       recommended = Math.max(recommended, 1);

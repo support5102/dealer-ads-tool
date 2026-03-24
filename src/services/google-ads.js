@@ -384,13 +384,54 @@ async function getImpressionShare(restCtx, sinceDate) {
 }
 
 /**
- * Fetches vehicle inventory from shopping product feed via REST.
+ * Fetches vehicle inventory count from VLA feed data.
+ *
+ * Strategy:
+ * 1. Primary: shopping_performance_view — counts unique products that actually
+ *    served in VLA/Shopping campaigns in the last 14 days. Works regardless of
+ *    Merchant Center linking level (MCC vs sub-account).
+ * 2. Fallback: shopping_product with status ELIGIBLE — direct feed query.
  *
  * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
- * @returns {Promise<Object>} { items: [{ itemId, condition, brand, model }], truncated: boolean }
+ * @returns {Promise<Object>} { newCount, usedCount, totalCount, source }
  */
 async function getInventory(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
+
+  // Primary: count unique vehicles from shopping performance (actually serving)
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT segments.product_item_id, segments.product_condition
+       FROM shopping_performance_view
+       WHERE segments.date DURING LAST_14_DAYS
+       LIMIT 10000`,
+      restCtx.loginCustomerId
+    );
+
+    if (rows.length > 0) {
+      // Deduplicate by item_id — same vehicle can serve multiple times
+      const seen = new Map();
+      for (const row of rows) {
+        const id = row.segments?.productItemId;
+        if (id && !seen.has(id)) {
+          seen.set(id, (row.segments?.productCondition || '').toUpperCase());
+        }
+      }
+      let newCount = 0;
+      let usedCount = 0;
+      for (const condition of seen.values()) {
+        if (condition === 'NEW') newCount++;
+        else if (condition === 'USED' || condition === 'REFURBISHED') usedCount++;
+        else newCount++; // default to new if condition not set
+      }
+      return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance' };
+    }
+  } catch (err) {
+    console.warn('getInventory shopping_performance_view failed (trying fallback):', err.message);
+  }
+
+  // Fallback: direct shopping_product query
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
@@ -401,18 +442,17 @@ async function getInventory(restCtx) {
       restCtx.loginCustomerId
     );
 
-    return {
-      items: rows.map(row => ({
-        itemId: row.shoppingProduct?.itemId || null,
-        condition: row.shoppingProduct?.condition || null,
-        brand: row.shoppingProduct?.brand || null,
-      })),
-      truncated: rows.length >= 5000,
-    };
+    let newCount = 0;
+    let usedCount = 0;
+    for (const row of rows) {
+      const condition = (row.shoppingProduct?.condition || '').toUpperCase();
+      if (condition === 'USED' || condition === 'REFURBISHED') usedCount++;
+      else newCount++;
+    }
+    return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product' };
   } catch (err) {
-    // Non-fatal: shopping_product may not exist for this account type
-    console.warn('getInventory failed (non-fatal):', err.message);
-    return { items: [], truncated: false };
+    console.warn('getInventory fallback also failed (non-fatal):', err.message);
+    return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none' };
   }
 }
 

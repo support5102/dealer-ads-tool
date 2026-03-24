@@ -239,71 +239,77 @@ describe('getImpressionShare', () => {
 
 describe('getInventory', () => {
   const defaultRows = [
-    { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' } },
-    { shoppingProduct: { itemId: 'VIN002', condition: 'NEW', brand: 'Honda' } },
-    { shoppingProduct: { itemId: 'VIN003', condition: 'USED', brand: 'Toyota' } },
+    { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
+    { segments: { productItemId: 'VIN002', productCondition: 'NEW' } },
+    { segments: { productItemId: 'VIN003', productCondition: 'USED' } },
   ];
 
-  test('returns inventory items with condition and brand', async () => {
-    const { items, truncated } = await getInventory(fakeCtx(defaultRows));
+  test('returns new and used counts from shopping performance data', async () => {
+    const result = await getInventory(fakeCtx(defaultRows));
 
-    expect(items).toHaveLength(3);
-    expect(truncated).toBe(false);
-    expect(items[0]).toEqual({
-      itemId: 'VIN001',
-      condition: 'NEW',
-      brand: 'Honda',
-    });
-    expect(items[2]).toEqual({
-      itemId: 'VIN003',
-      condition: 'USED',
-      brand: 'Toyota',
-    });
+    expect(result.newCount).toBe(2);
+    expect(result.usedCount).toBe(1);
+    expect(result.totalCount).toBe(3);
+    expect(result.source).toBe('shopping_performance');
   });
 
-  test('returns empty items array when no inventory', async () => {
-    const { items, truncated } = await getInventory(fakeCtx([]));
-    expect(items).toEqual([]);
-    expect(truncated).toBe(false);
+  test('returns zeros when no inventory', async () => {
+    const result = await getInventory(fakeCtx([]));
+    expect(result.newCount).toBe(0);
+    expect(result.usedCount).toBe(0);
+    expect(result.totalCount).toBe(0);
   });
 
-  test('handles missing brand as null', async () => {
-    const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: undefined } },
-    ]));
-    expect(items[0].brand).toBeNull();
+  test('deduplicates by item_id', async () => {
+    const rows = [
+      { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
+      { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
+      { segments: { productItemId: 'VIN002', productCondition: 'USED' } },
+    ];
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.totalCount).toBe(2);
+    expect(result.newCount).toBe(1);
+    expect(result.usedCount).toBe(1);
   });
 
-  test('handles many inventory items without truncation flag', async () => {
-    const products = Array.from({ length: 500 }, (_, i) => ({
-      shoppingProduct: { itemId: `VIN${i}`, condition: i % 2 === 0 ? 'NEW' : 'USED', brand: 'Honda' },
+  test('defaults to new when condition is not set', async () => {
+    const rows = [
+      { segments: { productItemId: 'VIN001', productCondition: '' } },
+      { segments: { productItemId: 'VIN002' } },
+    ];
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.newCount).toBe(2);
+    expect(result.usedCount).toBe(0);
+  });
+
+  test('handles large inventory without error', async () => {
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      segments: { productItemId: `VIN${i}`, productCondition: i % 2 === 0 ? 'NEW' : 'USED' },
     }));
-    const { items, truncated } = await getInventory(fakeCtx(products));
-    expect(items).toHaveLength(500);
-    expect(truncated).toBe(false);
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.totalCount).toBe(500);
+    expect(result.newCount).toBe(250);
+    expect(result.usedCount).toBe(250);
   });
 
-  test('sets truncated flag when items reach limit', async () => {
-    const products = Array.from({ length: 5000 }, (_, i) => ({
-      shoppingProduct: { itemId: `VIN${i}`, condition: 'NEW', brand: 'Honda' },
-    }));
-    const { items, truncated } = await getInventory(fakeCtx(products));
-    expect(items).toHaveLength(5000);
-    expect(truncated).toBe(true);
-  });
-
-  test('handles empty brand gracefully', async () => {
-    const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: { itemId: 'VIN999', condition: 'NEW', brand: '' } },
-    ]));
-    expect(items[0].brand).toBeNull();
-  });
-
-  test('handles null shoppingProduct gracefully', async () => {
-    const { items } = await getInventory(fakeCtx([
-      { shoppingProduct: null },
-    ]));
-    expect(items[0].itemId).toBeNull();
-    expect(items[0].brand).toBeNull();
+  test('falls back to shopping_product when performance view fails', async () => {
+    let callCount = 0;
+    const ctx = {
+      accessToken: 'fake', developerToken: 'fake', customerId: '123', loginCustomerId: '999',
+      _queryFn: async () => {
+        callCount++;
+        if (callCount === 1) throw new Error('shopping_performance_view not supported');
+        // Fallback returns shopping_product format
+        return [
+          { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' } },
+          { shoppingProduct: { itemId: 'VIN002', condition: 'USED', brand: 'Toyota' } },
+        ];
+      },
+    };
+    const result = await getInventory(ctx);
+    expect(result.source).toBe('shopping_product');
+    expect(result.newCount).toBe(1);
+    expect(result.usedCount).toBe(1);
+    expect(result.totalCount).toBe(2);
   });
 });

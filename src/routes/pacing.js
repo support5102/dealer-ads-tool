@@ -342,11 +342,10 @@ function createPacingRouter(config, deps = {}) {
         }
       }
 
-      // Count new vehicle inventory
-      const items = (inventoryResult && inventoryResult.items) || [];
-      const newVehicleCount = items.filter(
-        item => item.condition === 'NEW'
-      ).length;
+      // Vehicle inventory from VLA feed
+      const newVehicleCount = (inventoryResult && inventoryResult.newCount) || 0;
+      const usedVehicleCount = (inventoryResult && inventoryResult.usedCount) || 0;
+      const inventorySource = (inventoryResult && inventoryResult.source) || 'none';
 
       // Geo expansion: fetch proximity targets + geographic performance for IS-capped campaigns
       let geoTargets = null;
@@ -408,6 +407,11 @@ function createPacingRouter(config, deps = {}) {
         .sort((a, b) => a.impressionShare - b.impressionShare);
 
       const response = { customerId: customerId.replace(/-/g, ''), ...recommendation, campaignIS };
+      // Enrich inventory with used count and data source
+      if (response.inventory) {
+        response.inventory.usedCount = usedVehicleCount;
+        response.inventory.source = inventorySource;
+      }
       if (lastChange.changeDate) {
         response.changeDate = lastChange.changeDate;
       }

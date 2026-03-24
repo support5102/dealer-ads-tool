@@ -44,12 +44,10 @@ const SAMPLE_IMPRESSION_SHARE = [
 ];
 
 const SAMPLE_INVENTORY = {
-  items: [
-    { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' },
-    { itemId: 'VIN002', condition: 'NEW', brand: 'Honda' },
-    { itemId: 'VIN003', condition: 'USED', brand: 'Honda' },
-  ],
-  truncated: false,
+  newCount: 2,
+  usedCount: 1,
+  totalCount: 3,
+  source: 'shopping_performance',
 };
 
 const SAMPLE_GOALS = [
@@ -152,12 +150,14 @@ describe('GET /api/pacing', () => {
     expect(res.body.customerId).toBe('0000000000');
   });
 
-  test('counts only NEW vehicles for inventory', async () => {
+  test('returns new and used vehicle counts from VLA feed', async () => {
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
 
     // SAMPLE_INVENTORY has 2 NEW + 1 USED
     expect(res.body.inventory.count).toBe(2);
+    expect(res.body.inventory.usedCount).toBe(1);
+    expect(res.body.inventory.source).toBe('shopping_performance');
   });
 
   test('includes pacing calculations with correct budget', async () => {
@@ -216,12 +216,13 @@ describe('GET /api/pacing', () => {
     expect(res.body.error).toMatch(/Could not load goals|No goal found/);
   });
 
-  test('handles inventory with missing items array', async () => {
-    googleAds.getInventory.mockResolvedValue({});
+  test('handles inventory with empty result', async () => {
+    googleAds.getInventory.mockResolvedValue({ newCount: 0, usedCount: 0, totalCount: 0, source: 'none' });
 
     const agent = await authenticatedAgent(app);
     const res = await agent.get('/api/pacing?customerId=1234567890&accountName=Honda%20of%20Springfield').expect(200);
     expect(res.body.inventory.count).toBe(0);
+    expect(res.body.inventory.source).toBe('none');
   });
 
   test('returns 404 when readGoals fails (non-fatal, returns empty goals)', async () => {
