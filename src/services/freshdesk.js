@@ -11,7 +11,11 @@
 const axios = require('axios');
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
-const STATUS_LABELS = { 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed', 6: 'On-Hold' };
+const STATUS_LABELS = {
+  2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed',
+  6: 'Waiting on Reply', 10: 'Task in Azure', 11: 'Reopened',
+  12: 'Assigned', 13: 'In Progress', 14: 'Service Feedback',
+};
 
 /**
  * Creates a Freshdesk API client.
@@ -63,7 +67,8 @@ function createClient(freshdeskConfig) {
    */
   async function listTickets(agentId) {
     try {
-      const query = `"agent_id:${agentId} AND (status:2 OR status:3)"`;
+      // Include all active statuses (exclude only Resolved=4 and Closed=5)
+      const query = `"agent_id:${agentId} AND (status:2 OR status:3 OR status:6 OR status:10 OR status:11 OR status:12 OR status:13 OR status:14)"`;
       const { data } = await http.get('/search/tickets', {
         params: { query },
       });

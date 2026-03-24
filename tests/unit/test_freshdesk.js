@@ -82,7 +82,7 @@ describe('listTickets', () => {
     const client = createClient(FAKE_CONFIG);
     await client.listTickets(99);
     expect(mockGet).toHaveBeenCalledWith('/search/tickets', {
-      params: { query: '"agent_id:99 AND (status:2 OR status:3)"' },
+      params: { query: '"agent_id:99 AND (status:2 OR status:3 OR status:6 OR status:10 OR status:11 OR status:12 OR status:13 OR status:14)"' },
     });
   });
 
