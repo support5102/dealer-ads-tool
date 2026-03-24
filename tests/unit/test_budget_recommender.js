@@ -327,7 +327,7 @@ describe('distributeAccountBudget', () => {
     expect(sharedRec.recommendedDailyBudget).toBeGreaterThan(50);
   });
 
-  test('VLA with high IS gets reduced, freeing budget for shared', () => {
+  test('VLA with high IS stays at set budget when under-pacing', () => {
     const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 }); // $100/day needed
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 80 },
@@ -343,16 +343,10 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    // VLA decreases (96% > 90% target)
+    // Under-pacing: VLA stays at set budget despite IS > 90% — account needs every dollar
     const vlaRec = recommendations.find(r => r.isVla);
-    expect(vlaRec).toBeDefined();
-    expect(vlaRec.recommendedDailyBudget).toBeLessThan(80);
-    expect(vlaRec.reason).toMatch(/exceeds 90%/);
-
-    // Shared gets more of the pie (total must still hit $100/day)
-    const sharedRec = recommendations.find(r => !r.isVla);
-    expect(sharedRec).toBeDefined();
-    expect(sharedRec.recommendedDailyBudget).toBeGreaterThan(20);
+    // VLA recommended = dailyBudget (floored), change = $0 → filtered out
+    expect(vlaRec).toBeUndefined();
   });
 
   test('VLA boost is IS-driven, capped at 3x current spend', () => {

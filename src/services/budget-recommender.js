@@ -362,19 +362,18 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
           reason += ` (capped at ${MAX_VLA_BOOST}x — check feed/targeting if IS remains low)`;
         }
       } else if (is != null && is > VLA_IS_TARGET.max) {
-        const scale = VLA_IS_TARGET.max / is;
-        recommended = currentSpend * scale;
-        reason = `IS ${(is * 100).toFixed(1)}% exceeds 90% — reduce to avoid CPC inflation`;
+        // IS > 90% but account is under-pacing — keep spend, note the IS.
+        // Reducing VLAs on an under-pacing account worsens the pacing gap
+        // even if CPCs are inflated. The account needs every dollar.
+        reason = `IS ${(is * 100).toFixed(1)}% above 90% — maintaining budget (account under-pacing)`;
       } else if (is != null) {
         reason = `IS ${(is * 100).toFixed(1)}% on target (75-90%)`;
       } else {
         reason = null;
       }
-      // Under-pacing: floor VLA at set budget unless IS > 90% (where reducing
-      // is intentional to curb CPC inflation). An under-pacing account should
-      // never cut VLA budgets that are performing at or below target IS.
-      const isAboveCeiling = is != null && is > VLA_IS_TARGET.max;
-      if (!isAboveCeiling && recommended < (campaign.dailyBudget || 0)) {
+      // Under-pacing: always floor VLA at set budget. The account needs
+      // more spend, not less — never cut VLAs when behind on pacing.
+      if (recommended < (campaign.dailyBudget || 0)) {
         recommended = campaign.dailyBudget;
       }
       recommended = Math.max(recommended, 1);
