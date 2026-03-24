@@ -32,6 +32,10 @@ const TEST_CONFIG = {
     url:  'http://localhost:3000',
     port: 3000,
   },
+  freshdesk: {
+    apiKey: '',
+    domain: 'test-domain',
+  },
 };
 
 /**

@@ -22,6 +22,9 @@ let state = {
   loadingStructure: false,
   loadingTask:      false,
   applyingChanges:  false,
+  freshdeskConfigured: false,
+  freshdeskTickets:    [],
+  selectedTicketId:    null,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -51,6 +54,7 @@ async function checkAuthStatus() {
       state.connected = true;
       showConnectedState();
       await loadAccounts();
+      checkFreshdeskStatus();
     }
   } catch (e) {
     console.error('Auth check failed:', e);
@@ -79,6 +83,91 @@ function showConnectedState() {
   `;
   document.getElementById('notConnected').style.display = 'none';
   document.getElementById('taskArea').style.display     = 'block';
+}
+
+// ─────────────────────────────────────────────────────────────
+// FRESHDESK
+// ─────────────────────────────────────────────────────────────
+async function checkFreshdeskStatus() {
+  try {
+    const res = await fetch('/api/freshdesk/status');
+    const data = await res.json();
+    if (data.configured) {
+      state.freshdeskConfigured = true;
+      document.getElementById('freshdeskPanel').style.display = 'block';
+      loadFreshdeskTickets();
+    }
+  } catch (e) {
+    // Freshdesk is optional — silently ignore
+  }
+}
+
+async function loadFreshdeskTickets() {
+  const list = document.getElementById('freshdeskList');
+  list.innerHTML = '<div class="freshdesk-empty">Loading tickets...</div>';
+  try {
+    const res = await fetch('/api/freshdesk/tickets');
+    const data = await res.json();
+    state.freshdeskTickets = data.tickets || [];
+    renderFreshdeskTickets();
+  } catch (e) {
+    list.innerHTML = '<div class="freshdesk-empty">Failed to load tickets</div>';
+  }
+}
+
+function renderFreshdeskTickets() {
+  const list = document.getElementById('freshdeskList');
+  if (state.freshdeskTickets.length === 0) {
+    list.innerHTML = '<div class="freshdesk-empty">No open tickets assigned to you</div>';
+    return;
+  }
+  list.innerHTML = state.freshdeskTickets.map(t => {
+    const pClass = ['', 'low', 'medium', 'high', 'urgent'][t.priority] || 'low';
+    const sel = t.id === state.selectedTicketId ? ' selected' : '';
+    const ago = formatRelativeTime(t.createdAt);
+    return `<div class="freshdesk-ticket${sel}" onclick="selectFreshdeskTicket(${t.id})">
+      <div class="freshdesk-priority-dot ${pClass}"></div>
+      <div class="freshdesk-ticket-body">
+        <div class="freshdesk-ticket-subject">#${t.id} ${escapeHtml(t.subject)}</div>
+        <div class="freshdesk-ticket-meta">${escapeHtml(t.requesterName)} · ${ago}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function selectFreshdeskTicket(ticketId) {
+  state.selectedTicketId = ticketId;
+  renderFreshdeskTickets();
+  const input = document.getElementById('taskInput');
+  input.value = 'Loading ticket...';
+  try {
+    const res = await fetch(`/api/freshdesk/tickets/${ticketId}`);
+    const data = await res.json();
+    input.value = data.ticket.description || data.ticket.subject;
+    // Auto-analyse if an account is selected
+    if (state.selectedId) analyseTask();
+  } catch (e) {
+    input.value = '';
+    showToast('Failed to load ticket detail', 'error');
+  }
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ago';
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
 }
 
 // ─────────────────────────────────────────────────────────────

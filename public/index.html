@@ -54,6 +54,17 @@
     <div class="task-area" id="taskArea" style="display:none">
       <div class="section-title">Freshdesk Task</div>
 
+      <!-- Freshdesk Ticket Panel -->
+      <div id="freshdeskPanel" class="freshdesk-panel" style="display:none">
+        <div class="freshdesk-header">
+          <span class="freshdesk-title">My Tickets</span>
+          <button class="freshdesk-refresh-btn" onclick="loadFreshdeskTickets()" title="Refresh tickets">↻</button>
+        </div>
+        <div id="freshdeskList" class="freshdesk-list">
+          <div class="freshdesk-empty">Loading...</div>
+        </div>
+      </div>
+
       <div class="task-box">
         <div class="task-box-header">
           <div class="task-box-dots">
