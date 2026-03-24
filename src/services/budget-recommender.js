@@ -370,6 +370,12 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       } else {
         reason = null;
       }
+      // If losing impressions to budget, never recommend less than the current
+      // set budget — the campaign is already budget-constrained, cutting it
+      // would only worsen IS.
+      if (bls != null && bls > 0.05 && recommended < (campaign.dailyBudget || 0)) {
+        recommended = campaign.dailyBudget;
+      }
       recommended = Math.max(recommended, 1);
     }
 
@@ -592,7 +598,25 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         const isPercent = Math.round(isCap.maxIS * 1000) / 10;
         reason = `IS already ${isPercent}% — limited budget headroom`;
       } else {
-        reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
+        // Build a specific reason using this budget's IS data
+        const budgetCampaigns = budget.campaigns || [];
+        const budgetISData = budgetCampaigns
+          .map(c => isMap.get(String(c.campaignId)))
+          .filter(Boolean);
+        const avgIS = budgetISData.length > 0
+          ? budgetISData.reduce((s, d) => s + (d.impressionShare || 0), 0) / budgetISData.length
+          : null;
+        const avgBLS = budgetISData.length > 0
+          ? budgetISData.reduce((s, d) => s + (d.budgetLostShare || 0), 0) / budgetISData.length
+          : null;
+
+        if (avgIS != null && avgBLS != null && avgBLS > 0.10) {
+          reason = `IS ${(avgIS * 100).toFixed(1)}% (${(avgBLS * 100).toFixed(1)}% lost to budget) — ${direction}${tierLabel} to hit monthly budget`;
+        } else if (avgIS != null) {
+          reason = `IS ${(avgIS * 100).toFixed(1)}% — ${direction}${tierLabel} to hit monthly budget`;
+        } else {
+          reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
+        }
       }
 
       const rec = {
@@ -610,6 +634,27 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       if (geoExpansion) rec.geoExpansion = geoExpansion;
       recommendations.push(rec);
     });
+  }
+
+  // Reconciliation: ensure recommended totals hit the target daily rate.
+  // Gaps can arise from rounding, IS caps, brand caps, or VLA budget floors.
+  // Distribute any shortfall proportionally across uncapped shared budgets.
+  if (!accountOverPacing) {
+    const actualRecommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
+    const reconciliationGap = requiredDailyRate - actualRecommendedTotal;
+    if (Math.abs(reconciliationGap) > 1) {
+      const adjustableRecs = recommendations.filter(r => r.type === 'shared_budget' && !r.isCapped);
+      const adjustableTotal = adjustableRecs.reduce((s, r) => s + r.recommendedDailyBudget, 0);
+      if (adjustableTotal > 0) {
+        for (const rec of adjustableRecs) {
+          const proportion = rec.recommendedDailyBudget / adjustableTotal;
+          const extra = Math.round(reconciliationGap * proportion * 100) / 100;
+          rec.recommendedDailyBudget = Math.round((rec.recommendedDailyBudget + extra) * 100) / 100;
+          rec.change = Math.round((rec.recommendedDailyBudget - rec.budgetSetting) * 100) / 100;
+        }
+        recommendedSharedTotal = Math.round((recommendedSharedTotal + reconciliationGap) * 100) / 100;
+      }
+    }
   }
 
   // When over-pacing, identify low-priority campaigns that could be paused

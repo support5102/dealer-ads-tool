@@ -166,7 +166,7 @@ function computePostChangeAvg(dailyBreakdown, changeDate, excludeCampaigns) {
  * Writes per-campaign search impression share data to the Google Sheet.
  * Finds the row matching the account name and writes IS data to column E onward.
  *
- * Column E: campaign IS summary (e.g., "Brand: 45.2% | VLA: 62.1%")
+ * Column I: campaign IS summary (e.g., "Brand: 45.2% | VLA: 62.1%")
  *
  * @param {Object} sheetsClient - Sheets API client with values.update
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
@@ -191,7 +191,7 @@ async function writeImpressionShareToSheet(sheetsClient, spreadsheetId, accountN
     })
     .join(' | ');
 
-  const range = `PPC Spend Pace!E${sheetRow}`;
+  const range = `PPC Spend Pace!I${sheetRow}`;
 
   try {
     await sheetsClient.spreadsheets.values.update({
