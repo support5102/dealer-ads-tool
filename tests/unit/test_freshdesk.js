@@ -6,7 +6,7 @@ const { createClient } = require('../../src/services/freshdesk');
 
 jest.mock('axios');
 
-const FAKE_CONFIG = { apiKey: 'test-key-123', domain: 'testdealer' };
+const FAKE_CONFIG = { apiKey: 'test-key-123', domain: 'testdealer', agentEmail: '' };
 
 // Mock axios.create to return a mock instance with get()
 let mockGet;

@@ -67,8 +67,9 @@ function validateEnv(env = process.env) {
       model:  env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
     },
     freshdesk: {
-      apiKey: env.FRESHDESK_API_KEY || '',
-      domain: env.FRESHDESK_DOMAIN || 'savvydealer',
+      apiKey:     env.FRESHDESK_API_KEY || '',
+      domain:     env.FRESHDESK_DOMAIN || 'savvydealer',
+      agentEmail: env.FRESHDESK_AGENT_EMAIL || '',
     },
   };
 

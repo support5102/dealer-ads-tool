@@ -28,18 +28,35 @@ function createClient(freshdeskConfig) {
   const http = axios.create({ baseURL, headers, timeout: 15000 });
 
   /**
-   * Verifies the API key and returns the authenticated agent's info.
+   * Verifies the API key and returns the target agent's info.
+   * If agentEmail is configured, looks up that agent by email.
+   * Otherwise falls back to /agents/me (the API key owner).
+   *
    * @returns {Promise<{ id: number, name: string, email: string }>}
    */
   async function checkConnection() {
     try {
-      const { data } = await http.get('/agents/me');
+      const agentEmail = freshdeskConfig.agentEmail;
+      let data;
+
+      if (agentEmail) {
+        // Look up a specific agent by email
+        const res = await http.get('/agents', { params: { email: agentEmail } });
+        const agents = res.data || [];
+        if (agents.length === 0) throw new Error(`No Freshdesk agent found with email ${agentEmail}`);
+        data = agents[0];
+      } else {
+        const res = await http.get('/agents/me');
+        data = res.data;
+      }
+
       return {
         id: data.id,
         name: data.contact?.name || data.name || 'Unknown',
-        email: data.contact?.email || data.email || '',
+        email: data.contact?.email || data.email || agentEmail || '',
       };
     } catch (err) {
+      if (err.message && err.message.includes('No Freshdesk agent')) throw err;
       const status = err.response?.status;
       if (status === 401) throw new Error('Freshdesk API key is invalid or expired');
       if (status === 403) throw new Error('Freshdesk API key lacks permission');
