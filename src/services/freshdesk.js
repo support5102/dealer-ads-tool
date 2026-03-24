@@ -36,19 +36,10 @@ function createClient(freshdeskConfig) {
    */
   async function checkConnection() {
     try {
-      const agentEmail = freshdeskConfig.agentEmail;
-      let data;
-
-      if (agentEmail) {
-        // Look up a specific agent by email
-        const res = await http.get('/agents', { params: { email: agentEmail } });
-        const agents = res.data || [];
-        if (agents.length === 0) throw new Error(`No Freshdesk agent found with email ${agentEmail}`);
-        data = agents[0];
-      } else {
-        const res = await http.get('/agents/me');
-        data = res.data;
-      }
+      // Always use /agents/me — it works with any agent role (no admin required).
+      // The API key determines the agent identity.
+      const res = await http.get('/agents/me');
+      const data = res.data;
 
       return {
         id: data.id,
