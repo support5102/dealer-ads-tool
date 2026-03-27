@@ -159,7 +159,7 @@ function renderTable(accounts) {
     { key: 'dealerName', label: 'Dealer Name' },
     { key: 'mtdSpend', label: 'MTD Spend' },
     { key: 'monthlyBudget', label: 'Monthly Budget' },
-    { key: 'pacePercent', label: 'Pace %' },
+    { key: 'pacePercent', label: 'Pacing' },
     { key: 'status', label: 'Status' },
     { key: 'dailyAdjustment', label: 'Daily Adj.' },
     { key: 'sevenDayAvg', label: '7-Day Avg' },
@@ -182,7 +182,7 @@ function renderTable(accounts) {
       <td>${esc(a.dealerName)}</td>
       <td>${fmtCurrency(a.mtdSpend)}</td>
       <td>${fmtCurrency(a.monthlyBudget)}</td>
-      <td class="${paceClass}">${fmtPercent(a.pacePercent)}</td>
+      <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span></td>
       <td class="${adjClass}">${fmtSignedCurrency(a.dailyAdjustment)}/day</td>
       <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
