@@ -17,8 +17,8 @@ const STATUS_COLORS = {
 };
 
 let currentData = null;
-let sortCol = 'status';
-let sortAsc = true;
+let sortCol = 'pacePercent';
+let sortAsc = false;
 
 // ── Formatting helpers ──
 
