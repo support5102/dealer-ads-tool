@@ -86,8 +86,13 @@ function createChangesRouter(config) {
           const result = await applyChange(client, change, isDryRun);
           results.push({ change, result, success: true });
         } catch (err) {
-          const msg = err.message || 'Unknown error';
-          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg);
+          // google-ads-api errors may have .errors[], .failures[], or nested details
+          const gadsErrors = err.errors || err.failures || [];
+          const detail = gadsErrors.length
+            ? JSON.stringify(gadsErrors.map(e => e.error_code || e.message || e))
+            : '';
+          const msg = err.message || detail || JSON.stringify(err) || 'Unknown error';
+          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg, detail ? `| details: ${detail}` : '');
           errors.push({ change, error: msg });
           results.push({ change, result: msg, success: false });
         }
