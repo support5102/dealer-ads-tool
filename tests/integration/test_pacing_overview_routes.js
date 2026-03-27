@@ -49,6 +49,7 @@ function setupMocks() {
   googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
   googleAds.getMonthSpend.mockResolvedValue(SAMPLE_SPEND);
   googleAds.getDailySpendLast14Days.mockResolvedValue(SAMPLE_DAILY_14);
+  googleAds.getLastBudgetChange.mockResolvedValue({ changeDate: null });
   goalReader.readGoals.mockResolvedValue(SAMPLE_GOALS);
 }
 
@@ -81,6 +82,20 @@ describe('GET /api/pacing/all', () => {
     expect(honda.sevenDayAvg).toBeDefined();
     expect(honda.sevenDayTrend).toBeDefined();
     expect(honda.sevenDayTrendPercent).toBeDefined();
+    expect(honda.projectedSpend).toBeDefined();
+    expect(honda.projectedStatus).toBeDefined();
+  });
+
+  test('includes post-change projection when budget change exists', async () => {
+    googleAds.getLastBudgetChange.mockResolvedValue({ changeDate: '2026-03-15' });
+    const agent = await authenticatedAgent(app, { accounts: SAMPLE_ACCOUNTS });
+    const res = await agent.get('/api/pacing/all').expect(200);
+
+    const honda = res.body.accounts.find(a => a.dealerName === 'Honda of Springfield');
+    expect(honda.changeDate).toBe('2026-03-15');
+    expect(honda.postChangeDailyAvg).toBeDefined();
+    expect(honda.projectedSpend).toBeGreaterThan(0);
+    expect(['on_track', 'over', 'under', 'will_over', 'will_under']).toContain(honda.projectedStatus);
   });
 
   test('excludes accounts without matching goals', async () => {

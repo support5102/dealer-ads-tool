@@ -14,7 +14,7 @@ const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
 const { generateRecommendation, findISCappedCampaignIds } = require('../services/budget-recommender');
-const { calculatePacing, calculateSevenDayTrend } = require('../services/pacing-calculator');
+const { calculatePacing, calculateSevenDayTrend, calculateProjection } = require('../services/pacing-calculator');
 const { ACCOUNT_OVERRIDES } = require('../services/strategy-rules');
 
 /**
@@ -439,7 +439,7 @@ function createPacingRouter(config, deps = {}) {
   // =========================================================================
 
   router.get('/api/pacing/all', requireAuth, async (req, res, next) => {
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 6;
     const TIMEOUT_MS = 60_000;
     const startTime = Date.now();
 
@@ -513,9 +513,10 @@ function createPacingRouter(config, deps = {}) {
             customerId: account.id.replace(/-/g, ''),
             loginCustomerId: mccId,
           };
-          const [campaignSpend, dailySpend] = await Promise.all([
+          const [campaignSpend, dailySpend, lastChange] = await Promise.all([
             googleAds.getMonthSpend(restCtx),
             googleAds.getDailySpendLast14Days(restCtx),
+            googleAds.getLastBudgetChange(restCtx).catch(() => ({ changeDate: null })),
           ]);
           const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
           const now = new Date();
@@ -529,6 +530,15 @@ function createPacingRouter(config, deps = {}) {
             baselineInventory: null,
           });
           const trend = calculateSevenDayTrend(dailySpend);
+          const projection = calculateProjection({
+            monthlyBudget: goal.monthlyBudget,
+            mtdSpend,
+            dailySpend,
+            changeDate: lastChange.changeDate,
+            year: now.getFullYear(),
+            month: now.getMonth() + 1,
+            currentDay: now.getDate(),
+          });
           return {
             customerId: account.id,
             dealerName: account.name,
@@ -540,6 +550,10 @@ function createPacingRouter(config, deps = {}) {
             sevenDayAvg: trend.sevenDayAvg,
             sevenDayTrend: trend.sevenDayTrend,
             sevenDayTrendPercent: trend.sevenDayTrendPercent,
+            projectedSpend: projection.projectedSpend,
+            projectedStatus: projection.projectedStatus,
+            postChangeDailyAvg: projection.postChangeDailyAvg,
+            changeDate: projection.changeDate,
           };
         }
 

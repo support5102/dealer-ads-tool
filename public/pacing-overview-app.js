@@ -15,6 +15,14 @@ const STATUS_COLORS = {
   on_pace: 'green', over: 'yellow', under: 'yellow',
   critical_over: 'red', critical_under: 'red',
 };
+const PROJ_LABELS = {
+  on_track: 'On Track', over: 'Over', under: 'Under',
+  will_over: 'Will Over', will_under: 'Will Under',
+};
+const PROJ_COLORS = {
+  on_track: 'green', over: 'yellow', under: 'yellow',
+  will_over: 'red', will_under: 'red',
+};
 
 let currentData = null;
 let sortCol = 'pacePercent';
@@ -129,8 +137,12 @@ function renderSummary(data) {
 function sortAccounts(accounts) {
   return [...accounts].sort((a, b) => {
     let cmp = 0;
+    const PROJ_ORDER = { will_over: 0, over: 1, on_track: 2, under: 3, will_under: 4 };
     if (sortCol === 'status') {
       cmp = (STATUS_ORDER[a.status] ?? 5) - (STATUS_ORDER[b.status] ?? 5);
+      if (cmp === 0) cmp = a.dealerName.localeCompare(b.dealerName);
+    } else if (sortCol === 'projectedStatus') {
+      cmp = (PROJ_ORDER[a.projectedStatus] ?? 5) - (PROJ_ORDER[b.projectedStatus] ?? 5);
       if (cmp === 0) cmp = a.dealerName.localeCompare(b.dealerName);
     } else if (sortCol === 'dealerName') {
       cmp = a.dealerName.localeCompare(b.dealerName);
@@ -164,6 +176,7 @@ function renderTable(accounts) {
     { key: 'dailyAdjustment', label: 'Daily Adj.' },
     { key: 'sevenDayAvg', label: '7-Day Avg' },
     { key: 'sevenDayTrendPercent', label: '7-Day Trend' },
+    { key: 'projectedStatus', label: 'Projection' },
   ];
 
   const headerHtml = cols.map(c => {
@@ -187,6 +200,7 @@ function renderTable(accounts) {
       <td class="${adjClass}">${fmtSignedCurrency(a.dailyAdjustment)}/day</td>
       <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
       <td class="${trendClass}">${trendArrow} ${fmtPercent(a.sevenDayTrendPercent)}</td>
+      <td title="${a.changeDate ? 'Since ' + esc(a.changeDate) + ': ' + fmtCurrency(a.postChangeDailyAvg || 0) + '/day → Proj: ' + fmtCurrency(a.projectedSpend) : 'Full-month avg → Proj: ' + fmtCurrency(a.projectedSpend)}"><span class="status-mini ${PROJ_COLORS[a.projectedStatus] || 'gray'}">${PROJ_LABELS[a.projectedStatus] || 'N/A'}</span></td>
     </tr>`;
   }).join('');
 

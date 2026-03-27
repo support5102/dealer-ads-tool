@@ -286,8 +286,96 @@ function calculateSevenDayTrend(dailySpend) {
   };
 }
 
+/**
+ * Projects month-end spend based on post-change daily average.
+ *
+ * If a budget change happened this month, uses only the spend rate since that
+ * change to project whether the account will hit its monthly budget.
+ * If no change, uses the full-month projected spend from calculatePacing.
+ *
+ * @param {Object} params
+ * @param {number} params.monthlyBudget - Monthly budget target
+ * @param {number} params.mtdSpend - Month-to-date total spend
+ * @param {Object[]} params.dailySpend - Array of { date, spend } (14-day data)
+ * @param {string|null} params.changeDate - Last budget change date (YYYY-MM-DD) or null
+ * @param {number} params.year - Current year
+ * @param {number} params.month - Current month (1-12)
+ * @param {number} params.currentDay - Current day of month
+ * @returns {{ projectedSpend: number, projectedStatus: string, postChangeDailyAvg: number|null, changeDate: string|null }}
+ */
+function calculateProjection(params) {
+  const { monthlyBudget, mtdSpend, dailySpend, changeDate, year, month, currentDay } = params;
+
+  const totalDays = daysInMonth(year, month);
+  const daysElapsed = Math.min(currentDay, totalDays);
+  const daysRemaining = Math.max(totalDays - daysElapsed, 0);
+
+  // No budget change: project from full-month average
+  if (!changeDate || !dailySpend || dailySpend.length === 0) {
+    const dailyAvg = daysElapsed > 0 ? mtdSpend / daysElapsed : 0;
+    const projectedSpend = mtdSpend + (dailyAvg * daysRemaining);
+    const variance = monthlyBudget > 0
+      ? ((projectedSpend - monthlyBudget) / monthlyBudget) * 100
+      : 0;
+    return {
+      projectedSpend: Math.round(projectedSpend * 100) / 100,
+      projectedStatus: getProjectionStatus(variance),
+      postChangeDailyAvg: null,
+      changeDate: null,
+    };
+  }
+
+  // Filter daily spend to post-change days
+  const postChangeDays = dailySpend.filter(d => d.date >= changeDate);
+
+  if (postChangeDays.length === 0) {
+    // Change too recent, no post-change data yet — fall back to full-month
+    const dailyAvg = daysElapsed > 0 ? mtdSpend / daysElapsed : 0;
+    const projectedSpend = mtdSpend + (dailyAvg * daysRemaining);
+    const variance = monthlyBudget > 0
+      ? ((projectedSpend - monthlyBudget) / monthlyBudget) * 100
+      : 0;
+    return {
+      projectedSpend: Math.round(projectedSpend * 100) / 100,
+      projectedStatus: getProjectionStatus(variance),
+      postChangeDailyAvg: null,
+      changeDate,
+    };
+  }
+
+  // Compute post-change daily average and project forward
+  const postChangeTotal = postChangeDays.reduce((sum, d) => sum + (d.spend || 0), 0);
+  const postChangeDailyAvg = postChangeTotal / postChangeDays.length;
+  const projectedRemainingSpend = postChangeDailyAvg * daysRemaining;
+  const projectedSpend = mtdSpend + projectedRemainingSpend;
+
+  const variance = monthlyBudget > 0
+    ? ((projectedSpend - monthlyBudget) / monthlyBudget) * 100
+    : 0;
+
+  return {
+    projectedSpend: Math.round(projectedSpend * 100) / 100,
+    projectedStatus: getProjectionStatus(variance),
+    postChangeDailyAvg: Math.round(postChangeDailyAvg * 100) / 100,
+    changeDate,
+  };
+}
+
+/**
+ * Maps a projection variance % to a status string.
+ * Uses the same thresholds as pacing status.
+ */
+function getProjectionStatus(variance) {
+  if (variance >= 15)  return 'will_over';
+  if (variance >= 5)   return 'over';
+  if (variance <= -15)  return 'will_under';
+  if (variance <= -5)   return 'under';
+  return 'on_track';
+}
+
 module.exports = {
   calculatePacing,
+  calculateProjection,
   calculateSevenDayTrend,
   getPacingStatus,
   applyInventoryModifier,
