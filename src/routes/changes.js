@@ -71,11 +71,12 @@ function createChangesRouter(config) {
     const isDryRun = dryRun !== false;
 
     try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
       const client = googleAds.createClient(
         config.googleAds,
         req.session.tokens.refresh_token,
         String(customerId),
-        req.session.mccId
+        mccId
       );
 
       const results = [];
