@@ -25,6 +25,7 @@ const { createSchedulerRouter } = require('./routes/scheduler');
 const { createAuditRouter }           = require('./routes/audit');
 const { createOptimizationRouter }    = require('./routes/optimization');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
+const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { errorHandler }                = require('./middleware/error-handler');
 
 /**
@@ -73,6 +74,7 @@ function createApp(config) {
   app.use(createAuditRouter(config));
   app.use(createOptimizationRouter(config));
   app.use(createFreshdeskRouter(config));
+  app.use(createBudgetAdjustmentsRouter(config));
 
   // ── Health check ──
   app.get('/health', (req, res) => {

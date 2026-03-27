@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-19
-**Current Phase:** Phase 12: Strategy Rules + Deep Scan — COMPLETE
+**Last Updated:** 2026-03-27
+**Current Phase:** Phase 13: Smart Budget Auto-Adjuster — Phase 1 COMPLETE
 
 ---
 
@@ -22,6 +22,7 @@
 | 10 | Account Health Auditor | ✅ COMPLETE | 11 strategy-aligned checks, audit routes, dashboard UI (621 tests) |
 | 11 | Audit Automation | ✅ COMPLETE | Scheduled MCC-wide audits, token refresh, concurrency guards (651 tests) |
 | 12 | Strategy Rules + Deep Scan | ✅ COMPLETE | Rules engine, negative keyword analyzer, ad copy analyzer, deep scanner (764 tests) |
+| 13 | Smart Budget Auto-Adjuster | 🔨 IN PROGRESS | Phase 1 complete: detection engine, campaign classifier, adjustment generator (973 tests) |
 
 ---
 
@@ -194,6 +195,51 @@
 - Deploy V3 to Railway with all 5 tools (Task Manager, Pacing, Builder, Auditor, Scheduled Audits)
 - Fix high-severity PR findings (XSS in app.js innerHTML, OAuth CSRF in auth.js)
 - Phase 12+: Freshdesk integration, CPC optimization, factory offer automation
+
+---
+
+### 2026-03-27 - CLEAN HANDOFF
+
+**Completed:**
+- All-accounts pacing overview enhancements:
+  - Added "Pacing" column showing budget score (100% = on pace)
+  - Default sort by highest pace to lowest pace
+  - Added post-change projection column (On Track / Will Over / Will Under)
+- Phase 13: Smart Budget Auto-Adjuster — Phase 1 (Detection + Recommendation Engine):
+  - `campaign-classifier.js` — classifies campaigns by type (VLA, brand, service, comp, regional, general, model_keyword), extracts model names, computes inventory-weighted priority weights
+  - `pacing-detector.js` — flags accounts needing intervention with urgency scoring (critical/high/medium)
+  - `adjustment-generator.js` — generates executor-ready budget adjustments using proportional weighted distribution with inventory share multipliers
+  - `pacing-fetcher.js` — extracted shared fetchAccountPacing helper from pacing route
+  - Two weight tables agreed with user:
+    - CUT_WEIGHTS (over-pacing): Regional 1.0 → Service 0.95 → General 0.85 → Comp 0.75 → Low inv KW 0.6 → High inv KW 0.4 → Brand 0.35 → VLA 0.15
+    - ADDITION_WEIGHTS (under-pacing): VLA 1.0 → High inv KW 0.8 → Low inv VLA 0.6 → Low inv KW 0.4 → Brand 0.35 → Comp 0.3 → General 0.25 → Service 0.15 → Regional 0.1
+  - Inventory proportional to dealer's lot — no arbitrary high/low cutoff
+- Staff review (Opus) fixes applied:
+  - Fixed shared budget spend lookup (was using budget setting instead of actual campaign spend sum)
+  - Reduced BATCH_SIZE to 6 for rate limit safety with 3 parallel API calls
+  - Added defensive .catch() on getLastBudgetChange
+  - NaN guard on spend reduce
+  - Tooltip on projection cells
+  - Removed dead "dealership name" pattern, increased min model name length to 3
+
+**Files Created:**
+- `src/services/campaign-classifier.js`, `src/services/pacing-detector.js`
+- `src/services/adjustment-generator.js`, `src/services/pacing-fetcher.js`
+- `tests/unit/test_campaign_classifier.js` (33 tests), `tests/unit/test_pacing_detector.js` (17 tests)
+- `tests/unit/test_adjustment_generator.js` (17 tests), `tests/unit/test_projection.js` (9 tests)
+
+**Files Modified:**
+- `src/services/pacing-calculator.js` — added calculateProjection() + getProjectionStatus()
+- `src/routes/pacing.js` — added projection to /api/pacing/all, extracted fetchAccountPacing
+- `public/pacing-overview-app.js` — added Pacing score column, Projection column, sort support
+- `tests/integration/test_pacing_overview_routes.js` — added projection tests
+
+**Test Count:** 764 → 973 (+209 tests, 46 suites)
+
+**Next Session Focus:**
+- Phase 13 continued — Phase 2: Approval workflow backend (scan route, pending queue, approve/reject endpoints)
+- Phase 3: Execution + safety (wire to change-executor.js, capture previous values, staleness check)
+- Phase 4: Frontend approval UI (scan button, review table, approve/reject per account)
 
 ---
 
