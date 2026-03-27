@@ -29,11 +29,11 @@ const { sanitizeGaqlString, sanitizeGaqlNumber } = require('../utils/sanitize');
  */
 function createClient(config, refreshToken, customerId, loginCustomerId) {
   const customerConfig = {
-    customer_id:   customerId,
+    customer_id:   String(customerId).replace(/-/g, ''),
     refresh_token: refreshToken,
   };
   if (loginCustomerId) {
-    customerConfig.login_customer_id = loginCustomerId;
+    customerConfig.login_customer_id = String(loginCustomerId).replace(/-/g, '');
   }
 
   return new GoogleAdsApi({

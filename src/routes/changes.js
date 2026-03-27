@@ -72,6 +72,7 @@ function createChangesRouter(config) {
 
     try {
       const mccId = req.session.mccId || config.googleAds.mccId;
+      console.log('apply-changes auth:', { customerId: String(customerId), mccId, sessionMccId: req.session.mccId, configMccId: config.googleAds.mccId, isDryRun });
       const client = googleAds.createClient(
         config.googleAds,
         req.session.tokens.refresh_token,
