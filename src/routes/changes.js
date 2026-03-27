@@ -87,6 +87,7 @@ function createChangesRouter(config) {
           results.push({ change, result, success: true });
         } catch (err) {
           const msg = err.message || 'Unknown error';
+          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg);
           errors.push({ change, error: msg });
           results.push({ change, result: msg, success: false });
         }
