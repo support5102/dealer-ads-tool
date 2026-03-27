@@ -14,6 +14,20 @@
  */
 
 const { sanitizeGaqlString, sanitizeGaqlNumber } = require('../utils/sanitize');
+const { MATCH_TYPE_POLICY } = require('./strategy-rules');
+
+/** Validate and normalize match type — only EXACT and PHRASE allowed. */
+function validateMatchType(matchType, fallback = 'PHRASE') {
+  if (!matchType) return fallback;
+  const upper = matchType.toUpperCase();
+  if (MATCH_TYPE_POLICY.forbidden.includes(upper)) {
+    throw new Error(`Match type "${upper}" is forbidden by strategy rules. Use EXACT or PHRASE only.`);
+  }
+  if (!MATCH_TYPE_POLICY.allowed.includes(upper)) {
+    throw new Error(`Invalid match type: "${matchType}". Allowed: ${MATCH_TYPE_POLICY.allowed.join(', ')}`);
+  }
+  return upper;
+}
 
 /**
  * Looks up a campaign by name and returns its ID.
@@ -158,30 +172,32 @@ async function applyChange(client, change, dryRun) {
     }
 
     case 'add_negative_keyword': {
+      const matchType = validateMatchType(details.matchType, 'EXACT');
       const campId = await getCampaignId(client, campaignName);
       await client.campaignCriteria.create([{
         campaign: `customers/${customerId}/campaigns/${campId}`,
         negative: true,
         keyword: {
           text:       details.keyword,
-          match_type: details.matchType || 'EXACT',
+          match_type: matchType,
         },
       }]);
-      return `Added negative keyword [${details.matchType || 'EXACT'}] "${details.keyword}" to ${campaignName}`;
+      return `Added negative keyword [${matchType}] "${details.keyword}" to ${campaignName}`;
     }
 
     case 'add_keyword': {
+      const matchType = validateMatchType(details.matchType, 'PHRASE');
       const agId = await getAdGroupId(client, campaignName, adGroupName);
       await client.adGroupCriteria.create([{
         ad_group: `customers/${customerId}/adGroups/${agId}`,
         status:   'ENABLED',
         keyword: {
           text:       details.keyword,
-          match_type: details.matchType || 'BROAD',
+          match_type: matchType,
         },
         ...(details.cpcBid ? { cpc_bid_micros: Math.round(parseFloat(details.cpcBid) * 1_000_000) } : {}),
       }]);
-      return `Added keyword [${details.matchType || 'BROAD'}] "${details.keyword}" to ${adGroupName}`;
+      return `Added keyword [${matchType}] "${details.keyword}" to ${adGroupName}`;
     }
 
     case 'exclude_radius': {

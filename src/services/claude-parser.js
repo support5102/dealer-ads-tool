@@ -31,7 +31,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       "details": {
         "newBudget": "number string e.g. 150.00",
         "keyword": "keyword text",
-        "matchType": "EXACT|PHRASE|BROAD",
+        "matchType": "EXACT|PHRASE",
         "lat": 30.064250,
         "lng": -90.069620,
         "radius": 20,
@@ -48,7 +48,7 @@ Rules:
 - Use exact campaign/ad group names from the account structure provided
 - "all campaigns" = one change entry per campaign
 - Budget values: numbers only, no $ sign
-- Match types: EXACT, PHRASE, or BROAD (uppercase)
+- Match types: EXACT or PHRASE only (uppercase). NEVER use BROAD match — it is forbidden by strategy rules
 - Radius: always include lat, lng, radius, and units
 - If a campaign is not found in the account, add a warning`;
 }
