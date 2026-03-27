@@ -239,8 +239,56 @@ function calculatePacing(params) {
   };
 }
 
+/**
+ * Computes 7-day spend trend from daily spend data.
+ *
+ * Compares the average daily spend over the last 7 days to the prior 7 days.
+ * Returns direction (up/down/flat) and percent change.
+ *
+ * @param {Object[]} dailySpend - Array of { date, spend } sorted by date ascending
+ * @returns {{ sevenDayAvg: number, sevenDayTrend: string, sevenDayTrendPercent: number }}
+ */
+function calculateSevenDayTrend(dailySpend) {
+  const flat = { sevenDayAvg: 0, sevenDayTrend: 'flat', sevenDayTrendPercent: 0 };
+
+  if (!dailySpend || dailySpend.length < 2) return flat;
+
+  // Take the most recent 14 entries max
+  const recent = dailySpend.slice(-14);
+
+  // Split into last 7 and prior 7
+  const last7 = recent.slice(-7);
+  const prior7 = recent.slice(0, recent.length - last7.length);
+
+  const last7Avg = last7.length > 0
+    ? last7.reduce((sum, d) => sum + d.spend, 0) / last7.length
+    : 0;
+
+  const prior7Avg = prior7.length > 0
+    ? prior7.reduce((sum, d) => sum + d.spend, 0) / prior7.length
+    : 0;
+
+  let trendPercent;
+  if (prior7Avg === 0 && last7Avg > 0) {
+    trendPercent = 100;
+  } else if (prior7Avg === 0 && last7Avg === 0) {
+    trendPercent = 0;
+  } else {
+    trendPercent = ((last7Avg - prior7Avg) / prior7Avg) * 100;
+  }
+
+  const trend = trendPercent > 3 ? 'up' : trendPercent < -3 ? 'down' : 'flat';
+
+  return {
+    sevenDayAvg: Math.round(last7Avg * 100) / 100,
+    sevenDayTrend: trend,
+    sevenDayTrendPercent: Math.round(trendPercent * 10) / 10,
+  };
+}
+
 module.exports = {
   calculatePacing,
+  calculateSevenDayTrend,
   getPacingStatus,
   applyInventoryModifier,
   weightedExpectedSpend,

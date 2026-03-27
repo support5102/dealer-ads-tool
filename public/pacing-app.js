@@ -59,6 +59,7 @@ function connectGoogle() {
 function showConnectedState() {
   const hr = document.getElementById('headerRight');
   hr.innerHTML = `
+    <a href="/pacing-overview.html" class="nav-link">All Accounts</a>
     <a href="/" class="nav-link">Task Manager</a>
     <div class="connected-badge">
       <div class="pulse-dot"></div>
@@ -97,6 +98,14 @@ async function loadAccounts() {
 
     if (state.accounts.length === 0) {
       sel.innerHTML = '<option>No dealer accounts found</option>';
+    }
+
+    // Deep-link: auto-select account from ?account= query param (e.g. from overview)
+    const params = new URLSearchParams(window.location.search);
+    const deepLinkId = params.get('account');
+    if (deepLinkId && state.accounts.some(a => a.id === deepLinkId)) {
+      sel.value = deepLinkId;
+      loadPacing(deepLinkId);
     }
   } catch (err) {
     sel.innerHTML = '<option>Error loading accounts</option>';

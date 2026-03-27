@@ -59,6 +59,9 @@ function createTestApp() {
     if (data.mccId) {
       req.session.mccId = data.mccId;
     }
+    if (data.accounts) {
+      req.session.accounts = data.accounts;
+    }
     res.json({ ok: true });
   });
 

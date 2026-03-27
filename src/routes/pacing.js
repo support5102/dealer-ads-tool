@@ -14,6 +14,7 @@ const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
 const { generateRecommendation, findISCappedCampaignIds } = require('../services/budget-recommender');
+const { calculatePacing, calculateSevenDayTrend } = require('../services/pacing-calculator');
 const { ACCOUNT_OVERRIDES } = require('../services/strategy-rules');
 
 /**
@@ -429,6 +430,162 @@ function createPacingRouter(config, deps = {}) {
       res.json(response);
     } catch (err) {
       console.error('Pacing error:', err.message);
+      next(err);
+    }
+  });
+
+  // =========================================================================
+  // GET /api/pacing/all — All-accounts pacing overview
+  // =========================================================================
+
+  router.get('/api/pacing/all', requireAuth, async (req, res, next) => {
+    const BATCH_SIZE = 10;
+    const TIMEOUT_MS = 60_000;
+    const startTime = Date.now();
+
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      req.session.tokens.access_token = accessToken;
+
+      const activeSheets = sheetsClient || createSheetsClient(accessToken);
+
+      // Step 1: Read all goals from Google Sheets
+      let goals;
+      try {
+        goals = await readGoals(activeSheets, spreadsheetId);
+      } catch (err) {
+        return res.status(500).json({ error: 'Could not load budget goals. Check Google Sheets connection.' });
+      }
+
+      if (!goals || goals.length === 0) {
+        return res.status(404).json({ error: 'No budget goals found in Google Sheets.' });
+      }
+
+      // Step 2: Get accounts from session
+      const accounts = req.session.accounts || [];
+      if (accounts.length === 0) {
+        return res.status(400).json({ error: 'No accounts loaded. Click Refresh to load accounts first.' });
+      }
+
+      // Step 3: Match accounts to goals by normalized name
+      const normalize = s => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+      const matched = [];
+      for (const account of accounts) {
+        const accName = normalize(account.name);
+        const goal = goals.find(g => normalize(g.dealerName) === accName);
+        if (goal && goal.monthlyBudget > 0) {
+          matched.push({ account, goal });
+        }
+      }
+
+      if (matched.length === 0) {
+        return res.json({
+          accounts: [], failed: [],
+          totalAccounts: 0, loadedAccounts: 0,
+        });
+      }
+
+      // Step 4: Fetch spend data in batches
+      const results = [];
+      const failed = [];
+
+      for (let i = 0; i < matched.length; i += BATCH_SIZE) {
+        if (Date.now() - startTime > TIMEOUT_MS) {
+          // Timeout — add remaining to failed
+          for (let j = i; j < matched.length; j++) {
+            failed.push({
+              customerId: matched[j].account.id,
+              dealerName: matched[j].account.name,
+              error: 'Request timeout',
+            });
+          }
+          break;
+        }
+
+        const batch = matched.slice(i, i + BATCH_SIZE);
+
+        // Helper: fetch and compute pacing for one account
+        async function fetchAccountPacing({ account, goal }) {
+          const restCtx = {
+            accessToken,
+            developerToken: config.googleAds.developerToken,
+            customerId: account.id.replace(/-/g, ''),
+            loginCustomerId: mccId,
+          };
+          const [campaignSpend, dailySpend] = await Promise.all([
+            googleAds.getMonthSpend(restCtx),
+            googleAds.getDailySpendLast14Days(restCtx),
+          ]);
+          const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
+          const now = new Date();
+          const pacing = calculatePacing({
+            monthlyBudget: goal.monthlyBudget,
+            spendToDate: mtdSpend,
+            year: now.getFullYear(),
+            month: now.getMonth() + 1,
+            currentDay: now.getDate(),
+            currentInventory: null,
+            baselineInventory: null,
+          });
+          const trend = calculateSevenDayTrend(dailySpend);
+          return {
+            customerId: account.id,
+            dealerName: account.name,
+            monthlyBudget: goal.monthlyBudget,
+            mtdSpend: Math.round(mtdSpend * 100) / 100,
+            pacePercent: pacing.pacePercent,
+            status: pacing.paceStatus,
+            dailyAdjustment: Math.round((pacing.requiredDailyRate - pacing.dailyAvgSpend) * 100) / 100,
+            sevenDayAvg: trend.sevenDayAvg,
+            sevenDayTrend: trend.sevenDayTrend,
+            sevenDayTrendPercent: trend.sevenDayTrendPercent,
+          };
+        }
+
+        const batchResults = await Promise.allSettled(batch.map(fetchAccountPacing));
+
+        // Collect successes and identify rate-limited failures
+        const rateLimited = [];
+        for (let k = 0; k < batchResults.length; k++) {
+          const result = batchResults[k];
+          if (result.status === 'fulfilled') {
+            results.push(result.value);
+          } else {
+            const errMsg = result.reason?.message || 'Unknown error';
+            if (errMsg.includes('429') || errMsg.toLowerCase().includes('rate')) {
+              rateLimited.push({ idx: k, errMsg });
+            } else {
+              failed.push({ customerId: batch[k].account.id, dealerName: batch[k].account.name, error: errMsg });
+            }
+          }
+        }
+
+        // Batch retry: wait once, then retry all rate-limited accounts in parallel
+        if (rateLimited.length > 0) {
+          await new Promise(r => setTimeout(r, 5000));
+          const retryResults = await Promise.allSettled(
+            rateLimited.map(({ idx }) => fetchAccountPacing(batch[idx]))
+          );
+          for (let r = 0; r < retryResults.length; r++) {
+            const { idx, errMsg } = rateLimited[r];
+            if (retryResults[r].status === 'fulfilled') {
+              results.push(retryResults[r].value);
+            } else {
+              failed.push({ customerId: batch[idx].account.id, dealerName: batch[idx].account.name, error: errMsg });
+            }
+          }
+        }
+      }
+
+      res.json({
+        accounts: results,
+        failed,
+        totalAccounts: matched.length,
+        loadedAccounts: results.length,
+      });
+    } catch (err) {
+      console.error('Pacing overview error:', err.message);
       next(err);
     }
   });

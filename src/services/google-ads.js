@@ -896,6 +896,45 @@ async function getDailySpendBreakdown(restCtx) {
 }
 
 /**
+ * Fetches per-day total spend for the last 14 calendar days (crosses month boundaries).
+ * Used by the all-accounts pacing overview for 7-day trend calculation.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { date, spend } sorted by date ascending
+ */
+async function getDailySpendLast14Days(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const fourteenDaysAgo = new Date(today);
+  fourteenDaysAgo.setDate(today.getDate() - 14);
+
+  const fmt = d => d.toISOString().slice(0, 10);
+
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, metrics.cost_micros
+     FROM campaign
+     WHERE segments.date BETWEEN '${fmt(fourteenDaysAgo)}' AND '${fmt(yesterday)}'
+       AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
+
+  // Aggregate spend per day (rows are per-campaign)
+  const byDate = {};
+  for (const row of rows) {
+    const date = row.segments.date;
+    const spend = (row.metrics?.costMicros ?? 0) / 1_000_000;
+    byDate[date] = (byDate[date] || 0) + spend;
+  }
+
+  return Object.entries(byDate)
+    .map(([date, spend]) => ({ date, spend }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * Fetches proximity targeting (radius) for specific campaigns.
  * Only called for IS-capped campaigns to provide geo expansion recommendations.
  *
@@ -1015,6 +1054,7 @@ module.exports = {
   // Pacing: post-change tracking
   getLastBudgetChange,
   getDailySpendBreakdown,
+  getDailySpendLast14Days,
   // Pacing: geo expansion
   getCampaignProximityTargets,
   getGeographicPerformance,
