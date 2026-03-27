@@ -15,6 +15,7 @@ const googleAds = require('../services/google-ads');
 const { readGoals } = require('../services/goal-reader');
 const { generateRecommendation, findISCappedCampaignIds } = require('../services/budget-recommender');
 const { calculatePacing, calculateSevenDayTrend, calculateProjection } = require('../services/pacing-calculator');
+const { fetchAccountPacing } = require('../services/pacing-fetcher');
 const { ACCOUNT_OVERRIDES } = require('../services/strategy-rules');
 
 /**
@@ -505,59 +506,15 @@ function createPacingRouter(config, deps = {}) {
 
         const batch = matched.slice(i, i + BATCH_SIZE);
 
-        // Helper: fetch and compute pacing for one account
-        async function fetchAccountPacing({ account, goal }) {
-          const restCtx = {
+        const batchResults = await Promise.allSettled(batch.map(({ account, goal }) =>
+          fetchAccountPacing({
+            account,
+            goal,
             accessToken,
             developerToken: config.googleAds.developerToken,
-            customerId: account.id.replace(/-/g, ''),
             loginCustomerId: mccId,
-          };
-          const [campaignSpend, dailySpend, lastChange] = await Promise.all([
-            googleAds.getMonthSpend(restCtx),
-            googleAds.getDailySpendLast14Days(restCtx),
-            googleAds.getLastBudgetChange(restCtx).catch(() => ({ changeDate: null })),
-          ]);
-          const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
-          const now = new Date();
-          const pacing = calculatePacing({
-            monthlyBudget: goal.monthlyBudget,
-            spendToDate: mtdSpend,
-            year: now.getFullYear(),
-            month: now.getMonth() + 1,
-            currentDay: now.getDate(),
-            currentInventory: null,
-            baselineInventory: null,
-          });
-          const trend = calculateSevenDayTrend(dailySpend);
-          const projection = calculateProjection({
-            monthlyBudget: goal.monthlyBudget,
-            mtdSpend,
-            dailySpend,
-            changeDate: lastChange.changeDate,
-            year: now.getFullYear(),
-            month: now.getMonth() + 1,
-            currentDay: now.getDate(),
-          });
-          return {
-            customerId: account.id,
-            dealerName: account.name,
-            monthlyBudget: goal.monthlyBudget,
-            mtdSpend: Math.round(mtdSpend * 100) / 100,
-            pacePercent: pacing.pacePercent,
-            status: pacing.paceStatus,
-            dailyAdjustment: Math.round((pacing.requiredDailyRate - pacing.dailyAvgSpend) * 100) / 100,
-            sevenDayAvg: trend.sevenDayAvg,
-            sevenDayTrend: trend.sevenDayTrend,
-            sevenDayTrendPercent: trend.sevenDayTrendPercent,
-            projectedSpend: projection.projectedSpend,
-            projectedStatus: projection.projectedStatus,
-            postChangeDailyAvg: projection.postChangeDailyAvg,
-            changeDate: projection.changeDate,
-          };
-        }
-
-        const batchResults = await Promise.allSettled(batch.map(fetchAccountPacing));
+          })
+        ));
 
         // Collect successes and identify rate-limited failures
         const rateLimited = [];
