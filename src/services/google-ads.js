@@ -893,6 +893,54 @@ async function getCampaignNegatives(restCtx) {
 }
 
 /**
+ * Fetches search term report for the last 30 days via REST.
+ * Returns actual user search queries that triggered ads with performance metrics.
+ * Used by audit engine to detect irrelevant traffic and negative keyword opportunities.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of search term objects
+ */
+async function getSearchTermReport(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT search_term_view.search_term, search_term_view.status,
+              campaign.name, campaign.id, ad_group.name,
+              metrics.clicks, metrics.impressions, metrics.cost_micros,
+              metrics.conversions, metrics.conversions_value
+       FROM search_term_view
+       WHERE segments.date DURING LAST_30_DAYS
+         AND campaign.status = 'ENABLED'
+         AND metrics.impressions > 0
+       ORDER BY metrics.cost_micros DESC
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const stv = row.searchTermView || row.search_term_view || {};
+      const m = row.metrics || {};
+      return {
+        searchTerm: stv.searchTerm ?? stv.search_term ?? '',
+        status: stv.status ?? '',
+        campaignName: row.campaign?.name ?? '',
+        campaignId: String(row.campaign?.id ?? ''),
+        adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
+        clicks: m.clicks ?? 0,
+        impressions: m.impressions ?? 0,
+        cost: (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000,
+        conversions: m.conversions ?? 0,
+        conversionValue: m.conversionsValue ?? m.conversions_value ?? 0,
+      };
+    });
+  } catch (err) {
+    console.warn('getSearchTermReport failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
  * Counts active RSA ads per ad group via REST GAQL.
  * Used by deep scanner to detect ad groups missing RSAs.
  *
@@ -1180,4 +1228,5 @@ module.exports = {
   // Audit: diagnostics
   getKeywordDiagnostics,
   getCampaignDiagnostics,
+  getSearchTermReport,
 };

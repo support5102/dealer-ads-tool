@@ -24,6 +24,13 @@ const {
   checkHeadlineQuality,
   checkPinningOveruse,
 } = require('./ad-copy-analyzer');
+const {
+  analyzeNegativeConflicts,
+  analyzeCannibalization,
+  analyzeTrafficSculpting,
+  analyzeIrrelevantSearchTerms,
+  analyzeBlockedConvertingTerms,
+} = require('./negative-keyword-analyzer');
 
 // ── Severity levels ──
 const SEVERITY = {
@@ -411,13 +418,15 @@ async function runAudit(restCtx, options = {}) {
     'high_cpc', 'low_ctr', 'recommendations', 'ad_schedules', 'zero_spend',
     'low_impression_share',
     'stale_years', 'missing_rsas', 'headline_quality', 'pinning',
+    'neg_conflicts', 'neg_cannibalization', 'traffic_sculpting',
+    'irrelevant_search_terms', 'blocked_converting_terms',
   ];
   const selectedChecks = options.checks
     ? options.checks.filter(c => VALID_CHECKS.includes(c))
     : null; // null = all
 
   // Fetch all data in parallel (non-fatal for optional queries)
-  const [keywords, campaigns, ads, recommendations, adSchedules, adGroupAdCounts] = await Promise.all([
+  const [keywords, campaigns, ads, recommendations, adSchedules, adGroupAdCounts, campaignNegatives, searchTerms] = await Promise.all([
     googleAds.getKeywordPerformance(restCtx).catch(err => {
       console.error('Audit keyword query failed:', err.message);
       return [finding('query_error', SEVERITY.WARNING, 'system', 'Keyword query failed', 'Keyword data could not be loaded. Check account permissions.')];
@@ -430,6 +439,8 @@ async function runAudit(restCtx, options = {}) {
     googleAds.getRecommendations(restCtx).catch(() => []),
     googleAds.getAdSchedules(restCtx).catch(() => []),
     googleAds.getAdGroupAdCounts(restCtx).catch(() => []),
+    googleAds.getCampaignNegatives(restCtx).catch(() => []),
+    googleAds.getSearchTermReport(restCtx).catch(() => []),
   ]);
 
   // If queries returned error findings, use empty arrays for those checks
@@ -468,6 +479,15 @@ async function runAudit(restCtx, options = {}) {
     },
     headline_quality:     () => checkHeadlineQuality(ads),
     pinning:              () => checkPinningOveruse(ads),
+    // Negative keyword & search term checks
+    neg_conflicts:        () => analyzeNegativeConflicts(keywordData, campaignNegatives),
+    neg_cannibalization:  () => analyzeCannibalization(keywordData),
+    traffic_sculpting:    () => {
+      const campaignNames = [...new Set(keywordData.map(k => k.campaignName).filter(Boolean))];
+      return analyzeTrafficSculpting(keywordData, campaignNegatives, campaignNames);
+    },
+    irrelevant_search_terms:  () => analyzeIrrelevantSearchTerms(searchTerms),
+    blocked_converting_terms: () => analyzeBlockedConvertingTerms(searchTerms, campaignNegatives),
   };
 
   let allFindings = [...queryErrors];

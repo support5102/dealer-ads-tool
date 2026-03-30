@@ -522,6 +522,8 @@ describe('runAudit', () => {
     googleAds.getRecommendations.mockResolvedValue([]);
     googleAds.getAdSchedules.mockResolvedValue([]);
     googleAds.getAdGroupAdCounts.mockResolvedValue([]);
+    googleAds.getCampaignNegatives.mockResolvedValue([]);
+    googleAds.getSearchTermReport.mockResolvedValue([]);
   });
 
   test('returns audit result with all fields', async () => {
@@ -535,7 +537,7 @@ describe('runAudit', () => {
     expect(result.summary).toHaveProperty('warning');
     expect(result.summary).toHaveProperty('info');
     expect(result.checksRun).toBeInstanceOf(Array);
-    expect(result.checksRun.length).toBe(14);
+    expect(result.checksRun.length).toBe(19);
   });
 
   test('fetches all data in parallel', async () => {

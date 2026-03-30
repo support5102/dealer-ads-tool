@@ -51,6 +51,16 @@ function diagnose(finding, diagnostics = {}) {
       return diagnoseLowCtr(finding, diagnostics.adCopy || [], diagnostics.keywords || []);
     case 'pending_recommendations':
       return diagnosePendingRecommendations(finding);
+    case 'IRRELEVANT_SEARCH_TERMS':
+      return diagnoseIrrelevantSearchTerms(finding);
+    case 'NEG_CONFLICT':
+      return { fixable: false, fixes: [], manualNotes: ['Negative keyword is blocking an active positive keyword. Review and remove the negative if the positive keyword should be active.'] };
+    case 'BLOCKED_CONVERTING_TERMS':
+      return { fixable: false, fixes: [], manualNotes: ['A negative keyword is blocking a search term that previously converted. Review and remove the negative to restore converting traffic.'] };
+    case 'KW_CANNIBALIZATION':
+      return { fixable: false, fixes: [], manualNotes: ['The same keyword appears in multiple ad groups within one campaign. Consolidate to one ad group to avoid internal competition.'] };
+    case 'MISSING_COMPETING_NEGS':
+      return { fixable: false, fixes: [], manualNotes: ['Campaign is missing competing-make negative keywords for traffic sculpting. Add negatives for competitor brands.'] };
     case 'disapproved_ads':
       return { fixable: false, fixes: [], manualNotes: ['Disapproved ads require manual policy review. Check the Google Ads policy center for specific violations.'] };
     case 'bidding_not_manual_cpc':
@@ -335,6 +345,32 @@ function diagnosePendingRecommendations(finding) {
       campaignName: null,
     }],
     manualNotes,
+  };
+}
+
+/**
+ * Irrelevant search terms — add as negative keywords.
+ */
+function diagnoseIrrelevantSearchTerms(finding) {
+  const terms = finding.details?.terms || [];
+  const fixes = [];
+
+  for (const term of terms) {
+    fixes.push({
+      action: 'add_negative',
+      description: `Add negative "${term.searchTerm}" to ${term.campaignName} (${term.reason}, $${term.cost} wasted)`,
+      changeType: 'add_negative_keyword',
+      details: { keyword: term.searchTerm, matchType: 'PHRASE' },
+      campaignName: term.campaignName,
+    });
+  }
+
+  return {
+    fixable: fixes.length > 0,
+    fixes,
+    manualNotes: fixes.length > 0
+      ? ['Review each term before applying — some may have indirect value. Fixes add as PHRASE match negatives.']
+      : [],
   };
 }
 
