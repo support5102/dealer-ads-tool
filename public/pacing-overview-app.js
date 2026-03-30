@@ -79,8 +79,7 @@ async function loadOverview() {
   const summaryBar = document.getElementById('summaryBar');
   const failedSection = document.getElementById('failedSection');
 
-  content.innerHTML = '';
-  content.appendChild(loading);
+  content.replaceChildren(loading);
   loading.style.display = 'block';
   summaryBar.style.display = 'none';
   failedSection.innerHTML = '';
