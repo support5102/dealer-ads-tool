@@ -518,9 +518,6 @@ async function getKeywordPerformance(restCtx) {
     `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
             ad_group_criterion.status, ad_group_criterion.negative,
             ad_group_criterion.cpc_bid_micros,
-            ad_group_criterion.quality_info.quality_score,
-            ad_group_criterion.position_estimates.first_page_cpc_micros,
-            ad_group_criterion.approval_status,
             ad_group.name, ad_group.id, campaign.name, campaign.id,
             metrics.clicks, metrics.impressions, metrics.average_cpc,
             metrics.ctr, metrics.search_impression_share
@@ -536,8 +533,6 @@ async function getKeywordPerformance(restCtx) {
   return rows.map(row => {
     const kw = row.adGroupCriterion || row.ad_group_criterion || {};
     const keyword = kw.keyword || {};
-    const qi = kw.qualityInfo ?? kw.quality_info ?? {};
-    const pe = kw.positionEstimates ?? kw.position_estimates ?? {};
     const m = row.metrics || {};
     return {
       keyword: keyword.text || '',
@@ -545,10 +540,6 @@ async function getKeywordPerformance(restCtx) {
       status: normalizeStatus(kw.status),
       negative: kw.negative || false,
       cpcBid: (kw.cpcBidMicros ?? kw.cpc_bid_micros ?? 0) / 1_000_000,
-      qualityScore: qi.qualityScore ?? qi.quality_score ?? null,
-      firstPageBid: (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros ?? null) != null
-        ? (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros) / 1_000_000 : null,
-      approvalStatus: kw.approvalStatus ?? kw.approval_status ?? null,
       adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
       adGroupId: String(row.adGroup?.id ?? row.ad_group?.id ?? ''),
       campaignName: row.campaign?.name ?? '',
@@ -606,6 +597,55 @@ async function getCampaignPerformance(restCtx) {
       searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
     };
   });
+}
+
+/**
+ * Fetches keyword quality scores and bid estimates via REST.
+ * Separate from getKeywordPerformance because these fields require
+ * ad_group_criterion resource (not keyword_view with metrics).
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { keyword, matchType, campaignName, qualityScore, firstPageBid, approvalStatus }
+ */
+async function getKeywordDiagnostics(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+              ad_group_criterion.quality_info.quality_score,
+              ad_group_criterion.position_estimates.first_page_cpc_micros,
+              ad_group_criterion.approval_status,
+              campaign.name
+       FROM ad_group_criterion
+       WHERE campaign.status = 'ENABLED'
+         AND ad_group.status = 'ENABLED'
+         AND ad_group_criterion.type = 'KEYWORD'
+         AND ad_group_criterion.status = 'ENABLED'
+         AND ad_group_criterion.negative = FALSE
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const kw = row.adGroupCriterion || row.ad_group_criterion || {};
+      const keyword = kw.keyword || {};
+      const qi = kw.qualityInfo ?? kw.quality_info ?? {};
+      const pe = kw.positionEstimates ?? kw.position_estimates ?? {};
+      return {
+        keyword: keyword.text || '',
+        matchType: String(keyword.matchType ?? keyword.match_type ?? ''),
+        campaignName: row.campaign?.name ?? '',
+        qualityScore: qi.qualityScore ?? qi.quality_score ?? null,
+        firstPageBid: (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros ?? null) != null
+          ? (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros) / 1_000_000 : null,
+        approvalStatus: kw.approvalStatus ?? kw.approval_status ?? null,
+      };
+    });
+  } catch (err) {
+    console.warn('getKeywordDiagnostics failed (non-fatal):', err.message);
+    return [];
+  }
 }
 
 /**
@@ -1138,5 +1178,6 @@ module.exports = {
   getCampaignProximityTargets,
   getGeographicPerformance,
   // Audit: diagnostics
+  getKeywordDiagnostics,
   getCampaignDiagnostics,
 };

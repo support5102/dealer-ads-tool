@@ -203,11 +203,22 @@ function createAuditRouter(config) {
       const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
 
       // Fetch diagnostic data in parallel
-      const [keywords, adCopy, campaignDiagnostics] = await Promise.all([
+      const [keywords, keywordDiag, adCopy, campaignDiagnostics] = await Promise.all([
         googleAds.getKeywordPerformance(restCtx).catch(() => []),
+        googleAds.getKeywordDiagnostics(restCtx).catch(() => []),
         googleAds.getAdCopy(restCtx).catch(() => []),
         googleAds.getCampaignDiagnostics(restCtx).catch(() => []),
       ]);
+
+      // Merge quality/bid data into keyword performance data
+      for (const kw of keywords) {
+        const diag = keywordDiag.find(d => d.keyword === kw.keyword && d.campaignName === kw.campaignName);
+        if (diag) {
+          kw.qualityScore = diag.qualityScore;
+          kw.firstPageBid = diag.firstPageBid;
+          kw.approvalStatus = diag.approvalStatus;
+        }
+      }
 
       // Get the latest audit result
       const auditResult = auditStore.get(cleanId);
@@ -215,13 +226,26 @@ function createAuditRouter(config) {
         return res.status(400).json({ error: 'No audit results found. Run an audit first.' });
       }
 
-      // Diagnose each finding
+      // Diagnose each finding (catch per-finding errors so one bad finding doesn't break all)
       const diagnostics = { keywords, adCopy, campaignDiagnostics };
-      const results = auditResult.findings.map(finding => ({
-        checkId: finding.checkId,
-        title: finding.title,
-        ...diagnose(finding, diagnostics),
-      }));
+      const results = auditResult.findings.map(finding => {
+        try {
+          return {
+            checkId: finding.checkId,
+            title: finding.title,
+            ...diagnose(finding, diagnostics),
+          };
+        } catch (err) {
+          console.error(`Diagnose error for ${finding.checkId}:`, err.message);
+          return {
+            checkId: finding.checkId,
+            title: finding.title,
+            fixable: false,
+            fixes: [],
+            manualNotes: [`Diagnosis failed: ${err.message}`],
+          };
+        }
+      });
 
       res.json({ diagnoses: results });
     } catch (err) {
