@@ -534,7 +534,7 @@ describe('runAudit', () => {
     expect(result.summary).toHaveProperty('warning');
     expect(result.summary).toHaveProperty('info');
     expect(result.checksRun).toBeInstanceOf(Array);
-    expect(result.checksRun.length).toBe(11);
+    expect(result.checksRun.length).toBe(10);
   });
 
   test('fetches all data in parallel', async () => {

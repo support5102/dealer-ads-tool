@@ -16,6 +16,8 @@ const { runAudit } = require('../services/audit-engine');
 const auditStore = require('../services/audit-store');
 const googleAds = require('../services/google-ads');
 const auditScheduler = require('../services/audit-scheduler');
+const { diagnose } = require('../services/audit-fixer');
+const { applyChange } = require('../services/change-executor');
 
 /**
  * Creates audit routes.
@@ -182,6 +184,121 @@ function createAuditRouter(config) {
       res.json(result);
     } catch (err) {
       console.error('Deep scan error:', err.message);
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/audit/diagnose?customerId=X
+   * Diagnoses audit findings and returns fix recommendations without applying them.
+   */
+  router.post('/api/audit/diagnose', requireAuth, async (req, res, next) => {
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: 'Missing customerId.' });
+    const cleanId = customerId.replace(/-/g, '');
+
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
+
+      // Fetch diagnostic data in parallel
+      const [keywords, adCopy, campaignDiagnostics] = await Promise.all([
+        googleAds.getKeywordPerformance(restCtx).catch(() => []),
+        googleAds.getAdCopy(restCtx).catch(() => []),
+        googleAds.getCampaignDiagnostics(restCtx).catch(() => []),
+      ]);
+
+      // Get the latest audit result
+      const auditResult = auditStore.get(cleanId);
+      if (!auditResult || !auditResult.findings) {
+        return res.status(400).json({ error: 'No audit results found. Run an audit first.' });
+      }
+
+      // Diagnose each finding
+      const diagnostics = { keywords, adCopy, campaignDiagnostics };
+      const results = auditResult.findings.map(finding => ({
+        checkId: finding.checkId,
+        title: finding.title,
+        ...diagnose(finding, diagnostics),
+      }));
+
+      res.json({ diagnoses: results });
+    } catch (err) {
+      console.error('Diagnose error:', err.message);
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/audit/fix?customerId=X
+   * Applies specific fixes from a diagnosis. Body: { fixes: [{ changeType, campaignName, details }] }
+   */
+  router.post('/api/audit/fix', requireAuth, async (req, res, next) => {
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: 'Missing customerId.' });
+    const cleanId = customerId.replace(/-/g, '');
+    const { fixes } = req.body || {};
+    if (!fixes || !Array.isArray(fixes) || fixes.length === 0) {
+      return res.status(400).json({ error: 'No fixes provided.' });
+    }
+
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const client = googleAds.createClient(config.googleAds, req.session.tokens.refresh_token, cleanId, mccId);
+
+      const results = { applied: 0, failed: 0, details: [] };
+
+      // Handle dismiss_recommendations_batch specially — needs fresh recommendation data
+      const dismissBatch = fixes.find(f => f.changeType === 'dismiss_recommendations_batch');
+      const normalFixes = fixes.filter(f => f.changeType !== 'dismiss_recommendations_batch');
+
+      if (dismissBatch) {
+        try {
+          const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+          const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
+          const recommendations = await googleAds.getRecommendations(restCtx);
+          for (const rec of recommendations) {
+            try {
+              await applyChange(client, {
+                type: 'dismiss_recommendation',
+                details: { resourceName: rec.resourceName },
+              });
+              results.applied++;
+              results.details.push({ description: `Dismissed: ${rec.type}`, success: true });
+            } catch (err) {
+              results.failed++;
+              results.details.push({ description: `Failed to dismiss: ${rec.type}`, error: err.message, success: false });
+            }
+          }
+        } catch (err) {
+          results.failed++;
+          results.details.push({ description: 'Failed to fetch recommendations', error: err.message, success: false });
+        }
+      }
+
+      // Apply normal fixes
+      for (const fix of normalFixes) {
+        try {
+          const message = await applyChange(client, {
+            type: fix.changeType,
+            campaignName: fix.campaignName,
+            details: fix.details,
+          });
+          results.applied++;
+          results.details.push({ description: fix.description || message, success: true });
+        } catch (err) {
+          results.failed++;
+          results.details.push({ description: fix.description || fix.changeType, error: err.message, success: false });
+        }
+      }
+
+      res.json({
+        message: `Applied ${results.applied} of ${results.applied + results.failed} fixes.`,
+        results,
+      });
+    } catch (err) {
+      console.error('Fix error:', err.message);
       next(err);
     }
   });

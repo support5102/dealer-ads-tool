@@ -518,6 +518,9 @@ async function getKeywordPerformance(restCtx) {
     `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
             ad_group_criterion.status, ad_group_criterion.negative,
             ad_group_criterion.cpc_bid_micros,
+            ad_group_criterion.quality_info.quality_score,
+            ad_group_criterion.position_estimates.first_page_cpc_micros,
+            ad_group_criterion.approval_status,
             ad_group.name, ad_group.id, campaign.name, campaign.id,
             metrics.clicks, metrics.impressions, metrics.average_cpc,
             metrics.ctr, metrics.search_impression_share
@@ -533,6 +536,8 @@ async function getKeywordPerformance(restCtx) {
   return rows.map(row => {
     const kw = row.adGroupCriterion || row.ad_group_criterion || {};
     const keyword = kw.keyword || {};
+    const qi = kw.qualityInfo ?? kw.quality_info ?? {};
+    const pe = kw.positionEstimates ?? kw.position_estimates ?? {};
     const m = row.metrics || {};
     return {
       keyword: keyword.text || '',
@@ -540,6 +545,10 @@ async function getKeywordPerformance(restCtx) {
       status: normalizeStatus(kw.status),
       negative: kw.negative || false,
       cpcBid: (kw.cpcBidMicros ?? kw.cpc_bid_micros ?? 0) / 1_000_000,
+      qualityScore: qi.qualityScore ?? qi.quality_score ?? null,
+      firstPageBid: (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros ?? null) != null
+        ? (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros) / 1_000_000 : null,
+      approvalStatus: kw.approvalStatus ?? kw.approval_status ?? null,
       adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
       adGroupId: String(row.adGroup?.id ?? row.ad_group?.id ?? ''),
       campaignName: row.campaign?.name ?? '',
@@ -597,6 +606,76 @@ async function getCampaignPerformance(restCtx) {
       searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
     };
   });
+}
+
+/**
+ * Fetches campaign diagnostics for zero-spend/issue diagnosis via REST.
+ * Returns ad group count, keyword count, and budget per campaign.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, adGroupCount, keywordCount, budget }
+ */
+async function getCampaignDiagnostics(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+
+  // Query 1: Ad group counts per campaign
+  const agRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, ad_group.id, ad_group.status
+     FROM ad_group
+     WHERE campaign.status = 'ENABLED'
+     LIMIT 5000`,
+    restCtx.loginCustomerId
+  );
+
+  // Query 2: Keyword counts per campaign
+  const kwRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, ad_group_criterion.status, ad_group_criterion.approval_status
+     FROM ad_group_criterion
+     WHERE campaign.status = 'ENABLED'
+       AND ad_group_criterion.type = 'KEYWORD'
+       AND ad_group_criterion.negative = FALSE
+     LIMIT 10000`,
+    restCtx.loginCustomerId
+  );
+
+  // Query 3: Budget per campaign
+  const budgetRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign.status = 'ENABLED'
+     LIMIT 2000`,
+    restCtx.loginCustomerId
+  );
+
+  // Aggregate
+  const campaigns = new Map();
+  for (const row of agRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) campaigns.set(id, { campaignId: id, campaignName: row.campaign?.name ?? '', enabledAdGroups: 0, totalAdGroups: 0, enabledKeywords: 0, disapprovedKeywords: 0, budget: 0 });
+    const entry = campaigns.get(id);
+    entry.totalAdGroups++;
+    if (normalizeStatus(row.adGroup?.status ?? row.ad_group?.status) === 'ENABLED') entry.enabledAdGroups++;
+  }
+  for (const row of kwRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) continue;
+    const entry = campaigns.get(id);
+    const kwStatus = normalizeStatus(row.adGroupCriterion?.status ?? row.ad_group_criterion?.status);
+    const approvalStatus = row.adGroupCriterion?.approvalStatus ?? row.ad_group_criterion?.approval_status ?? '';
+    if (kwStatus === 'ENABLED') entry.enabledKeywords++;
+    if (approvalStatus === 'DISAPPROVED') entry.disapprovedKeywords++;
+  }
+  for (const row of budgetRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) continue;
+    const budget = row.campaignBudget ?? row.campaign_budget ?? {};
+    campaigns.get(id).budget = (budget.amountMicros ?? budget.amount_micros ?? 0) / 1_000_000;
+  }
+
+  return Array.from(campaigns.values());
 }
 
 /**
@@ -1058,4 +1137,6 @@ module.exports = {
   // Pacing: geo expansion
   getCampaignProximityTargets,
   getGeographicPerformance,
+  // Audit: diagnostics
+  getCampaignDiagnostics,
 };

@@ -403,7 +403,7 @@ async function runAudit(restCtx, options = {}) {
   const VALID_CHECKS = [
     'bidding_strategy', 'broad_match', 'zero_impressions', 'disapproved_ads',
     'high_cpc', 'low_ctr', 'recommendations', 'ad_schedules', 'zero_spend',
-    'naming_conventions', 'low_impression_share',
+    'low_impression_share',
   ];
   const selectedChecks = options.checks
     ? options.checks.filter(c => VALID_CHECKS.includes(c))
@@ -451,7 +451,6 @@ async function runAudit(restCtx, options = {}) {
     recommendations:      () => checkPendingRecommendations(recommendations),
     ad_schedules:         () => checkMissingAdSchedules(campaignData, adSchedules),
     zero_spend:           () => checkZeroSpendCampaigns(campaignData),
-    naming_conventions:   () => checkNamingConventions(campaignData),
     low_impression_share: () => checkLowImpressionShare(campaignData),
   };
 

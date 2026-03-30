@@ -175,6 +175,12 @@ function renderResults(result) {
     html += `</div>`;
   }
 
+  html += `<div class="audit-actions" style="margin: 20px 0;">
+    <button class="btn-primary" id="diagnoseBtn" onclick="diagnoseFindings()">Diagnose & Suggest Fixes</button>
+  </div>`;
+
+  html += `<div id="diagnosisResults"></div>`;
+
   html += `<div class="audit-meta">Audit ran at ${new Date(result.ranAt).toLocaleString()} &middot; ${result.checksRun.length} checks</div>`;
 
   findingsSection.innerHTML = html;
@@ -293,6 +299,151 @@ function stopStatusPolling() {
   if (statusPollTimer) {
     clearInterval(statusPollTimer);
     statusPollTimer = null;
+  }
+}
+
+// ── Diagnosis & Fix ──
+
+let currentDiagnoses = null;
+
+async function diagnoseFindings() {
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return alert('Select an account first.');
+
+  const btn = document.getElementById('diagnoseBtn');
+  const resultsDiv = document.getElementById('diagnosisResults');
+  btn.disabled = true;
+  btn.textContent = 'Diagnosing...';
+  resultsDiv.innerHTML = '<div class="audit-loading"><div class="spinner"></div><p>Analyzing findings and generating fix recommendations...</p></div>';
+
+  try {
+    const res = await fetch(`/api/audit/diagnose?customerId=${customerId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Diagnosis failed');
+
+    currentDiagnoses = data.diagnoses;
+    renderDiagnoses(data.diagnoses);
+  } catch (err) {
+    resultsDiv.innerHTML = `<div class="error-msg">Diagnosis error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Diagnose & Suggest Fixes';
+  }
+}
+
+function renderDiagnoses(diagnoses) {
+  const resultsDiv = document.getElementById('diagnosisResults');
+  const fixable = diagnoses.filter(d => d.fixable && d.fixes.length > 0);
+  const manual = diagnoses.filter(d => d.manualNotes && d.manualNotes.length > 0);
+
+  let html = '';
+
+  if (fixable.length > 0) {
+    const totalFixes = fixable.reduce((sum, d) => sum + d.fixes.length, 0);
+    html += `<div class="diagnosis-section">`;
+    html += `<h3 class="diagnosis-title">Auto-Fixable (${totalFixes} fixes available)</h3>`;
+    html += `<button class="btn-primary" onclick="applyAllFixes()" id="applyAllBtn">Apply All Fixes</button>`;
+
+    for (const d of fixable) {
+      html += `<div class="diagnosis-card fixable">`;
+      html += `<div class="diagnosis-header">${escapeHtml(d.title)}</div>`;
+      html += `<ul class="fix-list">`;
+      for (let i = 0; i < d.fixes.length; i++) {
+        const fix = d.fixes[i];
+        html += `<li class="fix-item">
+          <span class="fix-desc">${escapeHtml(fix.description)}</span>
+          <button class="btn-fix" onclick="applySingleFix('${escapeHtml(d.checkId)}', ${i})">Fix</button>
+        </li>`;
+      }
+      html += `</ul></div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (manual.length > 0) {
+    html += `<div class="diagnosis-section">`;
+    html += `<h3 class="diagnosis-title">Manual Review Required</h3>`;
+    for (const d of manual) {
+      if (!d.fixable || d.fixes.length === 0) {
+        html += `<div class="diagnosis-card manual">`;
+        html += `<div class="diagnosis-header">${escapeHtml(d.title)}</div>`;
+        html += `<ul class="manual-notes">`;
+        for (const note of d.manualNotes) {
+          html += `<li>${escapeHtml(note)}</li>`;
+        }
+        html += `</ul></div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  if (fixable.length === 0 && manual.length === 0) {
+    html = '<div class="empty-msg">No actionable recommendations found.</div>';
+  }
+
+  resultsDiv.innerHTML = html;
+}
+
+async function applyAllFixes() {
+  if (!currentDiagnoses) return;
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return;
+
+  const allFixes = [];
+  for (const d of currentDiagnoses) {
+    if (d.fixable && d.fixes) {
+      allFixes.push(...d.fixes);
+    }
+  }
+  if (allFixes.length === 0) return alert('No fixes to apply.');
+  if (!confirm(`Apply ${allFixes.length} fixes? This will modify campaigns in Google Ads.`)) return;
+
+  await executeFixes(allFixes);
+}
+
+async function applySingleFix(checkId, fixIndex) {
+  if (!currentDiagnoses) return;
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return;
+
+  const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+  if (!d || !d.fixes[fixIndex]) return;
+
+  const fix = d.fixes[fixIndex];
+  if (!confirm(`Apply fix: ${fix.description}?`)) return;
+
+  await executeFixes([fix]);
+}
+
+async function executeFixes(fixes) {
+  const customerId = document.getElementById('accountSelect').value;
+  const resultsDiv = document.getElementById('diagnosisResults');
+  const btn = document.getElementById('applyAllBtn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/audit/fix?customerId=${customerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Fix failed');
+
+    // Show results
+    let html = `<div class="fix-results">`;
+    html += `<h3>${data.message}</h3>`;
+    for (const detail of data.results.details) {
+      const cls = detail.success ? 'fix-success' : 'fix-failure';
+      html += `<div class="${cls}">${detail.success ? '&#x2705;' : '&#x274C;'} ${escapeHtml(detail.description)}${detail.error ? ' — ' + escapeHtml(detail.error) : ''}</div>`;
+    }
+    html += `<button class="btn-primary" onclick="runAudit()" style="margin-top: 12px;">Re-run Audit</button>`;
+    html += `</div>`;
+    resultsDiv.innerHTML = html;
+  } catch (err) {
+    resultsDiv.innerHTML += `<div class="error-msg">Fix error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
