@@ -27,6 +27,7 @@ const { createOptimizationRouter }    = require('./routes/optimization');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { errorHandler }                = require('./middleware/error-handler');
+const spendSync                       = require('./services/spend-sync');
 
 /**
  * Creates a configured Express app.
@@ -75,6 +76,52 @@ function createApp(config) {
   app.use(createOptimizationRouter(config));
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
+
+  // ── Spend Sync — daily 8 AM EST spend pull from Google Ads → Sheets ──
+  const { requireAuth } = require('./middleware/auth');
+
+  app.get('/api/spend-sync/status', requireAuth, (req, res) => {
+    res.json(spendSync.getSpendSyncStatus());
+  });
+
+  app.post('/api/spend-sync/enable', requireAuth, (req, res) => {
+    const refreshToken = req.session.tokens.refresh_token;
+    const mccId = req.session.mccId || config.googleAds.mccId;
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+    if (!spreadsheetId) {
+      return res.status(400).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured.' });
+    }
+    spendSync.enableSpendSync({
+      config: config.googleAds,
+      refreshToken,
+      mccId,
+      spreadsheetId,
+      runNow: req.body.runNow === true,
+    });
+    res.json({ enabled: true, ...spendSync.getSpendSyncStatus() });
+  });
+
+  app.post('/api/spend-sync/disable', requireAuth, (req, res) => {
+    spendSync.disableSpendSync();
+    res.json({ enabled: false });
+  });
+
+  app.post('/api/spend-sync/run-now', requireAuth, async (req, res) => {
+    const refreshToken = req.session.tokens.refresh_token;
+    const mccId = req.session.mccId || config.googleAds.mccId;
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+    if (!spreadsheetId) {
+      return res.status(400).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured.' });
+    }
+    spendSync.enableSpendSync({
+      config: config.googleAds,
+      refreshToken,
+      mccId,
+      spreadsheetId,
+    });
+    spendSync.runSpendSync();
+    res.json({ message: 'Spend sync started.', ...spendSync.getSpendSyncStatus() });
+  });
 
   // ── Health check ──
   app.get('/health', (req, res) => {
