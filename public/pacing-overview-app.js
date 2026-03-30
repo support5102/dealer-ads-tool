@@ -86,6 +86,8 @@ async function loadOverview() {
   document.getElementById('refreshBtn').disabled = true;
 
   try {
+    // Ensure accounts are loaded into session before fetching pacing
+    await fetch('/api/accounts');
     const res = await fetch('/api/pacing/all');
     const data = await res.json();
 
