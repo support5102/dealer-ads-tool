@@ -4,57 +4,87 @@
  * Called by: routes/audit.js (POST /api/audit/all)
  * Calls: services/google-ads.js (queryViaRest for child account discovery)
  *
- * Discovers all non-manager child accounts under an MCC, then runs a callback
- * against each account with rate limiting and error isolation. One account
- * failure does not abort the batch.
+ * Discovers all non-manager child accounts under an MCC (recursively through
+ * sub-MCCs), then runs a callback against each account with rate limiting
+ * and error isolation. One account failure does not abort the batch.
  */
 
 const { queryViaRest } = require('./google-ads');
 
 /**
- * Discovers non-manager child accounts under an MCC.
+ * Discovers non-manager child accounts under an MCC, recursively through sub-MCCs.
  *
  * @param {Object} config - googleAds config (clientId, clientSecret, developerToken)
  * @param {string} accessToken - Fresh OAuth access token
  * @param {string} mccId - MCC customer ID
  * @param {Function} [queryFn] - Injectable query function (for testing)
- * @returns {Promise<Object[]>} Array of { customerId, name, currency, isManager }
+ * @param {string} [rootMccId] - Top-level MCC for login-customer-id header
+ * @param {Set} [visited] - Prevents infinite loops on circular links
+ * @returns {Promise<Object[]>} Array of { customerId, name, currency, isManager, managingMccId }
  */
-async function discoverAccounts(config, accessToken, mccId, queryFn) {
+async function discoverAccounts(config, accessToken, mccId, queryFn, rootMccId, visited) {
   const doQuery = queryFn || queryViaRest;
   const cleanMcc = String(mccId).replace(/-/g, '');
+  const root = rootMccId ? String(rootMccId).replace(/-/g, '') : cleanMcc;
+  const seen = visited || new Set();
 
-  // Match the existing accounts.js discovery query exactly:
-  // - customer_client.status = 'ENABLED' filters out suspended/cancelled
-  // - No level filter so sub-MCC children at any depth are included
-  const rows = await doQuery(
-    accessToken,
-    config.developerToken,
-    cleanMcc,
-    `SELECT customer_client.id, customer_client.descriptive_name,
-            customer_client.currency_code, customer_client.manager
-     FROM customer_client
-     WHERE customer_client.status = 'ENABLED'`,
-    cleanMcc
-  );
+  if (seen.has(cleanMcc)) return [];
+  seen.add(cleanMcc);
 
-  return rows
-    .filter(r => {
-      const cc = r.customerClient || r.customer_client || {};
-      // Guard against malformed rows: must have a valid ID
-      if (!cc.id) return false;
-      // Filter out managers (MCCs) and the MCC itself
-      return !cc.manager && String(cc.id) !== cleanMcc;
-    })
-    .map(r => {
-      const cc = r.customerClient || r.customer_client || {};
-      return {
-        customerId: String(cc.id),
+  let rows;
+  try {
+    rows = await doQuery(
+      accessToken,
+      config.developerToken,
+      cleanMcc,
+      `SELECT customer_client.id, customer_client.descriptive_name,
+              customer_client.currency_code, customer_client.manager
+       FROM customer_client
+       WHERE customer_client.status = 'ENABLED'`,
+      root
+    );
+  } catch (err) {
+    console.error(`[discoverAccounts] Failed to query MCC ${cleanMcc}:`, err.message);
+    return [];
+  }
+
+  const accounts = [];
+  const subMccs = [];
+
+  for (const r of rows) {
+    const cc = r.customerClient || r.customer_client || {};
+    if (!cc.id) continue;
+    const id = String(cc.id);
+    if (id === cleanMcc) continue;
+
+    if (cc.manager) {
+      subMccs.push(id);
+    } else {
+      accounts.push({
+        customerId: id,
         name: cc.descriptiveName || cc.descriptive_name || '',
         currency: cc.currencyCode || cc.currency_code || 'USD',
         isManager: false,
-      };
-    });
+        managingMccId: cleanMcc,
+      });
+    }
+  }
+
+  // Recursively discover accounts under each sub-MCC
+  for (const subMcc of subMccs) {
+    const subAccounts = await discoverAccounts(config, accessToken, subMcc, queryFn, root, seen);
+    accounts.push(...subAccounts);
+  }
+
+  // Deduplicate by customerId
+  const unique = new Map();
+  for (const acct of accounts) {
+    if (!unique.has(acct.customerId)) {
+      unique.set(acct.customerId, acct);
+    }
+  }
+
+  return Array.from(unique.values());
 }
 
 /**
@@ -78,11 +108,13 @@ async function iterateAccounts(params) {
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
+    // Use the managing MCC as login customer ID for correct access
+    const loginMcc = account.managingMccId || String(mccId).replace(/-/g, '');
     const restCtx = {
       accessToken,
       developerToken: config.developerToken,
       customerId: account.customerId.replace(/-/g, ''),
-      loginCustomerId: String(mccId).replace(/-/g, ''),
+      loginCustomerId: loginMcc,
     };
     if (queryFn) restCtx._queryFn = queryFn;
 

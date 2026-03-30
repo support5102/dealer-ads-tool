@@ -62,7 +62,7 @@ function createChangesRouter(config) {
 
   // Apply changes to Google Ads
   router.post('/api/apply-changes', requireAuth, async (req, res, next) => {
-    const { changes, customerId, dryRun = true } = req.body;
+    const { changes, customerId, mccId: bodyMccId, dryRun = true } = req.body;
     if (!Array.isArray(changes) || !customerId) {
       return res.status(400).json({ error: 'Missing changes or customerId' });
     }
@@ -71,8 +71,9 @@ function createChangesRouter(config) {
     const isDryRun = dryRun !== false;
 
     try {
-      const mccId = req.session.mccId || config.googleAds.mccId;
-      console.log('apply-changes auth:', { customerId: String(customerId), mccId, sessionMccId: req.session.mccId, configMccId: config.googleAds.mccId, isDryRun });
+      // Use account-specific MCC from request, fall back to session/config
+      const mccId = bodyMccId || req.session.mccId || config.googleAds.mccId;
+      console.log('apply-changes auth:', { customerId: String(customerId), mccId, bodyMccId, sessionMccId: req.session.mccId, isDryRun });
       const client = googleAds.createClient(
         config.googleAds,
         req.session.tokens.refresh_token,
@@ -88,13 +89,8 @@ function createChangesRouter(config) {
           const result = await applyChange(client, change, isDryRun);
           results.push({ change, result, success: true });
         } catch (err) {
-          // google-ads-api errors may have .errors[], .failures[], or nested details
-          const gadsErrors = err.errors || err.failures || [];
-          const detail = gadsErrors.length
-            ? JSON.stringify(gadsErrors.map(e => e.error_code || e.message || e))
-            : '';
-          const msg = err.message || detail || JSON.stringify(err) || 'Unknown error';
-          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg, detail ? `| details: ${detail}` : '');
+          const msg = err.message || 'Unknown error';
+          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg);
           errors.push({ change, error: msg });
           results.push({ change, result: msg, success: false });
         }
