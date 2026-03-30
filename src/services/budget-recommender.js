@@ -340,14 +340,15 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       reason = `Account over-pacing — decrease to hit $${requiredDailyRate.toFixed(2)}/day target`;
 
       // Cap cut at 30% per cycle — never slash VLAs aggressively
-      const minAfterCut = currentSpend * (1 - MAX_CUT_RATIO);
+      const cutBase = Math.min(currentSpend, campaign.dailyBudget || currentSpend);
+      const minAfterCut = cutBase * (1 - MAX_CUT_RATIO);
       recommended = Math.max(recommended, minAfterCut);
 
       // If IS > 90%, the IS reduction might be even steeper — use lower value
       // But still respect the 30% max cut cap
       if (is != null && is > VLA_IS_TARGET.max) {
         const isReduced = currentSpend * (VLA_IS_TARGET.max / is);
-        const isFloor = currentSpend * (1 - MAX_CUT_RATIO); // 30% cap applies to IS cuts too
+        const isFloor = cutBase * (1 - MAX_CUT_RATIO); // 30% cap applies to IS cuts too
         const cappedIsReduced = Math.max(isReduced, isFloor);
         if (cappedIsReduced < recommended) {
           recommended = cappedIsReduced;

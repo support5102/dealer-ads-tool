@@ -261,9 +261,10 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, re
       const maxBudget = base * MAX_INCREASE_MULTIPLIER;
       newDailyBudget = Math.min(newDailyBudget, Math.max(maxBudget, base + 1));
     } else {
-      // Over-pacing: cap cut at 30% of current spend per cycle (use spend, not budget setting)
-      const base = Math.max(budget.currentDailySpend, budget.currentBudgetSetting);
-      const minAfterCut = base * (1 - MAX_CUT_RATIO);
+      // Over-pacing: cap cut at 30% of the LOWER of spend and budget setting.
+      // Using the higher would push recommendations UP when budget setting >> actual spend.
+      const base = Math.min(budget.currentDailySpend, budget.currentBudgetSetting);
+      const minAfterCut = base > 0 ? base * (1 - MAX_CUT_RATIO) : 0;
       newDailyBudget = Math.max(newDailyBudget, minAfterCut);
     }
 
