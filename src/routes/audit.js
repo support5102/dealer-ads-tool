@@ -249,8 +249,8 @@ function createAuditRouter(config) {
 
       res.json({ diagnoses: results });
     } catch (err) {
-      console.error('Diagnose error:', err.message);
-      next(err);
+      console.error('Diagnose error:', err.message, err.stack);
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
   });
 
