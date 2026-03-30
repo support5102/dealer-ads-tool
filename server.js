@@ -16,6 +16,7 @@ const { createBuilderRouter }      = require('./src/routes/builder');
 const { createAuditRouter }        = require('./src/routes/audit');
 const { createSchedulerRouter }    = require('./src/routes/scheduler');
 const { createOptimizationRouter } = require('./src/routes/optimization');
+const spendSync = require('./src/services/spend-sync');
 
 // ─────────────────────────────────────────────────────────────
 // STARTUP VALIDATION — fail fast if required env vars are missing
@@ -78,7 +79,7 @@ app.get('/auth/google', (req, res) => {
     client_id:     process.env.GOOGLE_ADS_CLIENT_ID,
     redirect_uri:  `${process.env.APP_URL}/auth/callback`,
     response_type: 'code',
-    scope:         'https://www.googleapis.com/auth/adwords',
+    scope:         'https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets',
     access_type:   'offline',
     prompt:        'consent',
   });
@@ -105,6 +106,21 @@ app.get('/auth/callback', async (req, res) => {
       refresh_token: data.refresh_token,
       token_expiry:  Date.now() + (data.expires_in || 3600) * 1000,
     };
+
+    // Auto-enable daily spend sync when user authenticates
+    if (data.refresh_token && process.env.GOOGLE_SHEETS_SPREADSHEET_ID) {
+      const mccId = process.env.GOOGLE_ADS_MCC_ID || '';
+      spendSync.enableSpendSync({
+        config: {
+          clientId:       process.env.GOOGLE_ADS_CLIENT_ID,
+          clientSecret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+          developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+        },
+        refreshToken: data.refresh_token,
+        mccId,
+        spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+      });
+    }
 
     res.redirect('/?connected=true');
   } catch (err) {
@@ -1433,6 +1449,62 @@ app.use(createBuilderRouter(v2Config));
 app.use(createSchedulerRouter());
 app.use(createAuditRouter(v2Config));
 app.use(createOptimizationRouter(v2Config));
+
+// ─────────────────────────────────────────────────────────────
+// SPEND SYNC — daily 8 AM EST spend pull from Google Ads → Sheets
+// ─────────────────────────────────────────────────────────────
+app.get('/api/spend-sync/status', requireAuth, (req, res) => {
+  res.json(spendSync.getSpendSyncStatus());
+});
+
+app.post('/api/spend-sync/enable', requireAuth, (req, res) => {
+  const refreshToken = req.session.tokens.refresh_token;
+  const mccId = req.session.mccId || process.env.GOOGLE_ADS_MCC_ID;
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+  if (!spreadsheetId) {
+    return res.status(400).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured.' });
+  }
+  spendSync.enableSpendSync({
+    config: {
+      clientId:       process.env.GOOGLE_ADS_CLIENT_ID,
+      clientSecret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    },
+    refreshToken,
+    mccId,
+    spreadsheetId,
+    runNow: req.body.runNow === true,
+  });
+  res.json({ enabled: true, ...spendSync.getSpendSyncStatus() });
+});
+
+app.post('/api/spend-sync/disable', requireAuth, (req, res) => {
+  spendSync.disableSpendSync();
+  res.json({ enabled: false });
+});
+
+app.post('/api/spend-sync/run-now', requireAuth, async (req, res) => {
+  const refreshToken = req.session.tokens.refresh_token;
+  const mccId = req.session.mccId || process.env.GOOGLE_ADS_MCC_ID;
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+  if (!spreadsheetId) {
+    return res.status(400).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured.' });
+  }
+  // Ensure it's enabled with latest token
+  spendSync.enableSpendSync({
+    config: {
+      clientId:       process.env.GOOGLE_ADS_CLIENT_ID,
+      clientSecret:   process.env.GOOGLE_ADS_CLIENT_SECRET,
+      developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    },
+    refreshToken,
+    mccId,
+    spreadsheetId,
+  });
+  // Run immediately (async — returns right away)
+  spendSync.runSpendSync();
+  res.json({ message: 'Spend sync started. Check /api/spend-sync/status for progress.', ...spendSync.getSpendSyncStatus() });
+});
 
 // ─────────────────────────────────────────────────────────────
 // HEALTH CHECK
