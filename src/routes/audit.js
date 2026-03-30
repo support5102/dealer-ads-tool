@@ -291,7 +291,7 @@ function createAuditRouter(config) {
           try {
             await axios.post(
               `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
-              { operations },
+              { operations, partialFailure: true },
               {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
