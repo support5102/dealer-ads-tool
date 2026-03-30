@@ -296,7 +296,7 @@ function createAuditRouter(config) {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
                   'developer-token': config.googleAds.developerToken,
-                  ...(mccId ? { 'login-customer-id': mccId } : {}),
+                  ...(mccId ? { 'login-customer-id': String(mccId).replace(/-/g, '') } : {}),
                 },
                 timeout: 30000,
               }
