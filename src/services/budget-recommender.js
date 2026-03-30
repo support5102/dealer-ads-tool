@@ -14,10 +14,15 @@
  */
 
 const { calculatePacing } = require('./pacing-calculator');
+const { BUDGET_SPLITS } = require('./strategy-rules');
 
 // VLA impression share targets — below 75% we're leaving money on the table,
 // above 90% CPC inflates with diminishing returns.
 const VLA_IS_TARGET = { min: 0.75, max: 0.90 };
+
+// Max increase/cut caps per adjustment cycle
+const MAX_INCREASE_MULTIPLIER = 2.0;  // Never more than 2x current budget per cycle
+const MAX_CUT_RATIO = 0.30;          // Never cut more than 30% per cycle
 
 /**
  * Maps pacing status to dashboard color.
@@ -326,16 +331,26 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     let recommended;
     let reason;
 
+    // VLA minimum floor: share of 40% allocation from strategy-rules.js
+    const vlaMinFloor = requiredDailyRate * (BUDGET_SPLITS.vla.min || 0.40) / Math.max(vlaCampaigns.length, 1);
+
     if (accountOverPacing) {
       // VLAs take a smaller cut than shared budgets
       recommended = currentSpend * vlaOverPacingRatio;
       reason = `Account over-pacing — decrease to hit $${requiredDailyRate.toFixed(2)}/day target`;
 
+      // Cap cut at 30% per cycle — never slash VLAs aggressively
+      const minAfterCut = currentSpend * (1 - MAX_CUT_RATIO);
+      recommended = Math.max(recommended, minAfterCut);
+
       // If IS > 90%, the IS reduction might be even steeper — use lower value
+      // But still respect the 30% max cut cap
       if (is != null && is > VLA_IS_TARGET.max) {
         const isReduced = currentSpend * (VLA_IS_TARGET.max / is);
-        if (isReduced < recommended) {
-          recommended = isReduced;
+        const isFloor = currentSpend * (1 - MAX_CUT_RATIO); // 30% cap applies to IS cuts too
+        const cappedIsReduced = Math.max(isReduced, isFloor);
+        if (cappedIsReduced < recommended) {
+          recommended = cappedIsReduced;
           reason = `IS ${(is * 100).toFixed(1)}% exceeds 90% — reduce to avoid CPC inflation`;
         }
       }
@@ -345,26 +360,29 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
           + (bls != null && bls > 0.05 ? `, ${(bls * 100).toFixed(1)}% lost to budget` : '')
           + `)`;
       }
+
+      // VLA floor: don't cut below 40% allocation floor.
+      // But if VLA is already below the floor, don't force it UP while over-pacing —
+      // that would worsen over-pacing. Just don't cut it further.
+      const effectiveFloor = Math.min(vlaMinFloor, campaign.dailyBudget || currentSpend);
+      recommended = Math.max(recommended, effectiveFloor);
     } else {
       // Under-pacing: IS-driven allocation
       recommended = currentSpend;
       if (is != null && is < VLA_IS_TARGET.min) {
-        // IS-driven boost capped at 3x current spend.
-        // Beyond 3x, the campaign likely has feed/targeting issues, not just budget.
-        const MAX_VLA_BOOST = 3.0;
+        // Cap increase at 2x current budget per cycle (prevents absurd spikes).
+        // Beyond 2x, changes should happen gradually over multiple cycles.
         const rawBoost = VLA_IS_TARGET.min / Math.max(is, 0.01);
-        const boost = Math.min(rawBoost, MAX_VLA_BOOST);
+        const boost = Math.min(rawBoost, MAX_INCREASE_MULTIPLIER);
         recommended = currentSpend * boost;
         reason = `IS ${(is * 100).toFixed(1)}% below 75% target`
           + (bls != null && bls > 0.05 ? ` (${(bls * 100).toFixed(1)}% lost to budget)` : '')
           + ` — increase to capture more VLA traffic`;
-        if (rawBoost > MAX_VLA_BOOST) {
-          reason += ` (capped at ${MAX_VLA_BOOST}x — check feed/targeting if IS remains low)`;
+        if (rawBoost > MAX_INCREASE_MULTIPLIER) {
+          reason += ` (capped at ${MAX_INCREASE_MULTIPLIER}x — check feed/targeting if IS remains low)`;
         }
       } else if (is != null && is > VLA_IS_TARGET.max) {
         // IS > 90% but account is under-pacing — keep spend, note the IS.
-        // Reducing VLAs on an under-pacing account worsens the pacing gap
-        // even if CPCs are inflated. The account needs every dollar.
         reason = `IS ${(is * 100).toFixed(1)}% above 90% — maintaining budget (account under-pacing)`;
       } else if (is != null) {
         reason = `IS ${(is * 100).toFixed(1)}% on target (75-90%)`;
@@ -376,10 +394,18 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       if (recommended < (campaign.dailyBudget || 0)) {
         recommended = campaign.dailyBudget;
       }
+      // Cap increase at 2x current budget per cycle
+      const maxBudget = (campaign.dailyBudget || currentSpend) * MAX_INCREASE_MULTIPLIER;
+      recommended = Math.min(recommended, Math.max(maxBudget, (campaign.dailyBudget || 1) + 1));
       recommended = Math.max(recommended, 1);
     }
 
-    recommended = Math.max(recommended, 0.01);
+    // Under-pacing: VLA floor at 40% allocation (we're adding budget, so push toward target)
+    // Over-pacing: already handled above with effectiveFloor
+    if (!accountOverPacing) {
+      recommended = Math.max(recommended, vlaMinFloor);
+    }
+    recommended = Math.max(recommended, 1);
     recommended = Math.round(recommended * 100) / 100;
 
     return { campaign, recommended, reason, currentSpend, budgetSetting: campaign.dailyBudget };
@@ -469,11 +495,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
 
     if (accountOverPacing) {
-      // Over-pacing: tier-weighted cuts
+      // Over-pacing: tier-weighted cuts, capped at 30% per budget per cycle
       sharedAllocations.forEach(a => {
         const tierWeight = TIER_CUT_WEIGHTS[a.tier] || 1.0;
         const baseCut = 1 - sharedOverPacingRatio;
-        const tierCut = Math.min(baseCut * tierWeight, 1);
+        const tierCut = Math.min(baseCut * tierWeight, MAX_CUT_RATIO); // cap at 30%
         a.recommended = a.currentSpend * (1 - tierCut);
       });
 

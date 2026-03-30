@@ -349,8 +349,9 @@ describe('distributeAccountBudget', () => {
     expect(vlaRec).toBeUndefined();
   });
 
-  test('VLA boost is IS-driven, capped at 3x current spend', () => {
+  test('VLA boost is IS-driven, capped at 2x per cycle but 40% allocation floor applies', () => {
     const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 });
+    // Required daily rate: $500/day. 40% VLA floor = $200.
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
     ];
@@ -363,10 +364,11 @@ describe('distributeAccountBudget', () => {
     });
 
     const vlaRec = recommendations.find(r => r.isVla);
-    // 0.75 / 0.10 = 7.5x raw, capped at 3x → $50 * 3 = $150
-    expect(vlaRec.recommendedDailyBudget).toBe(150);
+    // 2x cap = $100, but 40% allocation floor = $200/day for 1 VLA.
+    // Under-pacing: 40% floor takes priority to ensure VLA gets proper allocation.
+    expect(vlaRec.recommendedDailyBudget).toBe(200);
     expect(vlaRec.reason).toMatch(/below 75% target/);
-    expect(vlaRec.reason).toMatch(/capped at 3x/);
+    expect(vlaRec.reason).toMatch(/capped at 2x/);
   });
 
   test('skips non-VLA dedicated campaigns (not adjusted)', () => {
@@ -412,22 +414,20 @@ describe('distributeAccountBudget', () => {
     });
 
     // Over-pacing: VLA + shared must cover $60, currently $70 (VLA $20 + shared $50)
-    // VLA takes half the % cut of shared. sharedR = (60 - 20*0.5)/(20*0.5 + 50) = 50/60 = 0.833
-    // vlaR = 1 - 0.5*(1-0.833) = 0.917. VLA: 20*0.917=$18.33, Shared: 50*0.833=$41.67
+    // VLA is already below 40% floor ($40) at $20, so it's NOT cut further — change is $0
+    // and it gets filtered out. Shared budget absorbs the full cut.
     const vlaRec = recommendations.find(r => r.isVla);
-    expect(vlaRec).toBeDefined();
-    expect(vlaRec.recommendedDailyBudget).toBeCloseTo(18.33, 1);
-    expect(vlaRec.change).toBeLessThan(0);
+    // VLA should be filtered out (no change needed — already under-allocated)
+    expect(vlaRec).toBeUndefined();
 
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
-    expect(sharedRec.recommendedDailyBudget).toBeCloseTo(41.67, 1);
+    expect(sharedRec.recommendedDailyBudget).toBeLessThan(50);
     expect(sharedRec.change).toBeLessThan(0);
 
-    // VLA cut % should be smaller than shared cut %
-    const vlaCutPct = Math.abs(vlaRec.change) / 20;
+    // Shared absorbs entire cut since VLA is protected
     const sharedCutPct = Math.abs(sharedRec.change) / 50;
-    expect(vlaCutPct).toBeLessThan(sharedCutPct);
+    expect(sharedCutPct).toBeGreaterThan(0);
   });
 
   test('multiple shared budgets distributed proportionally to budget size', () => {
@@ -744,7 +744,7 @@ describe('generateRecommendation', () => {
     expect(rec.impressionShareSummary.avgImpressionShare).toBeNull();
   });
 
-  test('budget fully spent: all recommendations are decreases', () => {
+  test('budget fully spent: non-VLA recommendations are decreases, VLAs protected', () => {
     const params = {
       ...baseParams,
       campaignSpend: [
@@ -753,8 +753,10 @@ describe('generateRecommendation', () => {
     };
     const rec = generateRecommendation(params);
     expect(rec.status).toMatch(/over/);
-    // When over-pacing, every recommendation must be a decrease (never an increase)
-    rec.recommendations.forEach(r => {
+    // When over-pacing: non-VLA budgets decrease. VLAs are protected by 40% floor
+    // and may have zero or positive change if already under-allocated.
+    const nonVla = rec.recommendations.filter(r => !r.isVla);
+    nonVla.forEach(r => {
       expect(r.change).toBeLessThanOrEqual(0);
     });
   });

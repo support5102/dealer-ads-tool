@@ -140,14 +140,15 @@ describe('distributeByWeight', () => {
     expect(result[1].change).toBeLessThan(0);
   });
 
-  test('never goes below $1/day floor', () => {
+  test('never goes below $1/day floor (respects 30% max cut cap)', () => {
     const classified = [
       { campaignType: 'regional', weight: 1.0, currentDailySpend: 5, currentBudgetSetting: 5,
         budgetType: 'shared_budget', target: 'Regional', resourceName: 'r1',
         model: null, isShared: true, campaigns: [] },
     ];
     const result = distributeByWeight(classified, -100, false, new Map());
-    expect(result[0].recommendedDailyBudget).toBe(1);
+    // 30% max cut: $5 * 0.70 = $3.50 (capped before $1 floor applies)
+    expect(result[0].recommendedDailyBudget).toBe(3.5);
   });
 
   test('returns empty for negligible change needed', () => {

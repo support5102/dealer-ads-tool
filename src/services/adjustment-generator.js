@@ -22,6 +22,7 @@ const {
   computeInventoryShares,
   getEffectiveWeight,
 } = require('./campaign-classifier');
+const { BUDGET_SPLITS } = require('./strategy-rules');
 
 /**
  * Generates executable budget adjustments for a single account.
@@ -67,7 +68,6 @@ function generateExecutableAdjustments(params) {
 
   // Compute inventory shares
   const inventoryShares = computeInventoryShares(inventoryByModel);
-  const isAddition = direction === 'under';
 
   // Build impression share lookup
   const isMap = new Map();
@@ -81,17 +81,37 @@ function generateExecutableAdjustments(params) {
     ? pacing.remainingBudget / pacing.daysRemaining
     : 0;
 
-  // Classify all budgets and compute effective weights
+  // Calculate total daily change needed FIRST to derive true direction.
+  // The detector's direction can disagree with the math when pace variance
+  // and projected miss diverge — the math is authoritative.
+  // Note: isAddition=false here is arbitrary; only currentDailySpend is extracted
+  // and that doesn't depend on the weight direction.
+  const currentDailyTotal = (() => {
+    const tempClassified = classifyAllBudgets(
+      dedicatedBudgets, sharedBudgets, dailySpendMap, inventoryShares, false
+    );
+    return tempClassified.reduce((s, b) => s + b.currentDailySpend, 0);
+  })();
+  const totalChangeNeeded = requiredDailyRate - currentDailyTotal;
+
+  // No change needed — short-circuit
+  if (Math.abs(totalChangeNeeded) < 1) {
+    return { adjustmentId, customerId, dealerName, generatedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+      direction: direction || 'under', adjustments: [], summary: null };
+  }
+
+  // Derive direction from actual change needed, not detector input
+  const actualDirection = totalChangeNeeded > 0 ? 'under' : 'over';
+  const isAddition = actualDirection === 'under';
+
+  // Classify all budgets with correct direction for weight computation
   const classifiedBudgets = classifyAllBudgets(
     dedicatedBudgets, sharedBudgets, dailySpendMap, inventoryShares, isAddition
   );
 
-  // Calculate total daily change needed
-  const currentDailyTotal = classifiedBudgets.reduce((s, b) => s + b.currentDailySpend, 0);
-  const totalChangeNeeded = requiredDailyRate - currentDailyTotal;
-
   // Distribute the change proportionally by weighted share
-  const adjustments = distributeByWeight(classifiedBudgets, totalChangeNeeded, isAddition, isMap);
+  const adjustments = distributeByWeight(classifiedBudgets, totalChangeNeeded, isAddition, isMap, requiredDailyRate);
 
   // Filter out negligible changes (< $1)
   const significantAdjustments = adjustments.filter(a => Math.abs(a.change) >= 1);
@@ -102,7 +122,7 @@ function generateExecutableAdjustments(params) {
     currentDailyTotal: Math.round(currentDailyTotal * 100) / 100,
     totalChangeNeeded: Math.round(totalChangeNeeded * 100) / 100,
     adjustmentCount: significantAdjustments.length,
-    direction,
+    direction: actualDirection,
   };
 
   return {
@@ -111,7 +131,7 @@ function generateExecutableAdjustments(params) {
     dealerName,
     generatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-    direction,
+    direction: actualDirection,
     adjustments: significantAdjustments,
     summary,
   };
@@ -203,7 +223,7 @@ function classifyAllBudgets(dedicatedBudgets, sharedBudgets, spendMap, inventory
  * @param {Map} isMap - Impression share lookup
  * @returns {Object[]} Adjustment objects ready for executor
  */
-function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap) {
+function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, requiredDailyRate) {
   if (classified.length === 0 || Math.abs(totalChangeNeeded) < 1) return [];
 
   // Compute weighted shares
@@ -213,6 +233,18 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap) {
 
   if (totalWeightedSpend === 0) return [];
 
+  // VLA minimum floor: 40% of required daily rate per strategy-rules.js BUDGET_SPLITS
+  // Guard: floor total must not exceed requiredDailyRate (small accounts near month-end)
+  const vlaBudgets = classified.filter(b => b.campaignType === CAMPAIGN_TYPES.VLA);
+  const rawVlaFloor = (requiredDailyRate || 0) * (BUDGET_SPLITS.vla.min || 0.40);
+  const vlaMinFloor = Math.min(rawVlaFloor, (requiredDailyRate || 0) * 0.70); // cap at 70% of target
+  const vlaFloorPerBudget = vlaBudgets.length > 0 ? vlaMinFloor / vlaBudgets.length : 0;
+
+  // Max increase cap: 2x current budget per cycle (prevents absurd single-change spikes)
+  const MAX_INCREASE_MULTIPLIER = 2.0;
+  // Max cut: 30% of current budget per cycle (per strategy-rules budget-manager)
+  const MAX_CUT_RATIO = 0.30;
+
   return classified.map(budget => {
     const weightedSpend = Math.max(budget.currentDailySpend, 1) * budget.weight;
     const share = weightedSpend / totalWeightedSpend;
@@ -221,7 +253,30 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap) {
     // Calculate new budget
     let newDailyBudget = budget.currentBudgetSetting + rawChange;
 
-    // Floor: never go below $1/day
+    const isVla = budget.campaignType === CAMPAIGN_TYPES.VLA;
+
+    if (isAddition) {
+      // Under-pacing: cap increase at 2x current budget per cycle
+      const base = Math.max(budget.currentBudgetSetting, budget.currentDailySpend);
+      const maxBudget = base * MAX_INCREASE_MULTIPLIER;
+      newDailyBudget = Math.min(newDailyBudget, Math.max(maxBudget, base + 1));
+    } else {
+      // Over-pacing: cap cut at 30% of current spend per cycle (use spend, not budget setting)
+      const base = Math.max(budget.currentDailySpend, budget.currentBudgetSetting);
+      const minAfterCut = base * (1 - MAX_CUT_RATIO);
+      newDailyBudget = Math.max(newDailyBudget, minAfterCut);
+    }
+
+    // VLA floor: don't cut VLAs below their share of 40% allocation.
+    // But if already below the floor, don't force UP while over-pacing.
+    if (isVla) {
+      const effectiveFloor = isAddition
+        ? vlaFloorPerBudget  // under-pacing: push toward 40% target
+        : Math.min(vlaFloorPerBudget, budget.currentBudgetSetting);  // over-pacing: don't cut below floor or force up
+      newDailyBudget = Math.max(newDailyBudget, effectiveFloor);
+    }
+
+    // General floor: never below $1/day
     newDailyBudget = Math.max(newDailyBudget, 1);
 
     // Round to cents
