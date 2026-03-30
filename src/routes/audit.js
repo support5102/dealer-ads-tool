@@ -282,17 +282,30 @@ function createAuditRouter(config) {
           const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
           const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
           const recommendations = await googleAds.getRecommendations(restCtx);
+
+          // Dismiss via REST API directly — the google-ads-api library
+          // doesn't support client.recommendations.dismiss()
+          const axios = require('axios');
           for (const rec of recommendations) {
             try {
-              await applyChange(client, {
-                type: 'dismiss_recommendation',
-                details: { resourceName: rec.resourceName },
-              });
+              await axios.post(
+                `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
+                { operations: [{ resource_name: rec.resourceName }] },
+                {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'developer-token': config.googleAds.developerToken,
+                    ...(mccId ? { 'login-customer-id': mccId } : {}),
+                  },
+                  timeout: 10000,
+                }
+              );
               results.applied++;
               results.details.push({ description: `Dismissed: ${rec.type}`, success: true });
             } catch (err) {
+              const msg = err.response?.data?.error?.message || err.message;
               results.failed++;
-              results.details.push({ description: `Failed to dismiss: ${rec.type}`, error: err.message, success: false });
+              results.details.push({ description: `Failed to dismiss: ${rec.type}`, error: msg, success: false });
             }
           }
         } catch (err) {
