@@ -13,6 +13,74 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
 
+const CUSTOMER_CLIENT_QUERY = `SELECT customer_client.id, customer_client.descriptive_name,
+  customer_client.currency_code, customer_client.manager, customer_client.level
+  FROM customer_client WHERE customer_client.status = 'ENABLED'`;
+
+/**
+ * Recursively discovers all non-manager accounts under an MCC hierarchy.
+ * Handles nested MCCs (e.g. PPC Account MCC → Savvy Ford MCC → dealer accounts).
+ *
+ * @param {string} accessToken
+ * @param {string} developerToken
+ * @param {string} mccId - Current MCC to query
+ * @param {string} rootMccId - Top-level MCC for login-customer-id header
+ * @param {Set} visited - Prevents infinite loops on circular links
+ * @returns {Promise<Object[]>} Flat array of { id, name, currency, isManager, mccId }
+ */
+async function discoverAllAccounts(accessToken, developerToken, mccId, rootMccId, visited = new Set()) {
+  const cleanMcc = String(mccId).replace(/-/g, '');
+  if (visited.has(cleanMcc)) return [];
+  visited.add(cleanMcc);
+
+  let rows;
+  try {
+    rows = await googleAds.queryViaRest(
+      accessToken, developerToken, cleanMcc,
+      CUSTOMER_CLIENT_QUERY,
+      rootMccId
+    );
+  } catch (err) {
+    console.error(`[discoverAllAccounts] Failed to query MCC ${cleanMcc}:`, err.message);
+    return [];
+  }
+
+  const accounts = [];
+  const subMccs = [];
+
+  for (const row of rows) {
+    const c = row.customerClient;
+    if (!c || !c.id) continue;
+    const id = String(c.id);
+
+    // Skip the MCC itself
+    if (id === cleanMcc) continue;
+
+    if (c.manager) {
+      // Sub-MCC — queue for recursive discovery
+      subMccs.push(id);
+    } else {
+      accounts.push({
+        id,
+        name: c.descriptiveName || 'Account ' + id,
+        currency: c.currencyCode || '',
+        isManager: false,
+        mccId: cleanMcc, // Track which MCC directly manages this account
+      });
+    }
+  }
+
+  // Recursively discover accounts under each sub-MCC
+  for (const subMcc of subMccs) {
+    const subAccounts = await discoverAllAccounts(
+      accessToken, developerToken, subMcc, rootMccId, visited
+    );
+    accounts.push(...subAccounts);
+  }
+
+  return accounts;
+}
+
 /**
  * Creates account routes with the given config.
  *
@@ -22,7 +90,7 @@ const googleAds = require('../services/google-ads');
 function createAccountsRouter(config) {
   const router = express.Router();
 
-  // List all accessible accounts via MCC
+  // List all accessible accounts via MCC (including nested sub-MCCs)
   router.get('/api/accounts', requireAuth, async (req, res, next) => {
     try {
       const refreshToken = req.session.tokens.refresh_token;
@@ -38,29 +106,24 @@ function createAccountsRouter(config) {
       }
       req.session.mccId = mccId;
 
-      // Query all descendant accounts from MCC (any depth) — filter out managers below
-      let accounts = [];
-      const rows = await googleAds.queryViaRest(
-        accessToken, config.googleAds.developerToken, mccId,
-        'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.status = \'ENABLED\'',
-        mccId
+      // Recursively discover all accounts under MCC hierarchy
+      const accounts = await discoverAllAccounts(
+        accessToken, config.googleAds.developerToken, mccId, mccId
       );
 
-      rows.forEach(row => {
-        const c = row.customerClient;
-        if (c && !c.manager) {
-          accounts.push({
-            id:        String(c.id),
-            name:      c.descriptiveName || 'Account ' + c.id,
-            currency:  c.currencyCode || '',
-            isManager: false,
-            mccId,
-          });
+      // Deduplicate by account ID (an account could appear under multiple MCCs)
+      const seen = new Map();
+      for (const acct of accounts) {
+        if (!seen.has(acct.id)) {
+          seen.set(acct.id, acct);
         }
-      });
+      }
 
-      accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      res.json({ accounts });
+      const unique = Array.from(seen.values());
+      unique.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+      console.log(`[accounts] Discovered ${unique.length} accounts (from ${accounts.length} total incl. dupes)`);
+      res.json({ accounts: unique });
 
     } catch (err) {
       console.error('Accounts error:', err.response?.data?.error || err.message);
@@ -100,4 +163,4 @@ function createAccountsRouter(config) {
   return router;
 }
 
-module.exports = { createAccountsRouter };
+module.exports = { createAccountsRouter, discoverAllAccounts };

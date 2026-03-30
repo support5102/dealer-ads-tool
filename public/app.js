@@ -136,6 +136,7 @@ async function selectAccount(id) {
   const acc = state.accounts.find(a => a.id === id);
   state.selectedId   = id;
   state.selectedName = acc?.name || id;
+  state.selectedMccId = acc?.mccId || null;
   state.plan         = null;
   document.getElementById('planArea').innerHTML       = '';
   document.getElementById('accountLabel').textContent = '→ ' + state.selectedName;
@@ -370,6 +371,7 @@ async function applyChanges(dryRun) {
       body: JSON.stringify({
         changes:    state.plan.changes,
         customerId: state.selectedId,
+        mccId:      state.selectedMccId,
         dryRun,
       }),
     });

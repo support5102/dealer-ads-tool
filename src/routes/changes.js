@@ -62,7 +62,7 @@ function createChangesRouter(config) {
 
   // Apply changes to Google Ads
   router.post('/api/apply-changes', requireAuth, async (req, res, next) => {
-    const { changes, customerId, dryRun = true } = req.body;
+    const { changes, customerId, mccId: bodyMccId, dryRun = true } = req.body;
     if (!Array.isArray(changes) || !customerId) {
       return res.status(400).json({ error: 'Missing changes or customerId' });
     }
@@ -71,11 +71,14 @@ function createChangesRouter(config) {
     const isDryRun = dryRun !== false;
 
     try {
+      // Use account-specific MCC from request, fall back to session/config
+      const mccId = bodyMccId || req.session.mccId || config.googleAds.mccId;
+      console.log('apply-changes auth:', { customerId: String(customerId), mccId, bodyMccId, sessionMccId: req.session.mccId, isDryRun });
       const client = googleAds.createClient(
         config.googleAds,
         req.session.tokens.refresh_token,
         String(customerId),
-        req.session.mccId
+        mccId
       );
 
       const results = [];
@@ -87,6 +90,7 @@ function createChangesRouter(config) {
           results.push({ change, result, success: true });
         } catch (err) {
           const msg = err.message || 'Unknown error';
+          console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg);
           errors.push({ change, error: msg });
           results.push({ change, result: msg, success: false });
         }
