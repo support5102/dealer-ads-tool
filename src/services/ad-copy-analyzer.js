@@ -47,8 +47,10 @@ function extractYears(text) {
  */
 function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
   const findings = [];
+  // Current valid model years: this year and last year (e.g., 2025 and 2026)
+  const validYearMin = currentYear - 1;
   const staleMin = 2020;
-  const staleMax = currentYear - 1;
+  const staleMax = validYearMin - 1; // anything before the valid range
 
   const staleAds = [];
   const missingYearAds = [];
@@ -63,7 +65,7 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
     const combinedText = allText.join(' ');
     const allYears = extractYears(combinedText);
 
-    // Check for stale years
+    // Check for stale years (before valid range)
     const staleYears = allYears.filter(y => y >= staleMin && y <= staleMax);
     if (staleYears.length > 0) {
       const staleTexts = allText.filter(t => {
@@ -79,19 +81,22 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
       });
     }
 
-    // Check for missing years on "new" campaigns — new vehicle ads should reference model year
-    const campaignLower = (ad.campaignName || '').toLowerCase();
-    const adGroupLower = (ad.adGroupName || '').toLowerCase();
-    const isNewCampaign = campaignLower.includes('new') || campaignLower.includes('vla') ||
-      adGroupLower.includes('new') || campaignLower.includes('inventory');
-    const hasCurrentYear = allYears.some(y => y >= currentYear);
+    // Check for missing years ONLY on Search campaigns in "Dealer - New - Model" format.
+    // Skip VLA/PMax/inventory campaigns — they don't need model years in ad copy.
+    const campaignName = ad.campaignName || '';
+    const parts = campaignName.split(' - ').map(p => p.trim().toLowerCase());
+    // Must have at least 3 parts: "Dealer - New - Model" and the second part must be "new"
+    const isNewModelCampaign = parts.length >= 3 && parts[1] === 'new';
+    // Exclude PMax/VLA campaigns
+    const isPmax = campaignName.toLowerCase().includes('pmax') || campaignName.toLowerCase().includes('vla');
+    const hasValidYear = allYears.some(y => y >= validYearMin);
 
-    if (isNewCampaign && !hasCurrentYear && staleYears.length === 0) {
+    if (isNewModelCampaign && !isPmax && !hasValidYear && staleYears.length === 0) {
       missingYearAds.push({
         adId: ad.adId,
         campaignName: ad.campaignName,
         adGroupName: ad.adGroupName,
-        suggestion: `Add ${currentYear} or ${currentYear + 1} model year to headlines/descriptions`,
+        suggestion: `Add ${validYearMin} or ${currentYear} model year to headlines/descriptions`,
       });
     }
   }
@@ -112,8 +117,8 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
       checkId: 'ad_copy_missing_years',
       severity: SEVERITY.INFO,
       category: CATEGORY,
-      title: 'New vehicle ads missing current model year',
-      message: `${missingYearAds.length} ad(s) on new/inventory campaigns don't mention ${currentYear} or ${currentYear + 1} model year.`,
+      title: 'New model search ads missing current model year',
+      message: `${missingYearAds.length} ad(s) on "New - Model" search campaigns don't mention ${validYearMin} or ${currentYear} model year.`,
       details: { ads: missingYearAds },
     });
   }

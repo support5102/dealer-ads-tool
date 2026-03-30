@@ -60,14 +60,15 @@ describe('checkStaleYearReferences', () => {
     expect(findings[0].details.staleAds[0].staleYears).toContain(2024);
   });
 
-  test('flags ad with "2025 Civic Deals" description as stale', () => {
+  test('passes ad with "2025 Civic Deals" description (2025 is current model year)', () => {
     const ads = [makeAd({
       headlines: [{ text: 'Buy a Civic', pinnedField: null }],
       descriptions: [{ text: '2025 Civic Deals happening now!' }],
     })];
     const findings = checkStaleYearReferences(ads);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].details.staleAds[0].staleYears).toContain(2025);
+    // 2025 is a valid model year (currentYear - 1), not stale
+    const staleFindings = findings.filter(f => f.checkId === 'ad_copy_stale_years');
+    expect(staleFindings).toHaveLength(0);
   });
 
   test('passes ad with "2026 F-150" headline (current year)', () => {
