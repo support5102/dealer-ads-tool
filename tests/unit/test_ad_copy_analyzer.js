@@ -96,7 +96,9 @@ describe('checkStaleYearReferences', () => {
       descriptions: [{ text: 'Call us at 2025551234 today!' }],
     })];
     const findings = checkStaleYearReferences(ads);
-    expect(findings).toHaveLength(0);
+    // Should have no stale year findings (phone number "2025551234" is not a year)
+    const staleFindings = findings.filter(f => f.checkId === 'ad_copy_stale_years');
+    expect(staleFindings).toHaveLength(0);
   });
 
   test('returns empty array when no ads provided', () => {
@@ -241,7 +243,7 @@ describe('checkHeadlineQuality', () => {
       ],
     })];
     const findings = checkHeadlineQuality(ads);
-    const dealerFinding = findings.find(f => f.checkId === 'ad_copy_missing_dealer_name');
+    const dealerFinding = findings.find(f => f.checkId === 'ad_copy_wrong_dealer_name');
     expect(dealerFinding).toBeDefined();
     expect(dealerFinding.details.ads[0].dealerPortion).toBe('Sunrise Ford');
   });
@@ -254,7 +256,7 @@ describe('checkHeadlineQuality', () => {
       ],
     })];
     const findings = checkHeadlineQuality(ads);
-    const dealerFinding = findings.find(f => f.checkId === 'ad_copy_missing_dealer_name');
+    const dealerFinding = findings.find(f => f.checkId === 'ad_copy_wrong_dealer_name');
     expect(dealerFinding).toBeUndefined();
   });
 
@@ -276,7 +278,7 @@ describe('checkHeadlineQuality', () => {
 // checkPinningOveruse
 // ──────────────────────────────────────────────
 describe('checkPinningOveruse', () => {
-  test('flags ad with 3+ pinned headlines', () => {
+  test('flags ad with pinned headlines beyond position 1', () => {
     const ads = [makeAd({
       headlines: [
         { text: 'Test Dealer', pinnedField: 'HEADLINE_1' },
@@ -286,7 +288,7 @@ describe('checkPinningOveruse', () => {
     })];
     const findings = checkPinningOveruse(ads);
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('info');
+    expect(findings[0].severity).toBe('warning');
     expect(findings[0].checkId).toBe('ad_copy_pinning_overuse');
     expect(findings[0].details.ads[0].pinnedCount).toBe(3);
   });
@@ -315,11 +317,11 @@ describe('checkPinningOveruse', () => {
     expect(findings).toHaveLength(0);
   });
 
-  test('passes ad with exactly 2 pinned headlines', () => {
+  test('passes ad with only dealer name pinned at HEADLINE_1', () => {
     const ads = [makeAd({
       headlines: [
         { text: 'Test Dealer', pinnedField: 'HEADLINE_1' },
-        { text: 'New F-150', pinnedField: 'HEADLINE_2' },
+        { text: 'New F-150', pinnedField: null },
         { text: 'Call Today', pinnedField: null },
       ],
     })];

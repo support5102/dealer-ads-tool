@@ -18,6 +18,12 @@
  */
 
 const googleAds = require('./google-ads');
+const {
+  checkStaleYearReferences,
+  checkMissingRSAs,
+  checkHeadlineQuality,
+  checkPinningOveruse,
+} = require('./ad-copy-analyzer');
 
 // ── Severity levels ──
 const SEVERITY = {
@@ -404,13 +410,14 @@ async function runAudit(restCtx, options = {}) {
     'bidding_strategy', 'broad_match', 'zero_impressions', 'disapproved_ads',
     'high_cpc', 'low_ctr', 'recommendations', 'ad_schedules', 'zero_spend',
     'low_impression_share',
+    'stale_years', 'missing_rsas', 'headline_quality', 'pinning',
   ];
   const selectedChecks = options.checks
     ? options.checks.filter(c => VALID_CHECKS.includes(c))
     : null; // null = all
 
   // Fetch all data in parallel (non-fatal for optional queries)
-  const [keywords, campaigns, ads, recommendations, adSchedules] = await Promise.all([
+  const [keywords, campaigns, ads, recommendations, adSchedules, adGroupAdCounts] = await Promise.all([
     googleAds.getKeywordPerformance(restCtx).catch(err => {
       console.error('Audit keyword query failed:', err.message);
       return [finding('query_error', SEVERITY.WARNING, 'system', 'Keyword query failed', 'Keyword data could not be loaded. Check account permissions.')];
@@ -419,11 +426,10 @@ async function runAudit(restCtx, options = {}) {
       console.error('Audit campaign query failed:', err.message);
       return [finding('query_error_campaigns', SEVERITY.WARNING, 'system', 'Campaign query failed', 'Campaign data could not be loaded. Check account permissions.')];
     }),
-    googleAds.getAdCopy(restCtx).catch(err => {
-      return [];
-    }),
+    googleAds.getAdCopy(restCtx).catch(() => []),
     googleAds.getRecommendations(restCtx).catch(() => []),
     googleAds.getAdSchedules(restCtx).catch(() => []),
+    googleAds.getAdGroupAdCounts(restCtx).catch(() => []),
   ]);
 
   // If queries returned error findings, use empty arrays for those checks
@@ -452,6 +458,16 @@ async function runAudit(restCtx, options = {}) {
     ad_schedules:         () => checkMissingAdSchedules(campaignData, adSchedules),
     zero_spend:           () => checkZeroSpendCampaigns(campaignData),
     low_impression_share: () => checkLowImpressionShare(campaignData),
+    // Ad copy quality checks
+    stale_years:          () => checkStaleYearReferences(ads),
+    missing_rsas:         () => {
+      const adGroups = (adGroupAdCounts || []).map(ag => ({
+        name: ag.adGroupName, campaignName: ag.campaignName, status: 'ENABLED',
+      }));
+      return checkMissingRSAs(ads, adGroups);
+    },
+    headline_quality:     () => checkHeadlineQuality(ads),
+    pinning:              () => checkPinningOveruse(ads),
   };
 
   let allFindings = [...queryErrors];

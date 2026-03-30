@@ -51,26 +51,48 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
   const staleMax = currentYear - 1;
 
   const staleAds = [];
+  const missingYearAds = [];
 
   for (const ad of ads) {
+    if (ad.status !== 'ENABLED') continue;
+
     const allText = [
       ...ad.headlines.map(h => h.text),
       ...ad.descriptions.map(d => d.text),
     ];
+    const combinedText = allText.join(' ');
+    const allYears = extractYears(combinedText);
 
-    for (const text of allText) {
-      const years = extractYears(text);
-      const staleYears = years.filter(y => y >= staleMin && y <= staleMax);
-      if (staleYears.length > 0) {
-        staleAds.push({
-          adId: ad.adId,
-          campaignName: ad.campaignName,
-          adGroupName: ad.adGroupName,
-          staleYears,
-          text,
-        });
-        break; // count each ad once
-      }
+    // Check for stale years
+    const staleYears = allYears.filter(y => y >= staleMin && y <= staleMax);
+    if (staleYears.length > 0) {
+      const staleTexts = allText.filter(t => {
+        const years = extractYears(t);
+        return years.some(y => y >= staleMin && y <= staleMax);
+      });
+      staleAds.push({
+        adId: ad.adId,
+        campaignName: ad.campaignName,
+        adGroupName: ad.adGroupName,
+        staleYears: [...new Set(staleYears)],
+        text: staleTexts[0] || '',
+      });
+    }
+
+    // Check for missing years on "new" campaigns — new vehicle ads should reference model year
+    const campaignLower = (ad.campaignName || '').toLowerCase();
+    const adGroupLower = (ad.adGroupName || '').toLowerCase();
+    const isNewCampaign = campaignLower.includes('new') || campaignLower.includes('vla') ||
+      adGroupLower.includes('new') || campaignLower.includes('inventory');
+    const hasCurrentYear = allYears.some(y => y >= currentYear);
+
+    if (isNewCampaign && !hasCurrentYear && staleYears.length === 0) {
+      missingYearAds.push({
+        adId: ad.adId,
+        campaignName: ad.campaignName,
+        adGroupName: ad.adGroupName,
+        suggestion: `Add ${currentYear} or ${currentYear + 1} model year to headlines/descriptions`,
+      });
     }
   }
 
@@ -82,6 +104,17 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
       title: 'Stale year references in ad copy',
       message: `${staleAds.length} ad(s) reference outdated years. Update to current model years.`,
       details: { staleAds },
+    });
+  }
+
+  if (missingYearAds.length > 0) {
+    findings.push({
+      checkId: 'ad_copy_missing_years',
+      severity: SEVERITY.INFO,
+      category: CATEGORY,
+      title: 'New vehicle ads missing current model year',
+      message: `${missingYearAds.length} ad(s) on new/inventory campaigns don't mention ${currentYear} or ${currentYear + 1} model year.`,
+      details: { ads: missingYearAds },
     });
   }
 
@@ -241,11 +274,11 @@ function checkHeadlineQuality(ads) {
 
   if (missingDealerName.length > 0) {
     findings.push({
-      checkId: 'ad_copy_missing_dealer_name',
-      severity: SEVERITY.INFO,
+      checkId: 'ad_copy_wrong_dealer_name',
+      severity: SEVERITY.WARNING,
       category: CATEGORY,
-      title: 'RSAs missing dealer name in headlines',
-      message: `${missingDealerName.length} ad(s) have no headline containing the dealer name.`,
+      title: 'RSAs missing or wrong dealer name in headlines',
+      message: `${missingDealerName.length} ad(s) have no headline containing the dealer name. The dealer name should appear in at least one headline.`,
       details: { ads: missingDealerName },
     });
   }
@@ -254,38 +287,47 @@ function checkHeadlineQuality(ads) {
 }
 
 /**
- * Checks for excessive headline pinning in RSA ads.
+ * Checks for headline pinning in RSA ads.
  *
- * Best practice: pin dealer name to Position 1 only, leave everything else unpinned
- * so Google's ML can optimize. Flags ads with more than 2 pinned headlines.
+ * Savvy Dealer standard: only pin dealer name to Position 1, leave everything
+ * else unpinned so Google's ML can optimize ad rotation. Flags any ad with
+ * pinned headlines beyond position 1 dealer name.
  *
  * @param {Object[]} ads - Array of ad objects from getAdCopy
  * @returns {Object[]} Array of findings
  */
 function checkPinningOveruse(ads) {
   const findings = [];
-  const overPinned = [];
+  const pinnedAds = [];
 
   for (const ad of ads) {
-    const pinnedCount = ad.headlines.filter(h => h.pinnedField !== null).length;
-    if (pinnedCount > 2) {
-      overPinned.push({
+    if (ad.status !== 'ENABLED') continue;
+    const pinnedHeadlines = ad.headlines.filter(h => h.pinnedField !== null);
+    if (pinnedHeadlines.length === 0) continue;
+
+    // Allow exactly 1 pin at HEADLINE_1 (dealer name position) — flag everything else
+    const nonDealerPins = pinnedHeadlines.filter(h => h.pinnedField !== 'HEADLINE_1');
+    const excessPins = pinnedHeadlines.length > 1 || nonDealerPins.length > 0;
+
+    if (excessPins) {
+      pinnedAds.push({
         adId: ad.adId,
         campaignName: ad.campaignName,
         adGroupName: ad.adGroupName,
-        pinnedCount,
+        pinnedCount: pinnedHeadlines.length,
+        pinnedHeadlines: pinnedHeadlines.map(h => ({ text: h.text, position: h.pinnedField })),
       });
     }
   }
 
-  if (overPinned.length > 0) {
+  if (pinnedAds.length > 0) {
     findings.push({
       checkId: 'ad_copy_pinning_overuse',
-      severity: SEVERITY.INFO,
+      severity: SEVERITY.WARNING,
       category: CATEGORY,
-      title: 'Excessive headline pinning',
-      message: `${overPinned.length} ad(s) have more than 2 pinned headlines. Over-pinning reduces Google's optimization ability.`,
-      details: { ads: overPinned },
+      title: 'Headlines pinned — should be unpinned',
+      message: `${pinnedAds.length} ad(s) have pinned headlines. Only the dealer name in Position 1 should be pinned. Unpin all others for better optimization.`,
+      details: { ads: pinnedAds },
     });
   }
 
