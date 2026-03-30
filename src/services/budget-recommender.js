@@ -401,10 +401,12 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       recommended = Math.max(recommended, 1);
     }
 
-    // Under-pacing: VLA floor at 40% allocation (we're adding budget, so push toward target)
-    // Over-pacing: already handled above with effectiveFloor
+    // Under-pacing: VLA floor at 40% allocation, but never override the 2x cap.
+    // Campaigns can't absorb huge jumps — reach the 40% target over multiple cycles.
     if (!accountOverPacing) {
-      recommended = Math.max(recommended, vlaMinFloor);
+      const maxPerCycle = (campaign.dailyBudget || currentSpend) * MAX_INCREASE_MULTIPLIER;
+      const cappedFloor = Math.min(vlaMinFloor, maxPerCycle);
+      recommended = Math.max(recommended, cappedFloor);
     }
     recommended = Math.max(recommended, 1);
     recommended = Math.round(recommended * 100) / 100;

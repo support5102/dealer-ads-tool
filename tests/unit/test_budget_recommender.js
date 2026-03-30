@@ -349,9 +349,10 @@ describe('distributeAccountBudget', () => {
     expect(vlaRec).toBeUndefined();
   });
 
-  test('VLA boost is IS-driven, capped at 2x per cycle but 40% allocation floor applies', () => {
+  test('VLA boost is IS-driven, capped at 2x per cycle (floor does not override cap)', () => {
     const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 });
-    // Required daily rate: $500/day. 40% VLA floor = $200.
+    // Required daily rate: $500/day. 40% VLA floor = $200. But 2x cap = $100.
+    // The 2x cap wins — campaigns can't absorb huge jumps in one cycle.
     const dedicated = [
       { campaignId: '1', campaignName: 'Honda VLA', channelType: 'SHOPPING', resourceName: 'r/1', dailyBudget: 50 },
     ];
@@ -364,9 +365,8 @@ describe('distributeAccountBudget', () => {
     });
 
     const vlaRec = recommendations.find(r => r.isVla);
-    // 2x cap = $100, but 40% allocation floor = $200/day for 1 VLA.
-    // Under-pacing: 40% floor takes priority to ensure VLA gets proper allocation.
-    expect(vlaRec.recommendedDailyBudget).toBe(200);
+    // 2x cap: $50 * 2 = $100. Floor ($200) is capped to $100 by 2x limit.
+    expect(vlaRec.recommendedDailyBudget).toBe(100);
     expect(vlaRec.reason).toMatch(/below 75% target/);
     expect(vlaRec.reason).toMatch(/capped at 2x/);
   });

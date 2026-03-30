@@ -270,11 +270,20 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, re
 
     // VLA floor: don't cut VLAs below their share of 40% allocation.
     // But if already below the floor, don't force UP while over-pacing.
+    // And NEVER let the floor override the 2x per-cycle increase cap —
+    // campaigns can't absorb huge jumps (location targeting, feed limits).
     if (isVla) {
-      const effectiveFloor = isAddition
-        ? vlaFloorPerBudget  // under-pacing: push toward 40% target
-        : Math.min(vlaFloorPerBudget, budget.currentBudgetSetting);  // over-pacing: don't cut below floor or force up
-      newDailyBudget = Math.max(newDailyBudget, effectiveFloor);
+      if (isAddition) {
+        // Under-pacing: push toward 40% target, but cap at 2x current
+        const base = Math.max(budget.currentBudgetSetting, budget.currentDailySpend);
+        const maxPerCycle = base * MAX_INCREASE_MULTIPLIER;
+        const cappedFloor = Math.min(vlaFloorPerBudget, maxPerCycle);
+        newDailyBudget = Math.max(newDailyBudget, cappedFloor);
+      } else {
+        // Over-pacing: don't cut below floor or force up
+        const effectiveFloor = Math.min(vlaFloorPerBudget, budget.currentBudgetSetting);
+        newDailyBudget = Math.max(newDailyBudget, effectiveFloor);
+      }
     }
 
     // General floor: never below $1/day
