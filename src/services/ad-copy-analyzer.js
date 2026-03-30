@@ -8,6 +8,8 @@
  * { checkId, severity, category, title, message, details }
  */
 
+const { COMMON_MAKES } = require('./campaign-classifier');
+
 const SEVERITY = { CRITICAL: 'critical', WARNING: 'warning', INFO: 'info' };
 const CATEGORY = 'ad_copy';
 
@@ -81,12 +83,18 @@ function checkStaleYearReferences(ads, currentYear = new Date().getFullYear()) {
       });
     }
 
-    // Check for missing years ONLY on Search campaigns in "Dealer - New - Model" format.
-    // Skip VLA/PMax/inventory campaigns — they don't need model years in ad copy.
+    // Check for missing years ONLY on Search campaigns in "Dealer - New - Model" format
+    // where the third part is a specific MODEL (not just a make name like "Dodge" or "Chevrolet").
+    // "Dealer - New - F-150" needs the year. "Dealer - New - Dodge" does not.
     const campaignName = ad.campaignName || '';
-    const parts = campaignName.split(' - ').map(p => p.trim().toLowerCase());
+    const parts = campaignName.split(' - ').map(p => p.trim());
+    const partsLower = parts.map(p => p.toLowerCase());
     // Must have at least 3 parts: "Dealer - New - Model" and the second part must be "new"
-    const isNewModelCampaign = parts.length >= 3 && parts[1] === 'new';
+    const isNewCampaign = partsLower.length >= 3 && partsLower[1] === 'new';
+    // The third part must be a model name, NOT just a make name
+    const thirdPart = partsLower[2] || '';
+    const isJustAMake = COMMON_MAKES.includes(thirdPart);
+    const isNewModelCampaign = isNewCampaign && !isJustAMake && thirdPart.length > 0;
     // Exclude PMax/VLA campaigns
     const isPmax = campaignName.toLowerCase().includes('pmax') || campaignName.toLowerCase().includes('vla');
     const hasValidYear = allYears.some(y => y >= validYearMin);
