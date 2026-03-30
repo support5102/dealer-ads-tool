@@ -285,28 +285,38 @@ function createAuditRouter(config) {
 
           // Dismiss via REST API directly — the google-ads-api library
           // doesn't support client.recommendations.dismiss()
+          // Batch all dismiss operations into a single API call
           const axios = require('axios');
-          for (const rec of recommendations) {
-            try {
-              await axios.post(
-                `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
-                { operations: [{ resourceName: rec.resourceName }] },
-                {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'developer-token': config.googleAds.developerToken,
-                    ...(mccId ? { 'login-customer-id': mccId } : {}),
-                  },
-                  timeout: 10000,
-                }
-              );
-              results.applied++;
-              results.details.push({ description: `Dismissed: ${rec.type}`, success: true });
-            } catch (err) {
-              const msg = err.response?.data?.error?.message || err.message;
-              results.failed++;
-              results.details.push({ description: `Failed to dismiss: ${rec.type}`, error: msg, success: false });
-            }
+          const operations = recommendations.map(rec => ({ resourceName: rec.resourceName }));
+          try {
+            await axios.post(
+              `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
+              { operations },
+              {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'developer-token': config.googleAds.developerToken,
+                  ...(mccId ? { 'login-customer-id': mccId } : {}),
+                },
+                timeout: 30000,
+              }
+            );
+            results.applied += recommendations.length;
+            results.details.push({ description: `Dismissed ${recommendations.length} recommendations`, success: true });
+          } catch (err) {
+            // Log full error for debugging
+            const errData = err.response?.data;
+            console.error('Dismiss recommendations error:', JSON.stringify(errData, null, 2));
+            const msg = errData?.error?.message || err.message;
+            // Try to extract more specific error details
+            const details = (errData?.error?.details || [])
+              .map(d => d.errors?.map(e => e.message)).flat().filter(Boolean);
+            results.failed += recommendations.length;
+            results.details.push({
+              description: `Failed to dismiss ${recommendations.length} recommendations`,
+              error: details.length > 0 ? details[0] : msg,
+              success: false,
+            });
           }
         } catch (err) {
           results.failed++;
