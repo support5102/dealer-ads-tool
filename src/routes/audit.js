@@ -290,7 +290,7 @@ function createAuditRouter(config) {
             try {
               await axios.post(
                 `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
-                { operations: [{ resource_name: rec.resourceName }] },
+                { operations: [{ resourceName: rec.resourceName }] },
                 {
                   headers: {
                     'Authorization': `Bearer ${accessToken}`,
