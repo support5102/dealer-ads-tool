@@ -221,7 +221,7 @@ function createAuditRouter(config) {
       }
 
       // Get the latest audit result
-      const auditResult = auditStore.get(cleanId);
+      const auditResult = auditStore.getLatest(cleanId);
       if (!auditResult || !auditResult.findings) {
         return res.status(400).json({ error: 'No audit results found. Run an audit first.' });
       }
