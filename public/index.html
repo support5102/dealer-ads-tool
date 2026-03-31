@@ -1796,16 +1796,20 @@ function renderFreshdeskTickets(tickets) {
   list.innerHTML = tickets.map(t => {
     const c = colors[t.priority] || '#94a3b8';
     const age = formatRelativeTime(t.createdAt || t.created_at);
-    return '<div class="freshdesk-ticket" onclick="selectFreshdeskTicket(' + t.id + ')">'
+    return '<div class="freshdesk-ticket" onclick="selectFreshdeskTicket(' + t.id + ', this)">'
       + '<div class="freshdesk-priority-dot" style="background:' + c + '"></div>'
-      + '<div class="freshdesk-ticket-info">'
+      + '<div class="freshdesk-ticket-body">'
       + '<div class="freshdesk-ticket-subject">' + esc(t.subject || 'No subject') + '</div>'
       + '<div class="freshdesk-ticket-meta">' + esc(t.requester || '') + ' &middot; ' + age + '</div>'
       + '</div></div>';
   }).join('');
 }
 
-async function selectFreshdeskTicket(ticketId) {
+async function selectFreshdeskTicket(ticketId, el) {
+  // Highlight selected ticket immediately
+  document.querySelectorAll('.freshdesk-ticket').forEach(t => t.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+
   try {
     const res = await fetch('/api/freshdesk/tickets/' + ticketId);
     if (!res.ok) throw new Error('Failed to load ticket');
@@ -1815,7 +1819,6 @@ async function selectFreshdeskTicket(ticketId) {
       textarea.value = data.ticket.description || data.ticket.subject || '';
       textarea.focus();
     }
-    document.querySelectorAll('.freshdesk-ticket').forEach(el => el.classList.remove('selected'));
   } catch (err) {
     showToast('Failed to load ticket', 'error');
   }
