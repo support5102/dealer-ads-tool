@@ -188,7 +188,12 @@ function renderTable(accounts) {
   const rowsHtml = sorted.map(a => {
     const color = STATUS_COLORS[a.status] || 'gray';
     const paceClass = color === 'green' ? 'pace-green' : color === 'yellow' ? 'pace-yellow' : 'pace-red';
-    const adjClass = a.dailyAdjustment >= 0 ? 'adj-positive' : 'adj-negative';
+    // On the last day of month, dailyAdjustment is meaningless (required rate = 0)
+    // Show remaining budget instead
+    const remainingBudget = a.monthlyBudget - a.mtdSpend;
+    const isLastDay = new Date().getDate() === new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    const adjValue = isLastDay ? remainingBudget : a.dailyAdjustment;
+    const adjClass = adjValue >= 0 ? 'adj-positive' : 'adj-negative';
     const trendClass = a.sevenDayTrend === 'up' ? 'trend-up' : a.sevenDayTrend === 'down' ? 'trend-down' : 'trend-flat';
     const trendArrow = a.sevenDayTrend === 'up' ? '↑' : a.sevenDayTrend === 'down' ? '↓' : '→';
 
@@ -198,7 +203,7 @@ function renderTable(accounts) {
       <td>${fmtCurrency(a.monthlyBudget)}</td>
       <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span></td>
-      <td class="${adjClass}">${fmtSignedCurrency(a.dailyAdjustment)}/day</td>
+      <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
       <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
       <td class="${trendClass}">${trendArrow} ${fmtPercent(a.sevenDayTrendPercent)}</td>
       <td title="${a.changeDate ? 'Since ' + esc(a.changeDate) + ': ' + fmtCurrency(a.postChangeDailyAvg || 0) + '/day → Proj: ' + fmtCurrency(a.projectedSpend) : 'Full-month avg → Proj: ' + fmtCurrency(a.projectedSpend)}"><span class="status-mini ${PROJ_COLORS[a.projectedStatus] || 'gray'}">${PROJ_LABELS[a.projectedStatus] || 'N/A'}</span></td>
