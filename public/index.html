@@ -777,6 +777,17 @@
     <div class="task-area" id="taskArea" style="display:none">
       <div class="section-title">Freshdesk Task</div>
 
+      <!-- Freshdesk ticket list -->
+      <div id="freshdeskPanel" class="freshdesk-panel" style="display:none">
+        <div class="freshdesk-header">
+          <span class="freshdesk-title">My Tickets</span>
+          <button class="freshdesk-refresh-btn" onclick="loadFreshdeskTickets()">&#x21bb;</button>
+        </div>
+        <div id="freshdeskList" class="freshdesk-list">
+          <div class="freshdesk-empty">Loading...</div>
+        </div>
+      </div>
+
       <!-- Smart suggestions (populated after account load) -->
       <div id="suggestionsPanel" style="display:none"></div>
 
