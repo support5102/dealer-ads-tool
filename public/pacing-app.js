@@ -181,7 +181,7 @@ function renderDashboard(data) {
   renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
   renderImpressionShare(data.impressionShareSummary, data.changeDate);
   renderCampaignIS(data.campaignIS, data.changeDate);
-  renderInventory(data.inventory);
+  // renderInventory(data.inventory); // Temporarily hidden — inventory count is inaccurate for PMax
 }
 
 function renderHeader(data) {
