@@ -399,54 +399,9 @@ async function getInventory(restCtx) {
   const { extractModelFromProduct } = require('./campaign-classifier');
   const doQuery = restCtx._queryFn || queryViaRest;
 
-  // Primary: shopping_product with ELIGIBLE status — current live feed inventory.
-  // This matches what Google Ads shows in Listing Groups and avoids counting sold vehicles.
-  try {
-    const rows = await doQuery(
-      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT shopping_product.item_id, shopping_product.condition,
-              shopping_product.brand, shopping_product.title
-       FROM shopping_product
-       WHERE shopping_product.status = 'ELIGIBLE'
-       LIMIT 5000`,
-      restCtx.loginCustomerId
-    );
-
-    if (rows.length > 0) {
-      let newCount = 0;
-      let usedCount = 0;
-      let skippedCount = 0;
-      const conditionCounts = {};
-      const newInventoryByModel = {};
-      for (const row of rows) {
-        const rawCondition = row.shoppingProduct?.condition;
-        const condition = (rawCondition || '').toUpperCase();
-        conditionCounts[rawCondition || '(empty)'] = (conditionCounts[rawCondition || '(empty)'] || 0) + 1;
-        if (condition === 'USED' || condition === 'REFURBISHED') {
-          usedCount++;
-        } else if (condition === 'NEW') {
-          newCount++;
-          const model = extractModelFromProduct(
-            row.shoppingProduct?.itemId,
-            row.shoppingProduct?.title,
-            row.shoppingProduct?.brand
-          );
-          if (model) {
-            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
-          }
-        } else {
-          skippedCount++;
-        }
-      }
-      console.log(`[getInventory] shopping_product: ${rows.length} total, ${newCount} NEW, ${usedCount} USED, ${skippedCount} skipped. Conditions:`, JSON.stringify(conditionCounts));
-      return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
-    }
-  } catch (err) {
-    console.warn('getInventory shopping_product failed (trying fallback):', err.message);
-  }
-
-  // Fallback: shopping_performance_view — counts vehicles that served in the last 14 days.
-  // Less accurate (includes sold vehicles) but works when shopping_product is unavailable.
+  // Primary: shopping_performance_view — counts unique products that served in VLA/Shopping
+  // campaigns in the last 14 days. Works for all account types including PMax.
+  // Note: shopping_product often returns 0 rows for PMax campaigns, so we use performance_view first.
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
@@ -475,18 +430,59 @@ async function getInventory(restCtx) {
       let usedCount = 0;
       const newInventoryByModel = {};
       for (const [id, data] of seen.entries()) {
-        if (data.condition === 'NEW') {
+        if (data.condition === 'USED' || data.condition === 'REFURBISHED') {
+          usedCount++;
+        } else {
+          // Count as NEW: explicit 'NEW' or empty/missing condition.
+          // PMax campaigns often don't populate condition in performance_view,
+          // but the vehicles are from the feed and default to new inventory.
           newCount++;
           const model = extractModelFromProduct(id, data.title, data.brand);
           if (model) {
             newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
           }
-        } else if (data.condition === 'USED' || data.condition === 'REFURBISHED') {
-          usedCount++;
         }
-        // Skip unknown conditions — don't inflate count by assuming NEW
       }
       return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance', newInventoryByModel };
+    }
+  } catch (err) {
+    console.warn('getInventory shopping_performance_view failed (trying fallback):', err.message);
+  }
+
+  // Fallback: shopping_product with ELIGIBLE status — direct feed query.
+  // More accurate (current eligible only) but doesn't work for all account types.
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id, shopping_product.condition,
+              shopping_product.brand, shopping_product.title
+       FROM shopping_product
+       WHERE shopping_product.status = 'ELIGIBLE'
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    if (rows.length > 0) {
+      let newCount = 0;
+      let usedCount = 0;
+      const newInventoryByModel = {};
+      for (const row of rows) {
+        const condition = (row.shoppingProduct?.condition || '').toUpperCase();
+        if (condition === 'USED' || condition === 'REFURBISHED') {
+          usedCount++;
+        } else {
+          newCount++;
+          const model = extractModelFromProduct(
+            row.shoppingProduct?.itemId,
+            row.shoppingProduct?.title,
+            row.shoppingProduct?.brand
+          );
+          if (model) {
+            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+          }
+        }
+      }
+      return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
     }
   } catch (err) {
     console.warn('getInventory fallback also failed (non-fatal):', err.message);
