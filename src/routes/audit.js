@@ -18,6 +18,7 @@ const googleAds = require('../services/google-ads');
 const auditScheduler = require('../services/audit-scheduler');
 const { diagnose } = require('../services/audit-fixer');
 const { applyChange } = require('../services/change-executor');
+const changeHistory = require('../services/change-history');
 
 /**
  * Creates audit routes.
@@ -325,6 +326,7 @@ function createAuditRouter(config) {
       }
 
       // Apply normal fixes
+      const email = req.session.userEmail || 'unknown';
       for (const fix of normalFixes) {
         try {
           const message = await applyChange(client, {
@@ -334,9 +336,26 @@ function createAuditRouter(config) {
           });
           results.applied++;
           results.details.push({ description: fix.description || message, success: true });
+          changeHistory.addEntry({
+            action: fix.changeType,
+            userEmail: email,
+            accountId: cleanId,
+            details: { campaignName: fix.campaignName, target: fix.description, ...fix.details },
+            source: 'audit_fixer',
+            success: true,
+          });
         } catch (err) {
           results.failed++;
           results.details.push({ description: fix.description || fix.changeType, error: err.message, success: false });
+          changeHistory.addEntry({
+            action: fix.changeType,
+            userEmail: email,
+            accountId: cleanId,
+            details: { campaignName: fix.campaignName, target: fix.description },
+            source: 'audit_fixer',
+            success: false,
+            error: err.message,
+          });
         }
       }
 
@@ -348,6 +367,17 @@ function createAuditRouter(config) {
       console.error('Fix error:', err.message);
       next(err);
     }
+  });
+
+  /**
+   * GET /api/change-history?limit=100&accountId=X
+   * Returns change history log of all API changes made by the tool.
+   */
+  router.get('/api/change-history', requireAuth, (req, res) => {
+    const limit = parseInt(req.query.limit) || 100;
+    const accountId = req.query.accountId || null;
+    const history = changeHistory.getHistory(limit, accountId);
+    res.json({ entries: history, total: changeHistory.size() });
   });
 
   return router;

@@ -17,6 +17,7 @@ const { applyChange } = require('../services/change-executor');
 const { changesToRows, toCSV } = require('../services/csv-exporter');
 const googleAds = require('../services/google-ads');
 const { logAudit } = require('../utils/audit-log');
+const changeHistory = require('../services/change-history');
 
 /**
  * Creates changes routes with the given config.
@@ -84,15 +85,37 @@ function createChangesRouter(config) {
       const results = [];
       const errors  = [];
 
+      const email = req.session.userEmail || 'unknown';
       for (const change of changes) {
         try {
           const result = await applyChange(client, change, isDryRun);
           results.push({ change, result, success: true });
+          if (!isDryRun) {
+            changeHistory.addEntry({
+              action: change.type,
+              userEmail: email,
+              accountId: String(customerId),
+              details: { campaignName: change.campaignName, ...change.details },
+              source: 'task_manager',
+              success: true,
+            });
+          }
         } catch (err) {
           const msg = err.message || 'Unknown error';
           console.error(`Change failed [${change.type}] ${change.campaignName || ''}:`, msg);
           errors.push({ change, error: msg });
           results.push({ change, result: msg, success: false });
+          if (!isDryRun) {
+            changeHistory.addEntry({
+              action: change.type,
+              userEmail: email,
+              accountId: String(customerId),
+              details: { campaignName: change.campaignName },
+              source: 'task_manager',
+              success: false,
+              error: msg,
+            });
+          }
         }
       }
 

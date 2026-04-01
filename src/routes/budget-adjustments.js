@@ -23,6 +23,7 @@ const { readGoals } = require('../services/goal-reader');
 const googleAds = require('../services/google-ads');
 const { calculatePacing } = require('../services/pacing-calculator');
 const { logAudit } = require('../utils/audit-log');
+const changeHistory = require('../services/change-history');
 
 /**
  * Creates a lightweight Google Sheets client from an access token.
@@ -345,12 +346,31 @@ function createBudgetAdjustmentsRouter(config, deps = {}) {
             change: adj.change,
             success: true,
           });
+          changeHistory.addEntry({
+            action: 'budget_change',
+            userEmail: email,
+            accountId: batch.customerId,
+            dealerName: batch.dealerName,
+            details: { campaignName: adj.target, previousValue: `$${adj.currentDailyBudget}/day`, newValue: `$${adj.recommendedDailyBudget}/day`, reason: batch.direction },
+            source: 'auto_adjuster',
+            success: true,
+          });
         } catch (err) {
           results.failed++;
           results.details.push({
             target: adj.target,
             error: err.message,
             success: false,
+          });
+          changeHistory.addEntry({
+            action: 'budget_change',
+            userEmail: email,
+            accountId: batch.customerId,
+            dealerName: batch.dealerName,
+            details: { campaignName: adj.target, reason: batch.direction },
+            source: 'auto_adjuster',
+            success: false,
+            error: err.message,
           });
         }
       }
