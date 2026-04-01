@@ -48,6 +48,7 @@ const SAMPLE_INVENTORY = {
   usedCount: 1,
   totalCount: 3,
   source: 'shopping_performance',
+  newInventoryByModel: { civic: 1, accord: 1 },
 };
 
 const SAMPLE_GOALS = [

@@ -239,9 +239,9 @@ describe('getImpressionShare', () => {
 
 describe('getInventory', () => {
   const defaultRows = [
-    { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
-    { segments: { productItemId: 'VIN002', productCondition: 'NEW' } },
-    { segments: { productItemId: 'VIN003', productCondition: 'USED' } },
+    { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic LX', productBrand: 'Honda' } },
+    { segments: { productItemId: 'VIN002', productCondition: 'NEW', productTitle: '2024 Honda Accord Sport', productBrand: 'Honda' } },
+    { segments: { productItemId: 'VIN003', productCondition: 'USED', productTitle: '2022 Toyota Camry SE', productBrand: 'Toyota' } },
   ];
 
   test('returns new and used counts from shopping performance data', async () => {
@@ -251,6 +251,41 @@ describe('getInventory', () => {
     expect(result.usedCount).toBe(1);
     expect(result.totalCount).toBe(3);
     expect(result.source).toBe('shopping_performance');
+    expect(result.newInventoryByModel).toBeDefined();
+  });
+
+  test('builds newInventoryByModel from product titles', async () => {
+    const rows = [
+      { segments: { productItemId: 'V1', productCondition: 'NEW', productTitle: '2024 Honda Civic LX', productBrand: 'Honda' } },
+      { segments: { productItemId: 'V2', productCondition: 'NEW', productTitle: '2024 Honda Civic EX', productBrand: 'Honda' } },
+      { segments: { productItemId: 'V3', productCondition: 'NEW', productTitle: '2024 Honda Accord Sport', productBrand: 'Honda' } },
+      { segments: { productItemId: 'V4', productCondition: 'USED', productTitle: '2022 Toyota Camry SE', productBrand: 'Toyota' } },
+    ];
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.newInventoryByModel.civic).toBe(2);
+    expect(result.newInventoryByModel.accord).toBe(1);
+    // Camry is USED, should not be in newInventoryByModel
+    expect(result.newInventoryByModel.camry).toBeUndefined();
+  });
+
+  test('extracts model from item_id when it contains year/make/model', async () => {
+    const rows = [
+      { segments: { productItemId: '2024 Honda Civic', productCondition: 'NEW', productBrand: 'Honda' } },
+      { segments: { productItemId: '2024 Ford F-150', productCondition: 'NEW', productBrand: 'Ford' } },
+    ];
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.newInventoryByModel.civic).toBe(1);
+    expect(result.newInventoryByModel['f-150']).toBe(1);
+  });
+
+  test('returns empty newInventoryByModel when no models extractable', async () => {
+    const rows = [
+      { segments: { productItemId: '1HGCV1F34PA123456', productCondition: 'NEW' } },
+      { segments: { productItemId: '2T1BU4EE5DC123456', productCondition: 'NEW' } },
+    ];
+    const result = await getInventory(fakeCtx(rows));
+    expect(result.newCount).toBe(2);
+    expect(result.newInventoryByModel).toEqual({});
   });
 
   test('returns zeros when no inventory', async () => {
@@ -258,13 +293,14 @@ describe('getInventory', () => {
     expect(result.newCount).toBe(0);
     expect(result.usedCount).toBe(0);
     expect(result.totalCount).toBe(0);
+    expect(result.newInventoryByModel).toEqual({});
   });
 
   test('deduplicates by item_id', async () => {
     const rows = [
-      { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
-      { segments: { productItemId: 'VIN001', productCondition: 'NEW' } },
-      { segments: { productItemId: 'VIN002', productCondition: 'USED' } },
+      { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
+      { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
+      { segments: { productItemId: 'VIN002', productCondition: 'USED', productTitle: '2022 Toyota Camry', productBrand: 'Toyota' } },
     ];
     const result = await getInventory(fakeCtx(rows));
     expect(result.totalCount).toBe(2);
@@ -274,8 +310,8 @@ describe('getInventory', () => {
 
   test('defaults to new when condition is not set', async () => {
     const rows = [
-      { segments: { productItemId: 'VIN001', productCondition: '' } },
-      { segments: { productItemId: 'VIN002' } },
+      { segments: { productItemId: 'VIN001', productCondition: '', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
+      { segments: { productItemId: 'VIN002', productTitle: '2024 Honda Accord', productBrand: 'Honda' } },
     ];
     const result = await getInventory(fakeCtx(rows));
     expect(result.newCount).toBe(2);
@@ -290,6 +326,7 @@ describe('getInventory', () => {
     expect(result.totalCount).toBe(500);
     expect(result.newCount).toBe(250);
     expect(result.usedCount).toBe(250);
+    expect(result.newInventoryByModel).toBeDefined();
   });
 
   test('falls back to shopping_product when performance view fails', async () => {
@@ -299,10 +336,10 @@ describe('getInventory', () => {
       _queryFn: async () => {
         callCount++;
         if (callCount === 1) throw new Error('shopping_performance_view not supported');
-        // Fallback returns shopping_product format
+        // Fallback returns shopping_product format with title
         return [
-          { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda' } },
-          { shoppingProduct: { itemId: 'VIN002', condition: 'USED', brand: 'Toyota' } },
+          { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda', title: '2024 Honda Civic LX' } },
+          { shoppingProduct: { itemId: 'VIN002', condition: 'USED', brand: 'Toyota', title: '2022 Toyota Camry' } },
         ];
       },
     };
@@ -311,5 +348,7 @@ describe('getInventory', () => {
     expect(result.newCount).toBe(1);
     expect(result.usedCount).toBe(1);
     expect(result.totalCount).toBe(2);
+    expect(result.newInventoryByModel.civic).toBe(1);
+    expect(result.newInventoryByModel.camry).toBeUndefined(); // USED, not counted
   });
 });

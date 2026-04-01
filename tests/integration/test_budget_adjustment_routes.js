@@ -50,7 +50,7 @@ const SAMPLE_IS = [
   { campaignId: '200', campaignName: 'Honda Regional', impressionShare: 0.70, budgetLostShare: 0.10 },
 ];
 
-const SAMPLE_INVENTORY = { newCount: 50, usedCount: 20, totalCount: 70, source: 'shopping_performance' };
+const SAMPLE_INVENTORY = { newCount: 50, usedCount: 20, totalCount: 70, source: 'shopping_performance', newInventoryByModel: { civic: 20, accord: 15, 'cr-v': 15 } };
 
 function setupMocks() {
   googleAds.refreshAccessToken.mockResolvedValue('fresh-token');

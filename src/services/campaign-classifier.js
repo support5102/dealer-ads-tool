@@ -152,6 +152,107 @@ function extractModel(campaignName) {
 }
 
 /**
+ * Extracts a model name from product feed data (item_id, title, brand).
+ *
+ * Strategy (priority order):
+ * 1. item_id — if it looks like "2024 Honda Civic" or "2024-Honda-Civic", strip year+make → model
+ * 2. title  — same logic (often "2024 Honda Civic LX Sedan")
+ * 3. Returns null if item_id is a VIN and title is absent/unparseable
+ *
+ * @param {string} itemId - Product item ID from feed
+ * @param {string} [title] - Product title from feed
+ * @param {string} [brand] - Product brand/make from feed
+ * @returns {string|null} Lowercase model name, or null
+ */
+function extractModelFromProduct(itemId, title, brand) {
+  // Try item_id first, then title
+  return tryExtractModelFromFeed(itemId, brand) || tryExtractModelFromFeed(title, brand) || null;
+}
+
+/**
+ * Attempts to extract a model name from a feed text field (item_id or title).
+ * @param {string} text - The text to parse
+ * @param {string} [brand] - Known brand/make to strip
+ * @returns {string|null} Lowercase model name, or null
+ */
+function tryExtractModelFromFeed(text, brand) {
+  if (!text || typeof text !== 'string') return null;
+
+  let name = text.toLowerCase().trim();
+
+  // Skip VIN-format strings (17 alphanumeric, excluding I/O/Q per VIN spec)
+  if (/^[a-hj-npr-z0-9]{17}$/i.test(name)) return null;
+
+  // Skip stock-number-like strings (short alphanumeric codes without spaces, e.g., "VIN001", "STK4829")
+  if (/^[a-z0-9]{2,10}$/i.test(name) && !name.includes(' ')) return null;
+
+  // Replace underscores used as separators with spaces
+  name = name.replace(/_/g, ' ');
+
+  // Replace hyphens between two full words (word-word) with spaces, but preserve
+  // model-name hyphens (F-150, CR-V, ID.4) where one side is short/numeric
+  name = name.replace(/([a-z]{3,})-([a-z]{3,})/g, '$1 $2');
+
+  // Strip leading year (4-digit number at start, possibly followed by separator)
+  name = name.replace(/^\d{4}[\s\-_]*/, '');
+
+  // Strip the known brand if provided
+  if (brand) {
+    const brandLower = brand.toLowerCase().trim();
+    name = name.replace(new RegExp(`\\b${escapeRegex(brandLower)}\\b`, 'g'), ' ');
+  }
+
+  // Strip common makes
+  for (const make of COMMON_MAKES) {
+    name = name.replace(new RegExp(`\\b${escapeRegex(make)}\\b`, 'g'), ' ');
+  }
+
+  // Strip noise words
+  for (const word of NOISE_WORDS) {
+    name = name.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, 'g'), ' ');
+  }
+
+  // Strip common trim/body-style words
+  const TRIM_WORDS = ['lx', 'ex', 'le', 'xle', 'xse', 'sr', 'sv', 'sl',
+    'touring', 'limited', 'platinum', 'titanium', 'sel', 'sxt',
+    'sedan', 'coupe', 'suv', 'truck', 'hatchback', 'wagon', 'convertible',
+    'cab', 'crew', 'supercrew', 'supercab', 'double', 'quad', 'regular',
+    'awd', 'fwd', 'rwd', '4wd', '4x4', '2wd', '4dr', '2dr'];
+  for (const word of TRIM_WORDS) {
+    name = name.replace(new RegExp(`\\b${escapeRegex(word)}\\b`, 'g'), ' ');
+  }
+
+  // Do NOT strip standalone numbers — they're often model identifiers (1500, 3, 250, etc.)
+
+  // Strip separators
+  name = name.replace(/[|–—]/g, ' ');
+
+  // Collapse whitespace and trim
+  name = name.replace(/\s+/g, ' ').trim();
+
+  // Take first 1-3 tokens as the model name
+  // Handles: "civic", "grand cherokee", "model 3", "f-150", "1500", "id.4", "x5"
+  const tokens = name.split(' ').filter(t => t.length >= 1);
+  if (tokens.length === 0) return null;
+
+  // Take up to 2 tokens for the model name
+  let model;
+  if (tokens.length === 1) {
+    model = tokens[0];
+  } else if (tokens[0].length <= 5) {
+    // Short first token likely needs the second (e.g., "grand cherokee", "model 3", "id.4" → "id. 4")
+    model = tokens.slice(0, 2).join(' ');
+  } else {
+    model = tokens[0];
+  }
+
+  // Final validation: must be at least 2 chars (handles X5, Q7, etc.)
+  if (!model || model.length < 2) return null;
+
+  return model;
+}
+
+/**
  * Escape special regex characters in a string.
  */
 function escapeRegex(str) {
@@ -255,6 +356,7 @@ module.exports = {
   ADDITION_WEIGHTS,
   classifyCampaign,
   extractModel,
+  extractModelFromProduct,
   computeInventoryShares,
   getEffectiveWeight,
   findInventoryShare,

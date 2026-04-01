@@ -396,13 +396,15 @@ async function getImpressionShare(restCtx, sinceDate) {
  * @returns {Promise<Object>} { newCount, usedCount, totalCount, source }
  */
 async function getInventory(restCtx) {
+  const { extractModelFromProduct } = require('./campaign-classifier');
   const doQuery = restCtx._queryFn || queryViaRest;
 
   // Primary: count unique vehicles from shopping performance (actually serving)
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT segments.product_item_id, segments.product_condition
+      `SELECT segments.product_item_id, segments.product_condition,
+              segments.product_title, segments.product_brand
        FROM shopping_performance_view
        WHERE segments.date DURING LAST_14_DAYS
        LIMIT 10000`,
@@ -415,17 +417,29 @@ async function getInventory(restCtx) {
       for (const row of rows) {
         const id = row.segments?.productItemId;
         if (id && !seen.has(id)) {
-          seen.set(id, (row.segments?.productCondition || '').toUpperCase());
+          seen.set(id, {
+            condition: (row.segments?.productCondition || '').toUpperCase(),
+            title: row.segments?.productTitle || '',
+            brand: row.segments?.productBrand || '',
+          });
         }
       }
       let newCount = 0;
       let usedCount = 0;
-      for (const condition of seen.values()) {
-        if (condition === 'NEW') newCount++;
-        else if (condition === 'USED' || condition === 'REFURBISHED') usedCount++;
-        else newCount++; // default to new if condition not set
+      const newInventoryByModel = {};
+      for (const [id, data] of seen.entries()) {
+        const isNew = data.condition === 'NEW' || (!data.condition);
+        if (isNew) {
+          newCount++;
+          const model = extractModelFromProduct(id, data.title, data.brand);
+          if (model) {
+            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+          }
+        } else {
+          usedCount++;
+        }
       }
-      return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance' };
+      return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance', newInventoryByModel };
     }
   } catch (err) {
     console.warn('getInventory shopping_performance_view failed (trying fallback):', err.message);
@@ -435,7 +449,8 @@ async function getInventory(restCtx) {
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand
+      `SELECT shopping_product.item_id, shopping_product.condition,
+              shopping_product.brand, shopping_product.title
        FROM shopping_product
        WHERE shopping_product.status = 'ELIGIBLE'
        LIMIT 5000`,
@@ -444,15 +459,27 @@ async function getInventory(restCtx) {
 
     let newCount = 0;
     let usedCount = 0;
+    const newInventoryByModel = {};
     for (const row of rows) {
       const condition = (row.shoppingProduct?.condition || '').toUpperCase();
-      if (condition === 'USED' || condition === 'REFURBISHED') usedCount++;
-      else newCount++;
+      if (condition === 'USED' || condition === 'REFURBISHED') {
+        usedCount++;
+      } else {
+        newCount++;
+        const model = extractModelFromProduct(
+          row.shoppingProduct?.itemId,
+          row.shoppingProduct?.title,
+          row.shoppingProduct?.brand
+        );
+        if (model) {
+          newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+        }
+      }
     }
-    return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product' };
+    return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
   } catch (err) {
     console.warn('getInventory fallback also failed (non-fatal):', err.message);
-    return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none' };
+    return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none', newInventoryByModel: {} };
   }
 }
 

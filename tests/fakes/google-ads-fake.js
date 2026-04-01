@@ -60,9 +60,9 @@ class FakeGoogleAdsClient {
     ];
 
     this._shoppingProducts = options.shoppingProducts || [
-      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/1', item_id: 'VIN001', condition: 'NEW', brand: 'Honda', custom_label1: 'Civic' } },
-      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/2', item_id: 'VIN002', condition: 'NEW', brand: 'Honda', custom_label1: 'Accord' } },
-      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/3', item_id: 'VIN003', condition: 'USED', brand: 'Toyota', custom_label1: 'Camry' } },
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/1', item_id: 'VIN001', condition: 'NEW', brand: 'Honda', custom_label1: 'Civic', title: '2024 Honda Civic LX' } },
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/2', item_id: 'VIN002', condition: 'NEW', brand: 'Honda', custom_label1: 'Accord', title: '2024 Honda Accord Sport' } },
+      { shopping_product: { resource_name: 'customers/1234567890/shoppingProducts/3', item_id: 'VIN003', condition: 'USED', brand: 'Toyota', custom_label1: 'Camry', title: '2022 Toyota Camry SE' } },
     ];
 
     // Track all mutations for assertions

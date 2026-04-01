@@ -462,19 +462,28 @@ function createBudgetAdjustmentsRouter(config, deps = {}) {
 }
 
 /**
- * Builds an inventory-by-model map from VLA campaign names and total inventory.
- * Distributes total inventory proportionally across detected models.
+ * Builds an inventory-by-model map for budget weighting.
+ *
+ * Priority:
+ * 1. Real per-model counts from getInventory().newInventoryByModel (parsed from feed data)
+ * 2. Fallback: even-split of total inventory across VLA campaign model names
  *
  * @param {Object[]} dedicatedBudgets - From getDedicatedBudgets()
- * @param {Object} inventory - From getInventory() { totalCount }
- * @returns {Object} Map of model → estimated count
+ * @param {Object} inventory - From getInventory() { totalCount, newInventoryByModel }
+ * @returns {Object} Map of model → count
  */
 function buildInventoryByModel(dedicatedBudgets, inventory) {
-  const { classifyCampaign, extractModel, CAMPAIGN_TYPES } = require('../services/campaign-classifier');
   const totalCount = inventory?.totalCount || 0;
   if (totalCount === 0) return {};
 
-  // Find all VLA campaigns and extract model names
+  // Prefer real per-model data from the feed when available
+  const realByModel = inventory?.newInventoryByModel;
+  if (realByModel && Object.keys(realByModel).length > 0) {
+    return realByModel;
+  }
+
+  // Fallback: even-split across models extracted from campaign names
+  const { classifyCampaign, extractModel, CAMPAIGN_TYPES } = require('../services/campaign-classifier');
   const models = new Set();
   for (const b of (dedicatedBudgets || [])) {
     const type = classifyCampaign(b.campaignName, b.channelType);
@@ -486,8 +495,6 @@ function buildInventoryByModel(dedicatedBudgets, inventory) {
 
   if (models.size === 0) return {};
 
-  // Distribute total inventory evenly across models as a baseline estimate
-  // (Real per-model inventory would come from a feed/sheet in a future phase)
   const perModel = Math.round(totalCount / models.size);
   const result = {};
   for (const model of models) {

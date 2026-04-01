@@ -8,6 +8,7 @@ const {
   ADDITION_WEIGHTS,
   classifyCampaign,
   extractModel,
+  extractModelFromProduct,
   computeInventoryShares,
   getEffectiveWeight,
   findInventoryShare,
@@ -171,6 +172,75 @@ describe('findInventoryShare', () => {
   test('null inputs return null', () => {
     expect(findInventoryShare(null, shares)).toBeNull();
     expect(findInventoryShare('civic', null)).toBeNull();
+  });
+});
+
+describe('extractModelFromProduct', () => {
+  test('parses "2024 Honda Civic" item_id', () => {
+    expect(extractModelFromProduct('2024 Honda Civic', null, 'Honda')).toBe('civic');
+  });
+
+  test('parses hyphen-separated item_id "2024-Honda-Civic"', () => {
+    expect(extractModelFromProduct('2024-Honda-Civic', null, 'Honda')).toBe('civic');
+  });
+
+  test('falls back to title when item_id is a VIN', () => {
+    expect(extractModelFromProduct('1HGCV1F34PA123456', '2024 Honda Civic LX', 'Honda')).toBe('civic');
+  });
+
+  test('strips trim level from title', () => {
+    expect(extractModelFromProduct(null, '2024 Honda Accord Sedan', 'Honda')).toBe('accord');
+  });
+
+  test('handles Ford F-150', () => {
+    expect(extractModelFromProduct('2024 Ford F-150', null, 'Ford')).toBe('f-150');
+  });
+
+  test('handles multi-word models like Grand Cherokee', () => {
+    expect(extractModelFromProduct('2024 Jeep Grand Cherokee', null, 'Jeep')).toBe('grand cherokee');
+  });
+
+  test('handles Ram 1500', () => {
+    expect(extractModelFromProduct('2024 Ram 1500', null, 'Ram')).toBe('1500');
+  });
+
+  test('handles Tesla Model 3', () => {
+    const result = extractModelFromProduct('2024 Tesla Model 3', null, 'Tesla');
+    expect(result).toContain('3');
+  });
+
+  test('handles BMW X5', () => {
+    expect(extractModelFromProduct('2024 BMW X5', null, 'BMW')).toBe('x5');
+  });
+
+  test('handles Audi Q7', () => {
+    expect(extractModelFromProduct('2024 Audi Q7', null, 'Audi')).toBe('q7');
+  });
+
+  test('handles Silverado 1500', () => {
+    const result = extractModelFromProduct('2024 Chevrolet Silverado 1500', null, 'Chevrolet');
+    expect(result).toContain('silverado');
+  });
+
+  test('returns null when both item_id and title are unparseable', () => {
+    expect(extractModelFromProduct('1HGCV1F34PA123456', null, null)).toBeNull();
+  });
+
+  test('returns null for null/undefined inputs', () => {
+    expect(extractModelFromProduct(null, null, null)).toBeNull();
+    expect(extractModelFromProduct(undefined, undefined, undefined)).toBeNull();
+  });
+
+  test('uses brand to strip make when provided', () => {
+    expect(extractModelFromProduct('2024 Cadillac Escalade', null, 'Cadillac')).toBe('escalade');
+  });
+
+  test('strips make even without brand param using COMMON_MAKES', () => {
+    expect(extractModelFromProduct('2024 Toyota Tacoma', null, null)).toBe('tacoma');
+  });
+
+  test('works on used vehicles too (filtering is callers responsibility)', () => {
+    expect(extractModelFromProduct('2022 Toyota Camry', null, 'Toyota')).toBe('camry');
   });
 });
 
