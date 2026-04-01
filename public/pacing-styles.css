@@ -6,11 +6,11 @@
   font-size: 12px;
   font-family: 'DM Mono', monospace;
   padding: 6px 14px;
-  border: 1px solid var(--border);
+  border: 2px solid #7c3aed;
   border-radius: 6px;
   transition: all .15s;
 }
-.nav-link:hover { color: var(--text2); border-color: #2d4a6e; }
+.nav-link:hover { color: var(--text2); border-color: #a78bfa; }
 
 /* Layout */
 .pacing-main {
