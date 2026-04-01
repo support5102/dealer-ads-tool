@@ -408,7 +408,7 @@ async function getInventory(restCtx) {
       `SELECT segments.product_item_id, segments.product_condition,
               segments.product_title, segments.product_brand
        FROM shopping_performance_view
-       WHERE segments.date DURING LAST_14_DAYS
+       WHERE segments.date DURING YESTERDAY
        LIMIT 10000`,
       restCtx.loginCustomerId
     );
