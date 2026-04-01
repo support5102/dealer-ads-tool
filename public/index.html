@@ -741,11 +741,12 @@
     </div>
   </div>
   <div class="header-right" id="headerRight">
-    <a href="/pacing.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
+    <a href="/" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Task Manager</a>
+    <a href="/pacing-overview.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
     <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Auditor</a>
-    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Campaign Builder</a>
+    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Builder</a>
     <a href="/change-history.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">History</a>
-    <button class="connect-btn" onclick="connectGoogle()">🔗 Connect Google Ads</button>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
   </div>
 </div>
 
@@ -933,9 +934,11 @@ function logout() {
 function showConnectedState() {
   const hr = document.getElementById('headerRight');
   hr.innerHTML = `
-    <a href="/pacing.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
+    <a href="/" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Task Manager</a>
+    <a href="/pacing-overview.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
     <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Auditor</a>
-    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Campaign Builder</a>
+    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Builder</a>
+    <a href="/change-history.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">History</a>
     <div class="connected-badge">
       <div class="pulse-dot"></div>
       Google Ads Connected
