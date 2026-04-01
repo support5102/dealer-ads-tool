@@ -19,6 +19,9 @@ const auditScheduler = require('../services/audit-scheduler');
 const { diagnose } = require('../services/audit-fixer');
 const { applyChange } = require('../services/change-executor');
 const changeHistory = require('../services/change-history');
+const dealerContextStore = require('../services/dealer-context-store');
+const { syncDealerContext, syncAllDealers } = require('../services/freshdesk-context-sync');
+const { createClient: createFreshdeskClient } = require('../services/freshdesk');
 
 /**
  * Creates audit routes.
@@ -378,6 +381,72 @@ function createAuditRouter(config) {
     const accountId = req.query.accountId || null;
     const history = changeHistory.getHistory(limit, accountId);
     res.json({ entries: history, total: changeHistory.size() });
+  });
+
+  /**
+   * GET /api/dealer-context — list all cached dealer contexts
+   */
+  router.get('/api/dealer-context', requireAuth, (req, res) => {
+    res.json({ contexts: dealerContextStore.getAll() });
+  });
+
+  /**
+   * GET /api/dealer-context/:accountId — get context for a specific dealer
+   */
+  router.get('/api/dealer-context/:accountId', requireAuth, (req, res) => {
+    const ctx = dealerContextStore.getContext(req.params.accountId);
+    if (!ctx) return res.status(404).json({ error: 'No context found for this account.' });
+    res.json({ context: ctx });
+  });
+
+  /**
+   * POST /api/dealer-context/sync — sync context from Freshdesk for one dealer
+   * Body: { accountId, dealerName, freshdeskTag }
+   */
+  router.post('/api/dealer-context/sync', requireAuth, async (req, res) => {
+    const { accountId, dealerName, freshdeskTag } = req.body || {};
+    if (!accountId || !freshdeskTag) {
+      return res.status(400).json({ error: 'Missing accountId or freshdeskTag.' });
+    }
+    if (!config.freshdesk?.apiKey || !config.freshdesk?.domain) {
+      return res.status(400).json({ error: 'Freshdesk not configured.' });
+    }
+    if (!config.claude?.apiKey) {
+      return res.status(400).json({ error: 'Claude API not configured.' });
+    }
+
+    try {
+      const fdClient = createFreshdeskClient(config.freshdesk);
+      const result = await syncDealerContext(fdClient, config.claude, { accountId, dealerName, freshdeskTag });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/dealer-context/sync-all — sync context from Freshdesk for all dealers with tags
+   * Body: { dealers: [{ accountId, dealerName, freshdeskTag }] }
+   */
+  router.post('/api/dealer-context/sync-all', requireAuth, async (req, res) => {
+    const { dealers } = req.body || {};
+    if (!dealers || !Array.isArray(dealers)) {
+      return res.status(400).json({ error: 'Missing dealers array.' });
+    }
+    if (!config.freshdesk?.apiKey || !config.freshdesk?.domain) {
+      return res.status(400).json({ error: 'Freshdesk not configured.' });
+    }
+    if (!config.claude?.apiKey) {
+      return res.status(400).json({ error: 'Claude API not configured.' });
+    }
+
+    try {
+      const fdClient = createFreshdeskClient(config.freshdesk);
+      const result = await syncAllDealers(fdClient, config.claude, dealers);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;

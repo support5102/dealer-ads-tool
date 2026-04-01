@@ -26,6 +26,8 @@ const { logAudit } = require('../utils/audit-log');
 const changeHistory = require('../services/change-history');
 const dealerContextStore = require('../services/dealer-context-store');
 const { extractDealerContext } = require('../services/dealer-context-extractor');
+const { syncDealerContext } = require('../services/freshdesk-context-sync');
+const { createClient: createFreshdeskClient } = require('../services/freshdesk');
 
 /**
  * Creates a lightweight Google Sheets client from an access token.
@@ -103,16 +105,30 @@ function createBudgetAdjustmentsRouter(config, deps = {}) {
         return res.json({ flagged: [], adjustments: [], message: 'No accounts with budgets found.' });
       }
 
-      // Extract dealer context from Sheet notes in parallel (best-effort, non-blocking)
+      // Extract dealer context: Sheet notes first, then Freshdesk tickets as fallback
       if (config.claude?.apiKey) {
-        const contextPromises = matched
+        // Phase 1: Sheet notes (fast, parallel)
+        const sheetPromises = matched
           .filter(({ goal }) => goal.dealerNotes)
           .map(({ account, goal }) =>
             extractDealerContext(config.claude, goal.dealerName, goal.dealerNotes)
               .then(ctx => dealerContextStore.save(account.id, ctx))
-              .catch(() => {}) // best-effort
+              .catch(() => {})
           );
-        await Promise.allSettled(contextPromises);
+        await Promise.allSettled(sheetPromises);
+
+        // Phase 2: Freshdesk tickets for dealers with tags but no Sheet notes (or no existing context)
+        if (config.freshdesk?.apiKey && config.freshdesk?.domain) {
+          const fdClient = createFreshdeskClient(config.freshdesk);
+          const needsFreshdesk = matched.filter(({ account, goal }) =>
+            goal.freshdeskTag && !dealerContextStore.getContext(account.id)
+          );
+          for (const { account, goal } of needsFreshdesk) {
+            await syncDealerContext(fdClient, config.claude, {
+              accountId: account.id, dealerName: goal.dealerName, freshdeskTag: goal.freshdeskTag,
+            }).catch(() => {}); // best-effort
+          }
+        }
       }
 
       // Fetch pacing for all matched accounts

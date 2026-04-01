@@ -124,7 +124,67 @@ function createClient(freshdeskConfig) {
     }
   }
 
-  return { checkConnection, listTickets, getTicket };
+  /**
+   * Searches tickets by tag (dealer name). Returns tickets from the last 30 days
+   * including resolved/closed for context extraction.
+   *
+   * @param {string} tag - Tag to search for (e.g., "Coleman Chevrolet")
+   * @param {number} [lookbackDays=30] - How many days back to search
+   * @returns {Promise<Object[]>} Array of ticket summaries with descriptions
+   */
+  async function searchTicketsByTag(tag, lookbackDays = 30) {
+    try {
+      const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const query = `"tag:'${tag.replace(/'/g, '')}' AND updated_at:>'${since}'"`;
+      const { data } = await http.get('/search/tickets', {
+        params: { query },
+      });
+
+      const results = data.results || [];
+      return results.map(t => ({
+        id: t.id,
+        subject: t.subject || '(no subject)',
+        requesterName: t.requester?.name || 'Unknown',
+        priority: t.priority,
+        priorityLabel: PRIORITY_LABELS[t.priority] || 'Unknown',
+        status: t.status,
+        statusLabel: STATUS_LABELS[t.status] || 'Unknown',
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
+      }));
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 429) throw new Error('Freshdesk rate limit exceeded');
+      throw new Error(`Failed to search tickets by tag "${tag}": ${err.message}`);
+    }
+  }
+
+  /**
+   * Fetches ticket descriptions in bulk. Uses individual getTicket calls
+   * with a delay to stay under rate limits.
+   *
+   * @param {number[]} ticketIds - Array of ticket IDs
+   * @param {number} [delayMs=500] - Delay between requests (ms)
+   * @returns {Promise<Object[]>} Array of tickets with descriptions
+   */
+  async function getTicketsBulk(ticketIds, delayMs = 500) {
+    const results = [];
+    for (const id of ticketIds) {
+      try {
+        const ticket = await getTicket(id);
+        results.push(ticket);
+      } catch (err) {
+        console.warn(`[freshdesk] Failed to get ticket ${id}: ${err.message}`);
+      }
+      // Rate limit delay
+      if (delayMs > 0) {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+    return results;
+  }
+
+  return { checkConnection, listTickets, getTicket, searchTicketsByTag, getTicketsBulk };
 }
 
 module.exports = { createClient, PRIORITY_LABELS, STATUS_LABELS };

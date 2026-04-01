@@ -5,7 +5,7 @@
  * Calls: Google Sheets API v4 (via injected sheets client)
  *
  * Reads the "PPC Spend Pace" sheet with columns:
- * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory | E: Dealer Notes
+ * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory | E: Dealer Notes | F: Freshdesk Tag
  *
  * The sheets client is injected (not created here) so tests can provide a fake.
  */
@@ -16,6 +16,7 @@
  * @property {number} monthlyBudget - Monthly budget target in dollars
  * @property {number|null} baselineInventory - Normal new vehicle count (for inventory modifier)
  * @property {string|null} dealerNotes - Free-text notes about dealer preferences, priorities, constraints
+ * @property {string|null} freshdeskTag - Freshdesk tag for matching tickets to this dealer
  */
 
 /**
@@ -44,7 +45,7 @@ function cleanCustomerId(id) {
 /**
  * Parses a single row from the PPC Spend Pace sheet into a DealerGoal object.
  *
- * Column layout: A=Account Name, B=Cost (USD), C=Total Budget, D=Baseline Inventory, E=Dealer Notes
+ * Column layout: A=Account Name, B=Cost (USD), C=Total Budget, D=Baseline Inventory, E=Dealer Notes, F=Freshdesk Tag
  *
  * @param {string[]} row - Array of cell values from one sheet row
  * @returns {DealerGoal|null} Parsed goal, or null if row is invalid
@@ -61,12 +62,14 @@ function parseRow(row) {
 
   const baselineInventory = parseNumber(row[3]);
   const dealerNotes = row[4] != null ? String(row[4]).trim() : null;
+  const freshdeskTag = row[5] != null ? String(row[5]).trim() : null;
 
   return {
     dealerName,
     monthlyBudget,
     baselineInventory: baselineInventory || null,
     dealerNotes: dealerNotes || null,
+    freshdeskTag: freshdeskTag || null,
   };
 }
 
@@ -79,7 +82,7 @@ function parseRow(row) {
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:E') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:F') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'

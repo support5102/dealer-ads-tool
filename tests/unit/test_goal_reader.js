@@ -116,13 +116,14 @@ describe('cleanCustomerId', () => {
 
 describe('parseRow', () => {
   test('parses complete row into DealerGoal', () => {
-    const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00', '', 'Push F-150 hard']);
+    const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00', '', 'Push F-150 hard', 'honda-springfield']);
 
     expect(goal).toEqual({
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
       baselineInventory: null,
       dealerNotes: 'Push F-150 hard',
+      freshdeskTag: 'honda-springfield',
     });
   });
 
@@ -222,7 +223,7 @@ describe('readGoals', () => {
     expect(capturedParams.range).toBe('CustomRange!A1:Z');
   });
 
-  test('uses default range PPC Spend Pace!A2:E when not specified', async () => {
+  test('uses default range PPC Spend Pace!A2:F when not specified', async () => {
     let capturedParams;
     const client = {
       spreadsheets: {
@@ -236,7 +237,7 @@ describe('readGoals', () => {
     };
 
     await readGoals(client, 'my-sheet-id');
-    expect(capturedParams.range).toBe('PPC Spend Pace!A2:E');
+    expect(capturedParams.range).toBe('PPC Spend Pace!A2:F');
   });
 
   test('skips invalid rows and returns only valid goals', async () => {
