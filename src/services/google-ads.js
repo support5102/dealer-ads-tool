@@ -415,9 +415,13 @@ async function getInventory(restCtx) {
     if (rows.length > 0) {
       let newCount = 0;
       let usedCount = 0;
+      let skippedCount = 0;
+      const conditionCounts = {};
       const newInventoryByModel = {};
       for (const row of rows) {
-        const condition = (row.shoppingProduct?.condition || '').toUpperCase();
+        const rawCondition = row.shoppingProduct?.condition;
+        const condition = (rawCondition || '').toUpperCase();
+        conditionCounts[rawCondition || '(empty)'] = (conditionCounts[rawCondition || '(empty)'] || 0) + 1;
         if (condition === 'USED' || condition === 'REFURBISHED') {
           usedCount++;
         } else if (condition === 'NEW') {
@@ -430,9 +434,11 @@ async function getInventory(restCtx) {
           if (model) {
             newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
           }
+        } else {
+          skippedCount++;
         }
-        // Skip vehicles with no condition set — don't assume NEW
       }
+      console.log(`[getInventory] shopping_product: ${rows.length} total, ${newCount} NEW, ${usedCount} USED, ${skippedCount} skipped. Conditions:`, JSON.stringify(conditionCounts));
       return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
     }
   } catch (err) {
