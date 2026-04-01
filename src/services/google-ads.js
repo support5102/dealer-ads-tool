@@ -399,7 +399,48 @@ async function getInventory(restCtx) {
   const { extractModelFromProduct } = require('./campaign-classifier');
   const doQuery = restCtx._queryFn || queryViaRest;
 
-  // Primary: count unique vehicles from shopping performance (actually serving)
+  // Primary: shopping_product with ELIGIBLE status — current live feed inventory.
+  // This matches what Google Ads shows in Listing Groups and avoids counting sold vehicles.
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id, shopping_product.condition,
+              shopping_product.brand, shopping_product.title
+       FROM shopping_product
+       WHERE shopping_product.status = 'ELIGIBLE'
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    if (rows.length > 0) {
+      let newCount = 0;
+      let usedCount = 0;
+      const newInventoryByModel = {};
+      for (const row of rows) {
+        const condition = (row.shoppingProduct?.condition || '').toUpperCase();
+        if (condition === 'USED' || condition === 'REFURBISHED') {
+          usedCount++;
+        } else if (condition === 'NEW') {
+          newCount++;
+          const model = extractModelFromProduct(
+            row.shoppingProduct?.itemId,
+            row.shoppingProduct?.title,
+            row.shoppingProduct?.brand
+          );
+          if (model) {
+            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+          }
+        }
+        // Skip vehicles with no condition set — don't assume NEW
+      }
+      return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
+    }
+  } catch (err) {
+    console.warn('getInventory shopping_product failed (trying fallback):', err.message);
+  }
+
+  // Fallback: shopping_performance_view — counts vehicles that served in the last 14 days.
+  // Less accurate (includes sold vehicles) but works when shopping_product is unavailable.
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
@@ -428,59 +469,24 @@ async function getInventory(restCtx) {
       let usedCount = 0;
       const newInventoryByModel = {};
       for (const [id, data] of seen.entries()) {
-        const isNew = data.condition === 'NEW' || (!data.condition);
-        if (isNew) {
+        if (data.condition === 'NEW') {
           newCount++;
           const model = extractModelFromProduct(id, data.title, data.brand);
           if (model) {
             newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
           }
-        } else {
+        } else if (data.condition === 'USED' || data.condition === 'REFURBISHED') {
           usedCount++;
         }
+        // Skip unknown conditions — don't inflate count by assuming NEW
       }
       return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance', newInventoryByModel };
     }
   } catch (err) {
-    console.warn('getInventory shopping_performance_view failed (trying fallback):', err.message);
-  }
-
-  // Fallback: direct shopping_product query
-  try {
-    const rows = await doQuery(
-      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT shopping_product.item_id, shopping_product.condition,
-              shopping_product.brand, shopping_product.title
-       FROM shopping_product
-       WHERE shopping_product.status = 'ELIGIBLE'
-       LIMIT 5000`,
-      restCtx.loginCustomerId
-    );
-
-    let newCount = 0;
-    let usedCount = 0;
-    const newInventoryByModel = {};
-    for (const row of rows) {
-      const condition = (row.shoppingProduct?.condition || '').toUpperCase();
-      if (condition === 'USED' || condition === 'REFURBISHED') {
-        usedCount++;
-      } else {
-        newCount++;
-        const model = extractModelFromProduct(
-          row.shoppingProduct?.itemId,
-          row.shoppingProduct?.title,
-          row.shoppingProduct?.brand
-        );
-        if (model) {
-          newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
-        }
-      }
-    }
-    return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
-  } catch (err) {
     console.warn('getInventory fallback also failed (non-fatal):', err.message);
-    return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none', newInventoryByModel: {} };
   }
+
+  return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none', newInventoryByModel: {} };
 }
 
 /**

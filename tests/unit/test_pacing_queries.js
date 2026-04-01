@@ -238,28 +238,29 @@ describe('getImpressionShare', () => {
 // ===========================================================================
 
 describe('getInventory', () => {
+  // Primary source is now shopping_product (current eligible inventory)
   const defaultRows = [
-    { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic LX', productBrand: 'Honda' } },
-    { segments: { productItemId: 'VIN002', productCondition: 'NEW', productTitle: '2024 Honda Accord Sport', productBrand: 'Honda' } },
-    { segments: { productItemId: 'VIN003', productCondition: 'USED', productTitle: '2022 Toyota Camry SE', productBrand: 'Toyota' } },
+    { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda', title: '2024 Honda Civic LX' } },
+    { shoppingProduct: { itemId: 'VIN002', condition: 'NEW', brand: 'Honda', title: '2024 Honda Accord Sport' } },
+    { shoppingProduct: { itemId: 'VIN003', condition: 'USED', brand: 'Toyota', title: '2022 Toyota Camry SE' } },
   ];
 
-  test('returns new and used counts from shopping performance data', async () => {
+  test('returns new and used counts from shopping_product (primary)', async () => {
     const result = await getInventory(fakeCtx(defaultRows));
 
     expect(result.newCount).toBe(2);
     expect(result.usedCount).toBe(1);
     expect(result.totalCount).toBe(3);
-    expect(result.source).toBe('shopping_performance');
+    expect(result.source).toBe('shopping_product');
     expect(result.newInventoryByModel).toBeDefined();
   });
 
   test('builds newInventoryByModel from product titles', async () => {
     const rows = [
-      { segments: { productItemId: 'V1', productCondition: 'NEW', productTitle: '2024 Honda Civic LX', productBrand: 'Honda' } },
-      { segments: { productItemId: 'V2', productCondition: 'NEW', productTitle: '2024 Honda Civic EX', productBrand: 'Honda' } },
-      { segments: { productItemId: 'V3', productCondition: 'NEW', productTitle: '2024 Honda Accord Sport', productBrand: 'Honda' } },
-      { segments: { productItemId: 'V4', productCondition: 'USED', productTitle: '2022 Toyota Camry SE', productBrand: 'Toyota' } },
+      { shoppingProduct: { itemId: 'VIN01', condition: 'NEW', brand: 'Honda', title: '2024 Honda Civic LX' } },
+      { shoppingProduct: { itemId: 'VIN02', condition: 'NEW', brand: 'Honda', title: '2024 Honda Civic EX' } },
+      { shoppingProduct: { itemId: 'VIN03', condition: 'NEW', brand: 'Honda', title: '2024 Honda Accord Sport' } },
+      { shoppingProduct: { itemId: 'VIN04', condition: 'USED', brand: 'Toyota', title: '2022 Toyota Camry SE' } },
     ];
     const result = await getInventory(fakeCtx(rows));
     expect(result.newInventoryByModel.civic).toBe(2);
@@ -270,8 +271,8 @@ describe('getInventory', () => {
 
   test('extracts model from item_id when it contains year/make/model', async () => {
     const rows = [
-      { segments: { productItemId: '2024 Honda Civic', productCondition: 'NEW', productBrand: 'Honda' } },
-      { segments: { productItemId: '2024 Ford F-150', productCondition: 'NEW', productBrand: 'Ford' } },
+      { shoppingProduct: { itemId: '2024 Honda Civic', condition: 'NEW', brand: 'Honda' } },
+      { shoppingProduct: { itemId: '2024 Ford F-150', condition: 'NEW', brand: 'Ford' } },
     ];
     const result = await getInventory(fakeCtx(rows));
     expect(result.newInventoryByModel.civic).toBe(1);
@@ -280,8 +281,8 @@ describe('getInventory', () => {
 
   test('returns empty newInventoryByModel when no models extractable', async () => {
     const rows = [
-      { segments: { productItemId: '1HGCV1F34PA123456', productCondition: 'NEW' } },
-      { segments: { productItemId: '2T1BU4EE5DC123456', productCondition: 'NEW' } },
+      { shoppingProduct: { itemId: '1HGCV1F34PA123456', condition: 'NEW', brand: 'Honda' } },
+      { shoppingProduct: { itemId: '2T1BU4EE5DC123456', condition: 'NEW', brand: 'Toyota' } },
     ];
     const result = await getInventory(fakeCtx(rows));
     expect(result.newCount).toBe(2);
@@ -296,31 +297,22 @@ describe('getInventory', () => {
     expect(result.newInventoryByModel).toEqual({});
   });
 
-  test('deduplicates by item_id', async () => {
+  test('does NOT count vehicles with missing condition as NEW', async () => {
     const rows = [
-      { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
-      { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
-      { segments: { productItemId: 'VIN002', productCondition: 'USED', productTitle: '2022 Toyota Camry', productBrand: 'Toyota' } },
+      { shoppingProduct: { itemId: 'VIN001', condition: '', brand: 'Honda', title: '2024 Honda Civic' } },
+      { shoppingProduct: { itemId: 'VIN002', brand: 'Honda', title: '2024 Honda Accord' } },
+      { shoppingProduct: { itemId: 'VIN003', condition: 'NEW', brand: 'Honda', title: '2024 Honda CR-V' } },
     ];
     const result = await getInventory(fakeCtx(rows));
-    expect(result.totalCount).toBe(2);
+    // Only the one with explicit 'NEW' condition should be counted
     expect(result.newCount).toBe(1);
-    expect(result.usedCount).toBe(1);
-  });
-
-  test('defaults to new when condition is not set', async () => {
-    const rows = [
-      { segments: { productItemId: 'VIN001', productCondition: '', productTitle: '2024 Honda Civic', productBrand: 'Honda' } },
-      { segments: { productItemId: 'VIN002', productTitle: '2024 Honda Accord', productBrand: 'Honda' } },
-    ];
-    const result = await getInventory(fakeCtx(rows));
-    expect(result.newCount).toBe(2);
     expect(result.usedCount).toBe(0);
+    expect(result.totalCount).toBe(3);
   });
 
   test('handles large inventory without error', async () => {
     const rows = Array.from({ length: 500 }, (_, i) => ({
-      segments: { productItemId: `VIN${i}`, productCondition: i % 2 === 0 ? 'NEW' : 'USED' },
+      shoppingProduct: { itemId: `VIN${i}`, condition: i % 2 === 0 ? 'NEW' : 'USED' },
     }));
     const result = await getInventory(fakeCtx(rows));
     expect(result.totalCount).toBe(500);
@@ -329,22 +321,22 @@ describe('getInventory', () => {
     expect(result.newInventoryByModel).toBeDefined();
   });
 
-  test('falls back to shopping_product when performance view fails', async () => {
+  test('falls back to shopping_performance_view when shopping_product fails', async () => {
     let callCount = 0;
     const ctx = {
       accessToken: 'fake', developerToken: 'fake', customerId: '123', loginCustomerId: '999',
       _queryFn: async () => {
         callCount++;
-        if (callCount === 1) throw new Error('shopping_performance_view not supported');
-        // Fallback returns shopping_product format with title
+        if (callCount === 1) throw new Error('shopping_product not supported');
+        // Fallback returns shopping_performance_view format
         return [
-          { shoppingProduct: { itemId: 'VIN001', condition: 'NEW', brand: 'Honda', title: '2024 Honda Civic LX' } },
-          { shoppingProduct: { itemId: 'VIN002', condition: 'USED', brand: 'Toyota', title: '2022 Toyota Camry' } },
+          { segments: { productItemId: 'VIN001', productCondition: 'NEW', productTitle: '2024 Honda Civic LX', productBrand: 'Honda' } },
+          { segments: { productItemId: 'VIN002', productCondition: 'USED', productTitle: '2022 Toyota Camry', productBrand: 'Toyota' } },
         ];
       },
     };
     const result = await getInventory(ctx);
-    expect(result.source).toBe('shopping_product');
+    expect(result.source).toBe('shopping_performance');
     expect(result.newCount).toBe(1);
     expect(result.usedCount).toBe(1);
     expect(result.totalCount).toBe(2);
