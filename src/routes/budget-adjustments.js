@@ -24,6 +24,8 @@ const googleAds = require('../services/google-ads');
 const { calculatePacing } = require('../services/pacing-calculator');
 const { logAudit } = require('../utils/audit-log');
 const changeHistory = require('../services/change-history');
+const dealerContextStore = require('../services/dealer-context-store');
+const { extractDealerContext } = require('../services/dealer-context-extractor');
 
 /**
  * Creates a lightweight Google Sheets client from an access token.
@@ -99,6 +101,18 @@ function createBudgetAdjustmentsRouter(config, deps = {}) {
 
       if (matched.length === 0) {
         return res.json({ flagged: [], adjustments: [], message: 'No accounts with budgets found.' });
+      }
+
+      // Extract dealer context from Sheet notes in parallel (best-effort, non-blocking)
+      if (config.claude?.apiKey) {
+        const contextPromises = matched
+          .filter(({ goal }) => goal.dealerNotes)
+          .map(({ account, goal }) =>
+            extractDealerContext(config.claude, goal.dealerName, goal.dealerNotes)
+              .then(ctx => dealerContextStore.save(account.id, ctx))
+              .catch(() => {}) // best-effort
+          );
+        await Promise.allSettled(contextPromises);
       }
 
       // Fetch pacing for all matched accounts
@@ -185,6 +199,7 @@ function createBudgetAdjustmentsRouter(config, deps = {}) {
             inventoryByModel,
             spendMap,
             direction: account.direction,
+            dealerContext: dealerContextStore.getContext(account.customerId),
           });
 
           if (batch.adjustments.length > 0) {

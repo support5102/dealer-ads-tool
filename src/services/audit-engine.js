@@ -24,6 +24,8 @@ const {
   checkHeadlineQuality,
   checkPinningOveruse,
 } = require('./ad-copy-analyzer');
+const dealerContextStore = require('./dealer-context-store');
+const { classifyCampaign } = require('./campaign-classifier');
 const {
   analyzeNegativeConflicts,
   analyzeCannibalization,
@@ -400,6 +402,69 @@ function checkLowImpressionShare(campaigns) {
   return findings;
 }
 
+/**
+ * Check: Dealer context constraint violations.
+ * Flags campaigns whose budgets violate dealer-specified floors or ceilings.
+ */
+function checkDealerContextViolations(campaigns, accountId) {
+  const findings = [];
+  const ctx = dealerContextStore.getContext(accountId);
+  if (!ctx || !ctx.budgetConstraints || ctx.budgetConstraints.length === 0) return findings;
+
+  const violations = [];
+
+  for (const c of campaigns) {
+    if (c.status !== 'ENABLED') continue;
+    const campaignType = classifyCampaign(c.campaignName);
+
+    for (const constraint of ctx.budgetConstraints) {
+      const matches = (constraint.scope === 'account') ||
+        (constraint.scope === 'campaign_type' && campaignType === constraint.target) ||
+        (constraint.scope === 'campaign_name' && c.campaignName.toLowerCase().includes(constraint.target.toLowerCase()));
+      if (!matches) continue;
+
+      // Note: campaign performance data has cost (7-day total), not daily budget.
+      // We can approximate daily budget from cost/7 but this is imprecise.
+      // For a more accurate check, we'd need getDedicatedBudgets data.
+      // For now, flag based on daily spend rate vs constraint.
+      const dailySpend = c.cost != null ? c.cost / 7 : null;
+      if (dailySpend == null) continue;
+
+      const amount = constraint.unit === 'daily' ? constraint.amount : constraint.amount / 30;
+
+      if (constraint.constraint === 'floor' && dailySpend < amount * 0.8) {
+        violations.push({
+          campaignName: c.campaignName,
+          constraint: `floor $${amount.toFixed(2)}/day`,
+          currentSpend: `$${dailySpend.toFixed(2)}/day`,
+          note: constraint.note,
+        });
+      }
+      if (constraint.constraint === 'ceiling' && dailySpend > amount * 1.2) {
+        violations.push({
+          campaignName: c.campaignName,
+          constraint: `ceiling $${amount.toFixed(2)}/day`,
+          currentSpend: `$${dailySpend.toFixed(2)}/day`,
+          note: constraint.note,
+        });
+      }
+    }
+  }
+
+  if (violations.length > 0) {
+    findings.push(finding(
+      'dealer_context_violations',
+      SEVERITY.WARNING,
+      'dealer_context',
+      `${violations.length} campaign(s) violating dealer-specified budget constraints`,
+      'These campaigns are outside the budget range specified in dealer notes.',
+      { violations }
+    ));
+  }
+
+  return findings;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Main audit runner
 // ─────────────────────────────────────────────────────────────
@@ -420,6 +485,7 @@ async function runAudit(restCtx, options = {}) {
     'stale_years', 'missing_rsas', 'headline_quality', 'pinning',
     'neg_conflicts', 'neg_cannibalization', 'traffic_sculpting',
     'irrelevant_search_terms', 'blocked_converting_terms',
+    'dealer_context',
   ];
   const selectedChecks = options.checks
     ? options.checks.filter(c => VALID_CHECKS.includes(c))
@@ -488,6 +554,7 @@ async function runAudit(restCtx, options = {}) {
     },
     irrelevant_search_terms:  () => analyzeIrrelevantSearchTerms(searchTerms),
     blocked_converting_terms: () => analyzeBlockedConvertingTerms(searchTerms, campaignNegatives),
+    dealer_context:           () => checkDealerContextViolations(campaignData, restCtx.customerId),
   };
 
   let allFindings = [...queryErrors];

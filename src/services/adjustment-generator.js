@@ -56,6 +56,7 @@ function generateExecutableAdjustments(params) {
     inventoryByModel = {},
     spendMap,
     direction,
+    dealerContext = null,
   } = params;
 
   const adjustmentId = generateAdjustmentId();
@@ -111,7 +112,7 @@ function generateExecutableAdjustments(params) {
   );
 
   // Distribute the change proportionally by weighted share
-  const adjustments = distributeByWeight(classifiedBudgets, totalChangeNeeded, isAddition, isMap, requiredDailyRate);
+  const adjustments = distributeByWeight(classifiedBudgets, totalChangeNeeded, isAddition, isMap, requiredDailyRate, dealerContext);
 
   // Filter out negligible changes (< $1)
   const significantAdjustments = adjustments.filter(a => Math.abs(a.change) >= 1);
@@ -223,7 +224,7 @@ function classifyAllBudgets(dedicatedBudgets, sharedBudgets, spendMap, inventory
  * @param {Map} isMap - Impression share lookup
  * @returns {Object[]} Adjustment objects ready for executor
  */
-function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, requiredDailyRate) {
+function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, requiredDailyRate, dealerContext) {
   if (classified.length === 0 || Math.abs(totalChangeNeeded) < 1) return [];
 
   // Compute weighted shares
@@ -286,6 +287,40 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, re
       }
     }
 
+    // Only apply dealer context if confidence is above threshold
+    const applyDealerCtx = dealerContext && (dealerContext.confidence || 0) >= 0.5;
+
+    // Apply dealer model focus BEFORE constraints (so ceilings/floors clamp the result)
+    if (applyDealerCtx && dealerContext.modelFocus && budget.model) {
+      const focus = dealerContext.modelFocus.find(f =>
+        budget.model.toLowerCase().includes(f.model.toLowerCase())
+      );
+      if (focus) {
+        if (focus.action === 'push' && isAddition) {
+          newDailyBudget *= 1.15; // 15% boost for priority models
+        } else if (focus.action === 'reduce' && !isAddition) {
+          newDailyBudget *= 0.85; // 15% steeper cut for deprioritized models
+        }
+      }
+    }
+
+    // Apply dealer-specific budget constraints LAST (floors/ceilings are hard limits)
+    if (applyDealerCtx && dealerContext.budgetConstraints) {
+      for (const c of dealerContext.budgetConstraints) {
+        if (typeof c.amount !== 'number' || c.amount <= 0) continue; // skip invalid
+        const matches = (c.scope === 'account') ||
+          (c.scope === 'campaign_type' && budget.campaignType === c.target) ||
+          (c.scope === 'campaign_name' && budget.target.toLowerCase().includes(c.target.toLowerCase()));
+        if (!matches) continue;
+        const amount = c.unit === 'daily' ? c.amount : c.amount / 30;
+        if (c.constraint === 'floor') {
+          newDailyBudget = Math.max(newDailyBudget, amount);
+        } else if (c.constraint === 'ceiling') {
+          newDailyBudget = Math.min(newDailyBudget, amount);
+        }
+      }
+    }
+
     // General floor: never below $1/day
     newDailyBudget = Math.max(newDailyBudget, 1);
 
@@ -294,8 +329,16 @@ function distributeByWeight(classified, totalChangeNeeded, isAddition, isMap, re
 
     const change = Math.round((newDailyBudget - budget.currentBudgetSetting) * 100) / 100;
 
-    // Build reason string
-    const reason = buildReason(budget, change, isAddition, isMap);
+    // Build reason string with dealer context annotations
+    let reason = buildReason(budget, change, isAddition, isMap);
+    if (applyDealerCtx && budget.model) {
+      const focus = (dealerContext.modelFocus || []).find(f =>
+        budget.model.toLowerCase().includes(f.model.toLowerCase())
+      );
+      if (focus) {
+        reason += ` | Dealer: ${focus.action} ${focus.model}`;
+      }
+    }
 
     return {
       type: budget.budgetType,
