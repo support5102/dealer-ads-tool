@@ -28,7 +28,7 @@ function changeToRows(change) {
   const { type, campaignName, adGroupName, details } = change;
 
   // Guard: types that require details
-  const NEEDS_DETAILS = ['update_budget', 'pause_keyword', 'add_keyword', 'add_negative_keyword', 'add_radius', 'exclude_radius'];
+  const NEEDS_DETAILS = ['update_budget', 'pause_keyword', 'add_keyword', 'add_negative_keyword', 'add_radius', 'exclude_radius', 'create_shared_budget', 'assign_campaign_budget'];
   if (NEEDS_DETAILS.includes(type) && !details) {
     return {
       rows: [],
@@ -131,6 +131,20 @@ function changeToRows(change) {
         skipReason: `exclude_radius cannot be exported to CSV — use API to apply: ${campaignName} (${details.radius}mi at ${details.lat},${details.lng})`,
       };
     }
+
+    case 'create_shared_budget':
+      return {
+        rows: [],
+        skipped: true,
+        skipReason: `create_shared_budget cannot be exported to CSV — use API to apply: "${details.budgetName}" at $${details.dailyAmount}/day`,
+      };
+
+    case 'assign_campaign_budget':
+      return {
+        rows: [],
+        skipped: true,
+        skipReason: `assign_campaign_budget cannot be exported to CSV — use API to apply: "${campaignName}" → "${details.budgetName}"`,
+      };
 
     default:
       return {

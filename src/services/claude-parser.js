@@ -25,8 +25,8 @@ Return ONLY valid JSON, no markdown, no explanation:
   "summary": "Plain English summary of all changes",
   "changes": [
     {
-      "type": "pause_campaign|enable_campaign|update_budget|pause_ad_group|enable_ad_group|pause_keyword|add_keyword|add_negative_keyword|exclude_radius|add_radius",
-      "campaignName": "exact campaign name from account",
+      "type": "pause_campaign|enable_campaign|update_budget|pause_ad_group|enable_ad_group|pause_keyword|add_keyword|add_negative_keyword|exclude_radius|add_radius|create_shared_budget|assign_campaign_budget",
+      "campaignName": "exact campaign name from account (null for create_shared_budget)",
       "adGroupName": "exact ad group name if applicable",
       "details": {
         "newBudget": "number string e.g. 150.00",
@@ -36,7 +36,10 @@ Return ONLY valid JSON, no markdown, no explanation:
         "lng": -90.069620,
         "radius": 20,
         "units": "MILES",
-        "cpcBid": "1.50"
+        "cpcBid": "1.50",
+        "budgetName": "name for shared budget (create_shared_budget, assign_campaign_budget)",
+        "dailyAmount": "daily budget amount e.g. 500.00 (create_shared_budget)",
+        "campaignNames": ["list of campaign names to assign to new budget (create_shared_budget)"]
       }
     }
   ],
@@ -50,6 +53,8 @@ Rules:
 - Budget values: numbers only, no $ sign
 - Match types: EXACT or PHRASE only (uppercase). NEVER use BROAD match — it is forbidden by strategy rules
 - Radius: always include lat, lng, radius, and units
+- create_shared_budget: use when task says to create a shared/combined budget. Set budgetName, dailyAmount, and campaignNames (list of campaigns to move into it). campaignName at top level should be null
+- assign_campaign_budget: use when task says to move a campaign to an existing shared budget. Set campaignName (top level) and details.budgetName
 - If a campaign is not found in the account, add a warning`;
 }
 
