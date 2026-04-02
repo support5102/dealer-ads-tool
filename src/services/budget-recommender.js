@@ -439,12 +439,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // Build final recommendations
   const recommendations = [];
 
-  // VLA recs
+  // VLA recs — include all, even if no change needed
   vlaAllocations.forEach(v => {
-    if (!v.reason) return;
     const setBudget = v.budgetSetting || 0;
     const change = Math.round((v.recommended - setBudget) * 100) / 100;
-    if (Math.abs(change) < 0.01) return;
+    const reason = v.reason || (Math.abs(change) < 0.01 ? 'No change needed — on pace' : 'Adjust to hit monthly budget');
 
     recommendations.push({
       type: 'campaign_budget',
@@ -454,7 +453,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       currentDailyBudget: Math.round(v.currentSpend * 100) / 100,
       recommendedDailyBudget: v.recommended,
       change,
-      reason: v.reason,
+      reason,
       isVla: true,
     });
   });
@@ -574,7 +573,6 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
 
       const setBudget = budget.dailyBudget || 0;
       const change = Math.round((recommended - setBudget) * 100) / 100;
-      if (Math.abs(change) < 0.01 && !isCapped) return;
 
       const tierLabel = tier === CAMPAIGN_TIERS.GENERAL_REGIONAL ? ' (low priority — general/regional)'
         : tier === CAMPAIGN_TIERS.BRAND ? ' (brand — protected)' : '';
@@ -639,7 +637,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
           ? budgetISData.reduce((s, d) => s + (d.budgetLostShare || 0), 0) / budgetISData.length
           : null;
 
-        if (avgIS != null && avgBLS != null && avgBLS > 0.10) {
+        if (Math.abs(change) < 0.01) {
+          reason = avgIS != null
+            ? `No change needed — IS ${(avgIS * 100).toFixed(1)}%${tierLabel}`
+            : `No change needed — on pace${tierLabel}`;
+        } else if (avgIS != null && avgBLS != null && avgBLS > 0.10) {
           reason = `IS ${(avgIS * 100).toFixed(1)}% (${(avgBLS * 100).toFixed(1)}% lost to budget) — ${direction}${tierLabel} to hit monthly budget`;
         } else if (avgIS != null) {
           reason = `IS ${(avgIS * 100).toFixed(1)}% — ${direction}${tierLabel} to hit monthly budget`;

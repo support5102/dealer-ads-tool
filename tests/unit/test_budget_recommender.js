@@ -348,8 +348,9 @@ describe('distributeAccountBudget', () => {
 
     // Under-pacing: VLA stays at set budget despite IS > 90% — account needs every dollar
     const vlaRec = recommendations.find(r => r.isVla);
-    // VLA recommended = dailyBudget (floored), change = $0 → filtered out
-    expect(vlaRec).toBeUndefined();
+    // VLA recommended = dailyBudget (floored), change = $0 — still included with no-change reason
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.change).toBe(0);
   });
 
   test('VLA boost is IS-driven, capped at 2x per cycle (floor does not override cap)', () => {
@@ -393,9 +394,10 @@ describe('distributeAccountBudget', () => {
     // No VLA recs (Brand Search is not a VLA)
     expect(recommendations.filter(r => r.isVla)).toHaveLength(0);
 
-    // Shared gets $100 - $30 (non-VLA dedicated) = $70 — same as current, no change
+    // Shared gets $100 - $30 (non-VLA dedicated) = $70 — same as current, included with no change
     const sharedRec = recommendations.find(r => !r.isVla);
-    expect(sharedRec).toBeUndefined(); // no change needed
+    expect(sharedRec).toBeDefined();
+    expect(Math.abs(sharedRec.change)).toBeLessThan(1); // no meaningful change
   });
 
   test('non-VLA dedicated budget is subtracted from target before distributing', () => {
@@ -420,8 +422,9 @@ describe('distributeAccountBudget', () => {
     // VLA is already below 40% floor ($40) at $20, so it's NOT cut further — change is $0
     // and it gets filtered out. Shared budget absorbs the full cut.
     const vlaRec = recommendations.find(r => r.isVla);
-    // VLA should be filtered out (no change needed — already under-allocated)
-    expect(vlaRec).toBeUndefined();
+    // VLA included but with no change (already under-allocated)
+    expect(vlaRec).toBeDefined();
+    expect(vlaRec.change).toBe(0);
 
     const sharedRec = recommendations.find(r => !r.isVla);
     expect(sharedRec).toBeDefined();
@@ -499,7 +502,9 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: dedicated, sharedBudgets: shared, impressionShareData: isData,
     });
 
-    expect(recommendations).toHaveLength(0);
+    // All budgets included even when on target — each with $0 change
+    expect(recommendations.length).toBeGreaterThan(0);
+    recommendations.forEach(r => expect(Math.abs(r.change)).toBeLessThan(1));
   });
 
   test('handles null inputs gracefully', () => {
