@@ -571,25 +571,35 @@ function createPacingRouter(config, deps = {}) {
       const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
       req.session.tokens.access_token = accessToken;
       const mccId = req.session.mccId;
-
-      const client = googleAds.createClient(
-        config.googleAds,
-        req.session.tokens.refresh_token,
-        String(customerId).replace(/-/g, ''),
-        mccId
-      );
+      const cleanCustomerId = String(customerId).replace(/-/g, '');
 
       const changeHistory = require('../services/change-history');
+      const axios = require('axios');
       const results = { applied: 0, failed: 0, details: [] };
 
       for (const rec of recommendations) {
         try {
           const newAmountMicros = Math.round(rec.recommendedDailyBudget * 1_000_000);
           console.log(`[pacing-apply] Updating ${rec.target}: ${rec.resourceName} → $${rec.recommendedDailyBudget}/day (${newAmountMicros} micros)`);
-          await client.campaignBudgets.update([{
-            resource_name: rec.resourceName,
-            amount_micros: newAmountMicros,
-          }]);
+
+          // Use REST API directly — the google-ads-api library hangs on mutations
+          const mutateUrl = `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/campaignBudgets:mutate`;
+          await axios.post(mutateUrl, {
+            operations: [{
+              update: {
+                resource_name: rec.resourceName,
+                amount_micros: String(newAmountMicros),
+              },
+              update_mask: 'amount_micros',
+            }],
+          }, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'developer-token': config.googleAds.developerToken,
+              ...(mccId ? { 'login-customer-id': String(mccId).replace(/-/g, '') } : {}),
+            },
+            timeout: 15000,
+          });
           console.log(`[pacing-apply] Success: ${rec.target}`);
 
           results.applied++;
