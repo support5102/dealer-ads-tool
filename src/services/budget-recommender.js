@@ -21,7 +21,7 @@ const { BUDGET_SPLITS } = require('./strategy-rules');
 const VLA_IS_TARGET = { min: 0.75, max: 0.90 };
 
 // Max increase/cut caps per adjustment cycle
-const MAX_INCREASE_MULTIPLIER = 2.0;  // Never more than 2x current budget per cycle
+const MAX_INCREASE_MULTIPLIER = 50.0; // Allow large increases to hit target in one cycle
 const MAX_CUT_RATIO = 0.70;          // Allow up to 70% cut per cycle to hit target pace
 
 /**
