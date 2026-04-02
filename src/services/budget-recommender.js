@@ -667,20 +667,33 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
   }
 
-  // Reconciliation: ensure recommended totals hit the target daily rate.
+  // Reconciliation: ensure recommended totals hit the target daily rate exactly.
   // Gaps can arise from rounding, IS caps, brand caps, or VLA budget floors.
-  // Distribute any shortfall proportionally across uncapped shared budgets.
-  if (!accountOverPacing) {
+  // Distribute any shortfall/excess proportionally across adjustable budgets.
+  {
     const actualRecommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
     const reconciliationGap = requiredDailyRate - actualRecommendedTotal;
-    if (Math.abs(reconciliationGap) > 1) {
-      const adjustableRecs = recommendations.filter(r => r.type === 'shared_budget' && !r.isCapped);
+    if (Math.abs(reconciliationGap) > 0.10) {
+      // Try shared budgets first (excluding capped ones)
+      let adjustableRecs = recommendations.filter(r => r.type === 'shared_budget' && !r.isCapped);
+      // If no uncapped shared budgets, use all shared budgets
+      if (adjustableRecs.length === 0) {
+        adjustableRecs = recommendations.filter(r => r.type === 'shared_budget');
+      }
+      // If still none, use VLA budgets
+      if (adjustableRecs.length === 0) {
+        adjustableRecs = recommendations.filter(r => r.type === 'campaign_budget');
+      }
       const adjustableTotal = adjustableRecs.reduce((s, r) => s + r.recommendedDailyBudget, 0);
       if (adjustableTotal > 0) {
         for (const rec of adjustableRecs) {
           const proportion = rec.recommendedDailyBudget / adjustableTotal;
           const extra = Math.round(reconciliationGap * proportion * 100) / 100;
-          rec.recommendedDailyBudget = Math.round((rec.recommendedDailyBudget + extra) * 100) / 100;
+          let adjusted = Math.max(Math.round((rec.recommendedDailyBudget + extra) * 100) / 100, 3);
+          // Don't exceed 2x the set budget during reconciliation (safety cap)
+          const maxBudget = (rec.budgetSetting || rec.currentDailyBudget || 1) * MAX_INCREASE_MULTIPLIER;
+          if (adjusted > maxBudget && extra > 0) adjusted = Math.max(rec.recommendedDailyBudget, maxBudget);
+          rec.recommendedDailyBudget = adjusted;
           rec.change = Math.round((rec.recommendedDailyBudget - rec.budgetSetting) * 100) / 100;
         }
         recommendedSharedTotal = Math.round((recommendedSharedTotal + reconciliationGap) * 100) / 100;
