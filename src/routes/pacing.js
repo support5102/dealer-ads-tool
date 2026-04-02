@@ -587,10 +587,12 @@ function createPacingRouter(config, deps = {}) {
       for (const rec of recommendations) {
         try {
           const newAmountMicros = Math.round(rec.recommendedDailyBudget * 1_000_000);
+          console.log(`[pacing-apply] Updating ${rec.target}: ${rec.resourceName} → $${rec.recommendedDailyBudget}/day (${newAmountMicros} micros)`);
           await client.campaignBudgets.update([{
             resource_name: rec.resourceName,
             amount_micros: newAmountMicros,
           }]);
+          console.log(`[pacing-apply] Success: ${rec.target}`);
 
           results.applied++;
           results.details.push({
@@ -615,6 +617,7 @@ function createPacingRouter(config, deps = {}) {
             success: true,
           });
         } catch (err) {
+          console.error(`[pacing-apply] Failed: ${rec.target}:`, err.message);
           results.failed++;
           results.details.push({
             target: rec.target,
