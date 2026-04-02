@@ -398,7 +398,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       // Cap increase at 2x current budget per cycle
       const maxBudget = (campaign.dailyBudget || currentSpend) * MAX_INCREASE_MULTIPLIER;
       recommended = Math.min(recommended, Math.max(maxBudget, (campaign.dailyBudget || 1) + 1));
-      recommended = Math.max(recommended, 1);
+      recommended = Math.max(recommended, 3);
     }
 
     // Under-pacing: VLA floor at 40% allocation, but never override the 2x cap.
@@ -408,7 +408,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       const cappedFloor = Math.min(vlaMinFloor, maxPerCycle);
       recommended = Math.max(recommended, cappedFloor);
     }
-    recommended = Math.max(recommended, 1);
+    recommended = Math.max(recommended, 3); // Minimum $3/day for any budget
     recommended = Math.round(recommended * 100) / 100;
 
     return { campaign, recommended, reason, currentSpend, budgetSetting: campaign.dailyBudget };
@@ -568,7 +568,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       if (!accountOverPacing && tier === CAMPAIGN_TIERS.BRAND) {
         recommended = Math.max(recommended, budget.dailyBudget || currentSpend);
       }
-      recommended = Math.max(recommended, accountOverPacing ? 0.01 : 1);
+      recommended = Math.max(recommended, 3); // Minimum $3/day for any shared budget
       recommended = Math.round(recommended * 100) / 100;
       recommendedSharedTotal += recommended;
 

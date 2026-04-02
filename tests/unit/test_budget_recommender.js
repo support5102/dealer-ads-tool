@@ -223,10 +223,13 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: [],
     });
 
-    // Every recommendation must be a decrease
+    // Every recommendation must be a decrease OR at the $3/day minimum floor
     recommendations.forEach(r => {
-      expect(r.change).toBeLessThanOrEqual(0);
-      expect(r.recommendedDailyBudget).toBeLessThanOrEqual(r.currentDailyBudget);
+      const atFloor = r.recommendedDailyBudget <= 3;
+      if (!atFloor) {
+        expect(r.change).toBeLessThanOrEqual(0);
+        expect(r.recommendedDailyBudget).toBeLessThanOrEqual(r.currentDailyBudget);
+      }
     });
   });
 
