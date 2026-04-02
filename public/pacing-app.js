@@ -465,10 +465,8 @@ async function applySelected() {
     });
 
     statusEl.innerHTML = `<span style="color:#4ade80">${result.applied} applied</span>` +
-      (result.failed > 0 ? `, <span style="color:#f87171">${result.failed} failed</span>` : '');
-
-    // Refresh pacing data after 2 seconds
-    setTimeout(() => loadPacing(state.selectedId), 2000);
+      (result.failed > 0 ? `, <span style="color:#f87171">${result.failed} failed</span>` : '') +
+      ` — <a href="#" onclick="loadPacing(state.selectedId);return false" style="color:#93c5fd">Refresh</a>`;
   } catch (err) {
     statusEl.innerHTML = `<span style="color:#f87171">Error: ${esc(err.message)}</span>`;
   }
