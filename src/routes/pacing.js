@@ -388,12 +388,10 @@ function createPacingRouter(config, deps = {}) {
         sharedBudgets,
         dedicatedBudgets,
         impressionShare,
-        inventoryCount: newVehicleCount,
+        inventoryCount: null, // Inventory scrapped — use null to match overview calculation
         year: now.getFullYear(),
         month: now.getMonth() + 1,
         currentDay: now.getDate(),
-        dailyBreakdown: dailyBreakdown || undefined,
-        changeDate: lastChange.changeDate || undefined,
         excludeCampaigns: excludeNames,
         geoTargets,
       });
