@@ -315,7 +315,7 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   }
 
   let rows = '';
-  recs.forEach(r => {
+  recs.forEach((r, idx) => {
     const dir = r.change >= 0 ? 'increase' : 'decrease';
     const sign = r.change >= 0 ? '+' : '';
     const vlaBadge = r.isVla ? '<span class="vla-badge">VLA</span>' : '';
@@ -327,8 +327,17 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     const setLabel = r.budgetSetting != null
       ? `<span class="rec-setting">Set: $${r.budgetSetting.toFixed(2)}/day</span>` : '';
     rows += `
-      <div class="rec-item">
-        <div>
+      <div class="rec-item" id="rec-${idx}">
+        <label class="rec-checkbox-wrap">
+          <input type="checkbox" class="rec-checkbox" data-idx="${idx}"
+            data-resource="${esc(r.resourceName || '')}"
+            data-target="${esc(r.target)}"
+            data-recommended="${r.recommendedDailyBudget}"
+            data-current="${r.currentDailyBudget}"
+            data-change="${r.change}"
+            onchange="updateApplyCount()" />
+        </label>
+        <div class="rec-content">
           <div class="rec-target">${vlaBadge}${tierBadge}${esc(r.target)}</div>
           <div class="rec-budget-row">
             ${setLabel}
@@ -369,10 +378,103 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
         <div class="dash-section-count">${countParts.join(' + ')} budget${recs.length !== 1 ? 's' : ''}</div>
       </div>
       ${summaryHtml}
+      <div class="apply-controls">
+        <label class="select-all-wrap">
+          <input type="checkbox" id="selectAllRecs" onchange="toggleSelectAll(this.checked)" />
+          <span>Select All</span>
+        </label>
+        <button class="apply-btn" id="applyBtn" onclick="applySelected()" disabled>
+          Apply Selected (0)
+        </button>
+        <span id="applyStatus"></span>
+      </div>
       ${rows}
       ${pausableHtml}
     </div>
   `;
+}
+
+// ── Apply recommendations ────────────────────────────────────────────
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.rec-checkbox').forEach(cb => { cb.checked = checked; });
+  updateApplyCount();
+}
+
+function updateApplyCount() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  const btn = document.getElementById('applyBtn');
+  if (btn) {
+    btn.textContent = `Apply Selected (${checked.length})`;
+    btn.disabled = checked.length === 0;
+  }
+  // Sync select-all checkbox
+  const all = document.querySelectorAll('.rec-checkbox');
+  const selectAll = document.getElementById('selectAllRecs');
+  if (selectAll) selectAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+async function applySelected() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  if (checked.length === 0) return;
+
+  const btn = document.getElementById('applyBtn');
+  const statusEl = document.getElementById('applyStatus');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  statusEl.textContent = '';
+
+  const recommendations = [];
+  checked.forEach(cb => {
+    recommendations.push({
+      resourceName: cb.dataset.resource,
+      target: cb.dataset.target,
+      recommendedDailyBudget: parseFloat(cb.dataset.recommended),
+      currentDailyBudget: parseFloat(cb.dataset.current),
+      change: parseFloat(cb.dataset.change),
+    });
+  });
+
+  try {
+    const res = await fetch('/api/pacing/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: state.selectedId,
+        dealerName: state.data?.dealerName || state.selectedId,
+        recommendations,
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Apply failed');
+
+    // Show per-item results
+    result.details.forEach(d => {
+      const cb = document.querySelector(`.rec-checkbox[data-target="${CSS.escape(d.target)}"]`);
+      if (!cb) return;
+      const row = cb.closest('.rec-item');
+      if (d.success) {
+        row.style.borderLeft = '3px solid #4ade80';
+        row.querySelector('.rec-content').insertAdjacentHTML('beforeend',
+          `<div class="apply-result success">Applied: $${d.previousBudget}/day → $${d.newBudget}/day</div>`);
+      } else {
+        row.style.borderLeft = '3px solid #f87171';
+        row.querySelector('.rec-content').insertAdjacentHTML('beforeend',
+          `<div class="apply-result error">Failed: ${esc(d.error)}</div>`);
+      }
+      cb.disabled = true;
+    });
+
+    statusEl.innerHTML = `<span style="color:#4ade80">${result.applied} applied</span>` +
+      (result.failed > 0 ? `, <span style="color:#f87171">${result.failed} failed</span>` : '');
+
+    // Refresh pacing data after 2 seconds
+    setTimeout(() => loadPacing(state.selectedId), 2000);
+  } catch (err) {
+    statusEl.innerHTML = `<span style="color:#f87171">Error: ${esc(err.message)}</span>`;
+  }
+
+  btn.textContent = `Apply Selected (0)`;
+  btn.disabled = true;
 }
 
 function renderImpressionShare(is, changeDate) {

@@ -561,6 +561,86 @@ function createPacingRouter(config, deps = {}) {
     }
   });
 
+  // ── Apply selected pacing recommendations ──────────────────────────
+  router.post('/api/pacing/apply', requireAuth, async (req, res, next) => {
+    try {
+      const { customerId, dealerName, recommendations } = req.body;
+      if (!customerId || !recommendations || !recommendations.length) {
+        return res.status(400).json({ error: 'customerId and recommendations[] are required' });
+      }
+
+      const email = req.session.userEmail || 'unknown';
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      req.session.tokens.access_token = accessToken;
+      const mccId = req.session.mccId;
+
+      const client = googleAds.createClient(
+        config.googleAds,
+        req.session.tokens.refresh_token,
+        String(customerId).replace(/-/g, ''),
+        mccId
+      );
+
+      const changeHistory = require('../services/change-history');
+      const results = { applied: 0, failed: 0, details: [] };
+
+      for (const rec of recommendations) {
+        try {
+          const newAmountMicros = Math.round(rec.recommendedDailyBudget * 1_000_000);
+          await client.campaignBudgets.update([{
+            resource_name: rec.resourceName,
+            amount_micros: newAmountMicros,
+          }]);
+
+          results.applied++;
+          results.details.push({
+            target: rec.target,
+            previousBudget: rec.currentDailyBudget,
+            newBudget: rec.recommendedDailyBudget,
+            change: rec.change,
+            success: true,
+          });
+          changeHistory.addEntry({
+            action: 'budget_change',
+            userEmail: email,
+            accountId: customerId,
+            dealerName: dealerName || customerId,
+            details: {
+              campaignName: rec.target,
+              previousValue: `$${rec.currentDailyBudget}/day`,
+              newValue: `$${rec.recommendedDailyBudget}/day`,
+              reason: 'pacing_recommendation',
+            },
+            source: 'pacing_apply',
+            success: true,
+          });
+        } catch (err) {
+          results.failed++;
+          results.details.push({
+            target: rec.target,
+            error: err.message,
+            success: false,
+          });
+          changeHistory.addEntry({
+            action: 'budget_change',
+            userEmail: email,
+            accountId: customerId,
+            dealerName: dealerName || customerId,
+            details: { campaignName: rec.target, reason: 'pacing_recommendation' },
+            source: 'pacing_apply',
+            success: false,
+            error: err.message,
+          });
+        }
+      }
+
+      res.json(results);
+    } catch (err) {
+      console.error('Pacing apply error:', err.message);
+      next(err);
+    }
+  });
+
   return router;
 }
 
