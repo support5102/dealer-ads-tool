@@ -390,11 +390,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       } else {
         reason = null;
       }
-      // Under-pacing: always floor VLA at set budget. The account needs
-      // more spend, not less — never cut VLAs when behind on pacing.
-      if (recommended < (campaign.dailyBudget || 0)) {
-        recommended = campaign.dailyBudget;
-      }
+      // Under-pacing: never set below avg spend or set budget — can't pace up by cutting
+      recommended = Math.max(recommended, currentSpend, campaign.dailyBudget || 0);
       // Cap increase at 2x current budget per cycle
       const maxBudget = (campaign.dailyBudget || currentSpend) * MAX_INCREASE_MULTIPLIER;
       recommended = Math.min(recommended, Math.max(maxBudget, (campaign.dailyBudget || 1) + 1));
@@ -562,10 +559,9 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
 
     // Round and build recommendations
     sharedAllocations.forEach(({ budget, currentSpend, recommended, tier, isCapped, isCap }) => {
-      // Brand floor: never cut brand below its set budget during under-pacing.
-      // Brand needs to maintain local branded search coverage.
-      if (!accountOverPacing && tier === CAMPAIGN_TIERS.BRAND) {
-        recommended = Math.max(recommended, budget.dailyBudget || currentSpend);
+      // Under-pacing: NEVER set budget below avg daily spend — can't pace up by cutting spend
+      if (!accountOverPacing) {
+        recommended = Math.max(recommended, currentSpend, budget.dailyBudget || 0);
       }
       recommended = Math.max(recommended, 3); // Minimum $3/day for any shared budget
       recommended = Math.round(recommended * 100) / 100;
