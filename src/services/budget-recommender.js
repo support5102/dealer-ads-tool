@@ -494,11 +494,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
 
     if (accountOverPacing) {
-      // Over-pacing: tier-weighted cuts, capped at 30% per budget per cycle
+      // Over-pacing: tier-weighted cuts
       sharedAllocations.forEach(a => {
         const tierWeight = TIER_CUT_WEIGHTS[a.tier] || 1.0;
         const baseCut = 1 - sharedOverPacingRatio;
-        const tierCut = Math.min(baseCut * tierWeight, MAX_CUT_RATIO); // cap at 30%
+        const tierCut = Math.min(baseCut * tierWeight, MAX_CUT_RATIO);
         a.recommended = a.currentSpend * (1 - tierCut);
       });
 
@@ -510,51 +510,12 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         sharedAllocations.forEach(a => { a.recommended = Math.max(a.recommended * normFactor, 0.01); });
       }
     } else {
-      // Under-pacing: distribute the needed change, respecting IS caps.
-      // changeNeeded can be positive (need more spend) or negative (VLA took enough)
-      let changeNeeded = remainingForShared - currentSharedSpend;
-      if (changeNeeded <= 0) {
-        // VLA allocation consumed enough — shared decreases proportionally
-        sharedAllocations.forEach(a => {
-          const proportion = currentSharedSpend > 0 ? (a.currentSpend / currentSharedSpend) : (1 / sharedAllocations.length);
-          a.recommended = Math.max(remainingForShared * proportion, 0.01);
-        });
-      } else {
-        // Pass 1: distribute proportionally, cap by IS, track surplus
-        let surplus = 0;
-        const uncappedIndices = [];
-        sharedAllocations.forEach((a, i) => {
-          const proportion = currentSharedSpend > 0 ? (a.currentSpend / currentSharedSpend) : (1 / sharedAllocations.length);
-          const share = changeNeeded * proportion;
-          const desired = a.currentSpend + share;
-          if (a.isCap && desired > a.isCap.cap) {
-            a.recommended = a.isCap.cap;
-            a.isCapped = true;
-            surplus += desired - a.isCap.cap;
-          } else {
-            a.recommended = desired;
-            uncappedIndices.push(i);
-          }
-        });
-
-        // Pass 2: redistribute surplus to uncapped budgets
-        if (surplus > 0 && uncappedIndices.length > 0) {
-          const uncappedSpend = uncappedIndices.reduce((s, i) => s + sharedAllocations[i].currentSpend, 0);
-          uncappedIndices.forEach(i => {
-            const a = sharedAllocations[i];
-            const extraProportion = uncappedSpend > 0 ? (a.currentSpend / uncappedSpend) : (1 / uncappedIndices.length);
-            const extra = surplus * extraProportion;
-            const desired = a.recommended + extra;
-            if (a.isCap && desired > a.isCap.cap) {
-              a.recommended = a.isCap.cap;
-              a.isCapped = true;
-              // Any remaining surplus is truly unabsorbable — stays as gap
-            } else {
-              a.recommended = desired;
-            }
-          });
-        }
-      }
+      // Under-pacing: keep all budgets at LEAST at their current set budget.
+      // The account needs MORE spend, not less. Start from set budgets and
+      // let the reconciliation step add the deficit proportionally.
+      sharedAllocations.forEach(a => {
+        a.recommended = Math.max(a.budget.dailyBudget || 0, a.currentSpend);
+      });
     }
 
     // Round and build recommendations
