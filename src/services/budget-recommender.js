@@ -624,36 +624,45 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
   }
 
-  // Reconciliation: ensure recommended totals hit the target daily rate exactly.
-  // Gaps can arise from rounding, IS caps, brand caps, or VLA budget floors.
-  // Distribute any shortfall/excess proportionally across adjustable budgets.
+  // Reconciliation: ensure recommendations get ACTUAL SPEND to the target daily rate.
+  // The key insight: set budgets != actual spend. Google Ads typically spends less than
+  // what's set. So we need to figure out the spend-to-budget ratio and set budgets
+  // high enough that actual spend hits the target.
   {
-    const actualRecommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
-    const reconciliationGap = requiredDailyRate - actualRecommendedTotal;
-    if (Math.abs(reconciliationGap) > 0.10) {
-      // Try shared budgets first (excluding capped ones)
+    const totalCurrentSetBudget = recommendations.reduce((s, r) => s + (r.budgetSetting || 0), 0) + nonVlaDedicatedSpend;
+    const totalCurrentSpend = recommendations.reduce((s, r) => s + (r.currentDailyBudget || 0), 0) + nonVlaDedicatedSpend;
+
+    // Spend ratio: how much of the set budget actually gets spent (e.g., 0.74 means 74%)
+    const spendRatio = totalCurrentSetBudget > 0 ? totalCurrentSpend / totalCurrentSetBudget : 0.80;
+    const effectiveSpendRatio = Math.max(Math.min(spendRatio, 0.95), 0.50); // clamp between 50-95%
+
+    // What set budget total do we need so that actual spend = requiredDailyRate?
+    const targetSetTotal = requiredDailyRate / effectiveSpendRatio;
+
+    const actualRecommendedTotal = recommendations.reduce((s, r) => s + r.recommendedDailyBudget, 0) + nonVlaDedicatedSpend;
+    const reconciliationGap = targetSetTotal - actualRecommendedTotal;
+
+    if (Math.abs(reconciliationGap) > 0.50) {
+      // Get all adjustable recommendations (prefer non-brand shared, then all shared, then VLA)
       let adjustableRecs = recommendations.filter(r => r.type === 'shared_budget' && !r.isCapped);
-      // If no uncapped shared budgets, use all shared budgets
-      if (adjustableRecs.length === 0) {
-        adjustableRecs = recommendations.filter(r => r.type === 'shared_budget');
-      }
-      // If still none, use VLA budgets
-      if (adjustableRecs.length === 0) {
-        adjustableRecs = recommendations.filter(r => r.type === 'campaign_budget');
-      }
+      if (adjustableRecs.length === 0) adjustableRecs = recommendations.filter(r => r.type === 'shared_budget');
+      if (adjustableRecs.length === 0) adjustableRecs = recommendations.filter(r => r.type === 'campaign_budget');
+
       const adjustableTotal = adjustableRecs.reduce((s, r) => s + r.recommendedDailyBudget, 0);
       if (adjustableTotal > 0) {
         for (const rec of adjustableRecs) {
           const proportion = rec.recommendedDailyBudget / adjustableTotal;
           const extra = Math.round(reconciliationGap * proportion * 100) / 100;
-          let adjusted = Math.max(Math.round((rec.recommendedDailyBudget + extra) * 100) / 100, 3);
-          // Don't exceed 2x the set budget during reconciliation (safety cap)
-          const maxBudget = (rec.budgetSetting || rec.currentDailyBudget || 1) * MAX_INCREASE_MULTIPLIER;
-          if (adjusted > maxBudget && extra > 0) adjusted = Math.max(rec.recommendedDailyBudget, maxBudget);
+          let adjusted = Math.round((rec.recommendedDailyBudget + extra) * 100) / 100;
+          // Floor: never go below $3 or current avg spend (if under-pacing)
+          if (!accountOverPacing) {
+            adjusted = Math.max(adjusted, rec.currentDailyBudget || 0, rec.budgetSetting || 0, 3);
+          } else {
+            adjusted = Math.max(adjusted, 3);
+          }
           rec.recommendedDailyBudget = adjusted;
           rec.change = Math.round((rec.recommendedDailyBudget - rec.budgetSetting) * 100) / 100;
         }
-        recommendedSharedTotal = Math.round((recommendedSharedTotal + reconciliationGap) * 100) / 100;
       }
     }
   }
