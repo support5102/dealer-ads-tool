@@ -530,114 +530,118 @@ async function diagnoseShortHeadlines(finding, adCopy, claudeConfig) {
     adMap.get(item.adId).shortTexts.push(item.headline);
   }
 
-  for (const [adId, info] of adMap) {
+  // Collect ALL short headlines across ALL ads into ONE batch for a single AI call
+  const allShortHeadlines = [];
+  const adEntries = [...adMap.entries()];
+  for (const [adId, info] of adEntries) {
     const fullAd = adCopy.find(a => a.adId === adId);
     if (!fullAd) { manualNotes.push(`Could not find ad ${adId} — fix manually.`); continue; }
-
-    const dealerName = info.campaignName.split(/\s*[-–—]\s*/)[0].trim();
-
-    // Always try AI improvement — never just remove headlines
-    let improved = null;
-    let aiError = null;
-    if (claudeConfig?.apiKey) {
-      try {
-        improved = await generateImprovedHeadlines({
-          dealerName, campaignName: info.campaignName, adGroupName: info.adGroupName,
-          allHeadlines: fullAd.headlines, shortHeadlines: info.shortTexts, claudeConfig,
-        });
-      } catch (err) {
-        aiError = err.message;
-        console.error('AI headline improvement failed:', err.message);
-      }
-    } else {
-      aiError = 'Claude API key not configured';
+    for (const shortText of info.shortTexts) {
+      allShortHeadlines.push({ original: shortText, adId, adGroupName: info.adGroupName, campaignName: info.campaignName });
     }
+  }
 
-    if (improved && improved.length > 0) {
-      // Replace short headlines with AI-improved versions
+  // ONE Claude API call for all short headlines (not one per ad)
+  let aiResults = null;
+  let aiError = null;
+  if (claudeConfig?.apiKey && allShortHeadlines.length > 0) {
+    try {
+      const dealerName = (adEntries[0]?.[1]?.campaignName || '').split(/\s*[-–—]\s*/)[0].trim();
+      const uniqueShorts = [...new Set(allShortHeadlines.map(h => h.original))];
+
+      const prompt = `Dealer: ${dealerName}
+
+These Google Ads RSA headlines are too short (under 15 chars) and need to be rewritten to 20-30 characters. Keep the same intent. Make them compelling for car shoppers.
+
+Short headlines to improve:
+${uniqueShorts.map(h => `- "${h}" (${h.length} chars)`).join('\n')}
+
+Rewrite each to be 20-30 characters. Respond in JSON only:
+[{"original": "Shop Now", "improved": "Shop Our New Inventory"}]`;
+
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: claudeConfig.model || 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: 'You are an expert Google Ads copywriter for automotive dealerships. Rewrite short RSA headlines to be more compelling within the 30-character limit. Respond with JSON only, no other text.',
+          messages: [{ role: 'user', content: prompt }],
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': claudeConfig.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          timeout: 30000,
+        }
+      );
+
+      const text = response.data.content?.[0]?.text || '';
+      const jsonMatch = text.match(/\[[\s\S]*?\]/);
+      if (!jsonMatch) throw new Error('No JSON in Claude response');
+      aiResults = JSON.parse(jsonMatch[0]);
+      // Validate lengths
+      for (const r of aiResults) {
+        if (r.improved && r.improved.length > 30) {
+          r.improved = r.improved.substring(0, 27) + '...';
+        }
+      }
+      console.log(`AI improved ${aiResults.length} short headlines successfully`);
+    } catch (err) {
+      aiError = err.message;
+      console.error('AI headline batch improvement failed:', err.message);
+    }
+  } else if (!claudeConfig?.apiKey) {
+    aiError = 'Claude API key not configured';
+  }
+
+  // Build fixes per ad using the AI results
+  for (const [adId, info] of adEntries) {
+    const fullAd = adCopy.find(a => a.adId === adId);
+    if (!fullAd) continue;
+
+    if (aiResults && aiResults.length > 0) {
       const replacedHeadlines = fullAd.headlines.map(h => {
-        const r = improved.find(x => x.original === h.text);
+        const r = aiResults.find(x => x.original === h.text);
         return {
           text: r ? r.improved : h.text,
           ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}),
         };
       });
 
-      const changes = improved.map(r => `"${r.original}" → "${r.improved}"`).join(', ');
-      fixes.push({
-        action: 'update_rsa',
-        description: `Improve ${info.shortTexts.length} short headline(s) in "${info.adGroupName}" (${info.campaignName}): ${changes}`,
-        changeType: 'update_rsa',
-        campaignName: info.campaignName,
-        adGroupName: info.adGroupName,
-        details: {
-          adId,
-          headlines: replacedHeadlines,
-          descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
-          finalUrls: fullAd.finalUrls || [],
-        },
-      });
+      // Only create a fix if something actually changed
+      const hasChange = replacedHeadlines.some((h, i) => h.text !== fullAd.headlines[i].text);
+      if (hasChange) {
+        const changes = info.shortTexts
+          .map(st => { const r = aiResults.find(x => x.original === st); return r ? `"${st}" → "${r.improved}"` : null; })
+          .filter(Boolean).join(', ');
+
+        fixes.push({
+          action: 'update_rsa',
+          description: `Improve headline(s) in "${info.adGroupName}" (${info.campaignName}): ${changes}`,
+          changeType: 'update_rsa',
+          campaignName: info.campaignName,
+          adGroupName: info.adGroupName,
+          details: {
+            adId,
+            headlines: replacedHeadlines,
+            descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
+            finalUrls: fullAd.finalUrls || [],
+          },
+        });
+      }
     } else {
-      // AI failed — flag for manual review (never auto-remove headlines)
       const shortList = info.shortTexts.map(t => `"${t}"`).join(', ');
-      manualNotes.push(`"${info.adGroupName}" (${info.campaignName}): short headlines ${shortList} need manual improvement.${aiError ? ` (AI error: ${aiError})` : ''}`);
+      manualNotes.push(`"${info.adGroupName}" (${info.campaignName}): short headlines ${shortList} need manual improvement.${aiError ? ` (AI: ${aiError})` : ''}`);
     }
   }
 
   return { fixable: fixes.length > 0, fixes, manualNotes };
 }
 
-/**
- * Calls Claude to generate improved versions of short headlines.
- */
-async function generateImprovedHeadlines({ dealerName, campaignName, adGroupName, allHeadlines, shortHeadlines, claudeConfig }) {
-  const prompt = `Dealer: ${dealerName}
-Campaign: ${campaignName}
-Ad Group: ${adGroupName}
-
-Current headlines:
-${allHeadlines.map(h => `- "${h.text}" (${h.text.length} chars)`).join('\n')}
-
-These headlines are too short (under 15 chars) and need improvement:
-${shortHeadlines.map(h => `- "${h}" (${h.length} chars)`).join('\n')}
-
-Rewrite ONLY the short headlines to be 20-30 characters. Keep the same intent. Make them compelling for car shoppers. Do not duplicate existing headlines.
-
-Respond in JSON only: [{"original": "Shop Now", "improved": "Shop Our New Inventory"}]`;
-
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
-      model: claudeConfig.model || 'claude-sonnet-4-20250514',
-      max_tokens: 300,
-      system: 'You are an expert Google Ads copywriter for automotive dealerships. Rewrite short RSA headlines to be more compelling within the 30-character limit. Respond with JSON only.',
-      messages: [{ role: 'user', content: prompt }],
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeConfig.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      timeout: 15000,
-    }
-  );
-
-  const text = response.data.content?.[0]?.text || '';
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) throw new Error('No JSON in Claude response');
-
-  const results = JSON.parse(jsonMatch[0]);
-
-  // Validate: trim to 30 chars if needed
-  for (const r of results) {
-    if (r.improved && r.improved.length > 30) {
-      r.improved = r.improved.substring(0, 27) + '...';
-    }
-  }
-
-  return results;
-}
+// generateImprovedHeadlines is now inlined in diagnoseShortHeadlines
+// to avoid per-ad API calls — one batch call for all short headlines
 
 module.exports = {
   diagnose,
