@@ -359,13 +359,16 @@ async function getSharedBudgets(restCtx) {
  */
 async function getImpressionShare(restCtx, sinceDate) {
   const doQuery = restCtx._queryFn || queryViaRest;
-  // If a budget change date is provided and falls within this month, narrow the
-  // impression share window to only the post-change period so the numbers reflect
-  // performance after the pacing adjustment — not the full month average.
-  let dateFilter = 'segments.date DURING THIS_MONTH';
+  // Use the post-change period if a budget change date is provided, otherwise
+  // default to LAST_30_DAYS for a meaningful sample size (not THIS_MONTH which
+  // can be just 1-2 days at month start).
+  const today = new Date().toISOString().slice(0, 10);
+  let dateFilter = 'segments.date DURING LAST_30_DAYS';
   if (sinceDate) {
-    const today = new Date().toISOString().slice(0, 10);
-    dateFilter = `segments.date BETWEEN '${sinceDate}' AND '${today}'`;
+    // Cap sinceDate at 30 days ago — older data is stale
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const effectiveDate = sinceDate > thirtyDaysAgo ? sinceDate : thirtyDaysAgo;
+    dateFilter = `segments.date BETWEEN '${effectiveDate}' AND '${today}'`;
   }
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
@@ -1043,7 +1046,7 @@ async function getLastBudgetChange(restCtx) {
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
       `SELECT change_event.change_date_time
        FROM change_event
-       WHERE change_event.change_date_time DURING THIS_MONTH
+       WHERE change_event.change_date_time DURING LAST_30_DAYS
          AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
        ORDER BY change_event.change_date_time DESC
        LIMIT 5`,

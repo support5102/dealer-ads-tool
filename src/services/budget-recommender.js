@@ -21,7 +21,7 @@ const { BUDGET_SPLITS } = require('./strategy-rules');
 const VLA_IS_TARGET = { min: 0.75, max: 0.90 };
 
 // Max increase/cut caps per adjustment cycle
-const MAX_INCREASE_MULTIPLIER = 50.0; // Allow large increases to hit target in one cycle
+const MAX_INCREASE_MULTIPLIER = 5.0;  // Cap at 5x per cycle to prevent distorted proportional distribution
 const MAX_CUT_RATIO = 0.70;          // Allow up to 70% cut per cycle to hit target pace
 
 /**
@@ -582,30 +582,22 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         const isPercent = Math.round(isCap.maxIS * 1000) / 10;
         reason = `IS already ${isPercent}% — limited budget headroom`;
       } else {
-        // Build a specific reason using this budget's IS data
-        const budgetCampaigns = budget.campaigns || [];
-        const budgetISData = budgetCampaigns
-          .map(c => isMap.get(String(c.campaignId)))
-          .filter(Boolean);
-        const avgIS = budgetISData.length > 0
-          ? budgetISData.reduce((s, d) => s + (d.impressionShare || 0), 0) / budgetISData.length
-          : null;
-        const avgBLS = budgetISData.length > 0
-          ? budgetISData.reduce((s, d) => s + (d.budgetLostShare || 0), 0) / budgetISData.length
-          : null;
-
-        if (Math.abs(change) < 0.01) {
-          reason = avgIS != null
-            ? `No change needed — IS ${(avgIS * 100).toFixed(1)}%${tierLabel}`
-            : `No change needed — on pace${tierLabel}`;
-        } else if (avgIS != null && avgBLS != null && avgBLS > 0.10) {
-          reason = `IS ${(avgIS * 100).toFixed(1)}% (${(avgBLS * 100).toFixed(1)}% lost to budget) — ${direction}${tierLabel} to hit monthly budget`;
-        } else if (avgIS != null) {
-          reason = `IS ${(avgIS * 100).toFixed(1)}% — ${direction}${tierLabel} to hit monthly budget`;
-        } else {
-          reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
-        }
+        // Reason will be finalized AFTER reconciliation (see below).
+        // Store IS data so reason can be recomputed with final change value.
+        reason = ''; // placeholder — overwritten post-reconciliation
       }
+
+      // Compute IS data for this budget's campaigns (used for post-reconciliation reasons)
+      const budgetCampaigns = budget.campaigns || [];
+      const budgetISData = budgetCampaigns
+        .map(c => isMap.get(String(c.campaignId)))
+        .filter(Boolean);
+      const avgIS = budgetISData.length > 0
+        ? budgetISData.reduce((s, d) => s + (d.impressionShare || 0), 0) / budgetISData.length
+        : null;
+      const avgBLS = budgetISData.length > 0
+        ? budgetISData.reduce((s, d) => s + (d.budgetLostShare || 0), 0) / budgetISData.length
+        : null;
 
       const rec = {
         type: 'shared_budget',
@@ -618,6 +610,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         tier,
         reason,
         isCapped,
+        _avgIS: avgIS,       // preserved for post-reconciliation reason generation
+        _avgBLS: avgBLS,     // preserved for post-reconciliation reason generation
       };
       if (geoExpansion) rec.geoExpansion = geoExpansion;
       recommendations.push(rec);
@@ -665,6 +659,40 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
         }
       }
     }
+  }
+
+  // Post-reconciliation: generate reason text based on FINAL change values.
+  // This ensures the reason accurately describes what the recommendation does,
+  // including any adjustments made by the reconciliation step above.
+  for (const rec of recommendations) {
+    // Skip recs that already have a meaningful reason (VLA, capped, geo-expansion)
+    if (rec.reason !== '') continue;
+
+    const avgIS = rec._avgIS;
+    const avgBLS = rec._avgBLS;
+    const change = rec.change;
+    const tierLabel = rec.tier != null ? ` [tier ${rec.tier}]` : '';
+    const direction = change > 0 ? 'increasing' : 'decreasing';
+
+    if (Math.abs(change) < 0.01 && (avgIS == null || avgIS >= VLA_IS_TARGET.min)) {
+      // Truly no change needed AND IS is acceptable (≥75%) or unknown
+      rec.reason = avgIS != null
+        ? `No change needed — IS ${(avgIS * 100).toFixed(1)}%${tierLabel}`
+        : `No change needed — on pace${tierLabel}`;
+    } else if (Math.abs(change) < 0.01 && avgIS != null && avgIS < VLA_IS_TARGET.min) {
+      // No budget change but IS is below target — flag it
+      rec.reason = `IS ${(avgIS * 100).toFixed(1)}% (below ${(VLA_IS_TARGET.min * 100)}% target) — may need budget or targeting review${tierLabel}`;
+    } else if (avgIS != null && avgBLS != null && avgBLS > 0.10) {
+      rec.reason = `IS ${(avgIS * 100).toFixed(1)}% (${(avgBLS * 100).toFixed(1)}% lost to budget) — ${direction}${tierLabel} to hit monthly budget`;
+    } else if (avgIS != null) {
+      rec.reason = `IS ${(avgIS * 100).toFixed(1)}% — ${direction}${tierLabel} to hit monthly budget`;
+    } else {
+      rec.reason = `Account needs $${requiredDailyRate.toFixed(2)}/day total — ${direction}${tierLabel} to hit monthly budget`;
+    }
+
+    // Clean up internal fields
+    delete rec._avgIS;
+    delete rec._avgBLS;
   }
 
   // When over-pacing, identify low-priority campaigns that could be paused

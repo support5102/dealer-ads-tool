@@ -90,9 +90,9 @@ function analyzeAccount(account, thresholds) {
     if (expectedDaily < thresholds.minimumDailySpend) return null;
   }
 
-  // pacePercent is relative to 100 (e.g., 108 = 8% over, 92 = 8% under)
-  // Convert to variance from target
-  const paceVariance = (account.pacePercent || 100) - 100;
+  // pacePercent is a variance from target (e.g., +8 = 8% over, -8 = 8% under)
+  // as output by pacing-calculator.js: ((spend - expected) / expected) * 100
+  const paceVariance = account.pacePercent || 0;
   const absPaceVariance = Math.abs(paceVariance);
 
   // Calculate projected miss %

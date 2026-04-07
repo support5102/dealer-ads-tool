@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-03-27
-**Current Phase:** Phase 13: Smart Budget Auto-Adjuster — Phase 1 COMPLETE
+**Last Updated:** 2026-04-07
+**Current Phase:** Phase 14: Recommendation & Pacing Bug Fixes — Phase 1 COMPLETE
 
 ---
 
@@ -23,6 +23,7 @@
 | 11 | Audit Automation | ✅ COMPLETE | Scheduled MCC-wide audits, token refresh, concurrency guards (651 tests) |
 | 12 | Strategy Rules + Deep Scan | ✅ COMPLETE | Rules engine, negative keyword analyzer, ad copy analyzer, deep scanner (764 tests) |
 | 13 | Smart Budget Auto-Adjuster | 🔨 IN PROGRESS | Phase 1 complete: detection engine, campaign classifier, adjustment generator (973 tests) |
+| 14 | Recommendation & Pacing Bug Fixes | 🔨 IN PROGRESS | Phase 1 complete: 4 critical logic bugs fixed, 5 new tests (809 unit tests) |
 
 ---
 
@@ -237,9 +238,37 @@
 **Test Count:** 764 → 973 (+209 tests, 46 suites)
 
 **Next Session Focus:**
-- Phase 13 continued — Phase 2: Approval workflow backend (scan route, pending queue, approve/reject endpoints)
-- Phase 3: Execution + safety (wire to change-executor.js, capture previous values, staleness check)
-- Phase 4: Frontend approval UI (scan button, review table, approve/reject per account)
+- Phase 14 continued — Phase 2: Remove "Critical" status verbiage (On Pace / Overpacing / Underpacing only)
+- Phase 14 Phase 3: Persistent history via PostgreSQL (Railway addon)
+- Phase 14 Phase 4: Dealer filtering in pacing overview
+- Phase 14 Phase 5: Light/dark mode toggle
+- Phase 14 Phase 6: Ad copy editing in Auditor (largest, requires Google Ads API mutation)
+
+---
+
+### 2026-04-07 — Phase 14 Phase 1: Critical Bug Fixes — CLEAN
+
+**Completed:**
+- Deep exploration of entire codebase via 4 specialist subagents (recommendation logic, pacing math, history/ad editing, UI/infrastructure)
+- Fixed 4 critical bugs in the recommendation/pacing pipeline:
+
+1. **"No Change Needed" contradiction** (`budget-recommender.js`): Reason text was generated BEFORE reconciliation modified budgets. Moved reason generation to AFTER reconciliation. Added IS-awareness: IS < 75% never says "no change needed."
+
+2. **IS date range wrong** (`google-ads.js`): `getImpressionShare()` defaulted to `THIS_MONTH` (1-2 days of data at month start). Changed to `LAST_30_DAYS`. Added 30-day cap on `sinceDate` parameter. `getLastBudgetChange()` also updated to `LAST_30_DAYS`.
+
+3. **pacePercent format mismatch** (`pacing-detector.js`): Line `(account.pacePercent || 100) - 100` treated pacePercent as 100-based (118 = +18%), but `pacing-calculator.js` outputs variance (+18 = +18%). This INVERTED over/under direction — over-pacing dealers flagged as under-pacing. Fixed to `account.pacePercent || 0`.
+
+4. **MAX_INCREASE_MULTIPLIER too high** (`budget-recommender.js`): Lowered from 50x to 5x to prevent distorted proportional distribution.
+
+**Files Modified:**
+- `src/services/budget-recommender.js` — reason generation moved post-reconciliation, IS-awareness, MAX cap lowered
+- `src/services/google-ads.js` — LAST_30_DAYS default, 30-day sinceDate cap
+- `src/services/pacing-detector.js` — pacePercent interpretation fix
+- `tests/unit/test_budget_recommender.js` — 2 new tests for reason accuracy
+- `tests/unit/test_pacing_detector.js` — all 17 tests updated to variance-based pacePercent
+- `tests/unit/test_pacing_queries.js` — 3 new tests for date range logic
+
+**Test Count:** 805 unit tests pass (4 pre-existing failures in test_change_executor.js and test_account_iterator.js — unrelated)
 
 ---
 

@@ -608,6 +608,59 @@ describe('distributeAccountBudget', () => {
 
     expect(budgetSummary.currentDailyTotal).toBe(80); // 30 + 50 from budget settings
   });
+
+  test('reason never says "No change needed" when budget is actually changed by reconciliation', () => {
+    // Under-pacing account: shared budget has small initial change that gets
+    // amplified by reconciliation. Reason should reflect the actual change.
+    const pacing = makePacing({ remainingBudget: 5000, daysRemaining: 10 }); // $500/day needed
+    const shared = [
+      { resourceName: 'r/1', name: 'Competitor', dailyBudget: 65,
+        campaigns: [{ campaignId: '10', campaignName: 'Competitor Campaign' }] },
+      { resourceName: 'r/2', name: 'F-150', dailyBudget: 125,
+        campaigns: [{ campaignId: '11', campaignName: 'F-150 Campaign' }] },
+    ];
+    // IS at 47% — well below 75% target
+    const isData = [
+      { campaignId: '10', impressionShare: 0.47, budgetLostShare: 0.20 },
+      { campaignId: '11', impressionShare: 0.60, budgetLostShare: 0.15 },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    // Verify no recommendation says "No change needed" when there IS a change
+    for (const rec of recommendations) {
+      if (Math.abs(rec.change) >= 0.01) {
+        expect(rec.reason).not.toMatch(/No change needed/i);
+      }
+    }
+  });
+
+  test('reason flags low IS even when budget change is zero', () => {
+    // On-pace account with low IS — budget may not change but IS should be flagged
+    const pacing = makePacing({ remainingBudget: 1000, daysRemaining: 10 }); // $100/day
+    const shared = [
+      { resourceName: 'r/1', name: 'General', dailyBudget: 100,
+        campaigns: [{ campaignId: '20', campaignName: 'General Campaign' }] },
+    ];
+    // IS at 37% — way below 75% target
+    const isData = [
+      { campaignId: '20', impressionShare: 0.37, budgetLostShare: 0.30 },
+    ];
+
+    const { recommendations } = distributeAccountBudget({
+      pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: isData,
+    });
+
+    const rec = recommendations.find(r => r.target === 'General');
+    expect(rec).toBeDefined();
+    // If the budget didn't change AND IS is below 75%, should NOT say "No change needed"
+    if (Math.abs(rec.change) < 0.01) {
+      expect(rec.reason).not.toMatch(/No change needed/i);
+      expect(rec.reason).toMatch(/below.*target|review/i);
+    }
+  });
 });
 
 // ===========================================================================

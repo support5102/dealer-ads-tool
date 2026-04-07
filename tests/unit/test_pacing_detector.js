@@ -9,13 +9,15 @@ const {
 } = require('../../src/services/pacing-detector');
 
 // Helper: create an account with overrides
+// NOTE: pacePercent is a variance (e.g., +18 = 18% over, -18 = 18% under, 0 = on pace)
+// as output by pacing-calculator.js
 function makeAccount(overrides = {}) {
   return {
     customerId: '111-111-1111',
     dealerName: 'Test Dealer',
     monthlyBudget: 15000,
     mtdSpend: 10000,
-    pacePercent: 100,       // on pace
+    pacePercent: 0,         // on pace (variance from target)
     status: 'on_pace',
     dailyAdjustment: 0,
     sevenDayAvg: 500,
@@ -48,7 +50,7 @@ describe('analyzeAccount', () => {
 
   test('flags critical over-pacing (>15%)', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 118,   // +18% over
+      pacePercent: 18,    // +18% over (variance)
       projectedSpend: 18000,
     }), thresholds);
     expect(result).not.toBeNull();
@@ -58,7 +60,7 @@ describe('analyzeAccount', () => {
 
   test('flags critical under-pacing (>15%)', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 82,    // -18% under
+      pacePercent: -18,   // -18% under (variance)
       projectedSpend: 11000,
     }), thresholds);
     expect(result).not.toBeNull();
@@ -68,7 +70,7 @@ describe('analyzeAccount', () => {
 
   test('flags high urgency for 10-15% variance', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 112,   // +12% over
+      pacePercent: 12,    // +12% over (variance)
       projectedSpend: 16500,
     }), thresholds);
     expect(result.urgency).toBe(URGENCY.HIGH);
@@ -76,7 +78,7 @@ describe('analyzeAccount', () => {
 
   test('flags medium urgency for 8-10% variance', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 109,   // +9% over
+      pacePercent: 9,     // +9% over (variance)
       projectedSpend: 15500,
     }), thresholds);
     expect(result.urgency).toBe(URGENCY.MEDIUM);
@@ -84,7 +86,7 @@ describe('analyzeAccount', () => {
 
   test('does not flag 7% variance (below threshold)', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 107,
+      pacePercent: 7,     // +7% over (variance, below 8% threshold)
       projectedSpend: 15500,
     }), thresholds);
     expect(result).toBeNull();
@@ -92,8 +94,8 @@ describe('analyzeAccount', () => {
 
   test('flags based on projected miss even if pace is okay', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 105,           // 5% over (below 8% threshold)
-      projectedSpend: 17000,      // 13.3% over budget → projected miss triggers
+      pacePercent: 5,              // 5% over (below 8% threshold)
+      projectedSpend: 17000,       // 13.3% over budget → projected miss triggers
     }), thresholds);
     expect(result).not.toBeNull();
     expect(result.urgency).toBe(URGENCY.MEDIUM); // 13.3% miss is between 10-15%
@@ -101,10 +103,10 @@ describe('analyzeAccount', () => {
 
   test('worsening trend bumps medium to high', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 109,           // 9% over → medium
+      pacePercent: 9,              // 9% over → medium (variance)
       projectedSpend: 15800,
-      sevenDayTrend: 'up',        // spending increasing while over-pacing
-      sevenDayTrendPercent: 20,   // >15% threshold
+      sevenDayTrend: 'up',         // spending increasing while over-pacing
+      sevenDayTrendPercent: 20,    // >15% threshold
     }), thresholds);
     expect(result.urgency).toBe(URGENCY.HIGH);
     expect(result.reasons).toEqual(expect.arrayContaining([
@@ -114,7 +116,7 @@ describe('analyzeAccount', () => {
 
   test('worsening trend does NOT bump if already high/critical', () => {
     const result = analyzeAccount(makeAccount({
-      pacePercent: 112,           // 12% over → already high
+      pacePercent: 12,             // 12% over → already high (variance)
       projectedSpend: 17000,
       sevenDayTrend: 'up',
       sevenDayTrendPercent: 25,
@@ -123,8 +125,8 @@ describe('analyzeAccount', () => {
   });
 
   test('includes correct direction', () => {
-    const over = analyzeAccount(makeAccount({ pacePercent: 112, projectedSpend: 17000 }), thresholds);
-    const under = analyzeAccount(makeAccount({ pacePercent: 88, projectedSpend: 12000 }), thresholds);
+    const over = analyzeAccount(makeAccount({ pacePercent: 12, projectedSpend: 17000 }), thresholds);
+    const under = analyzeAccount(makeAccount({ pacePercent: -12, projectedSpend: 12000 }), thresholds);
     expect(over.direction).toBe('over');
     expect(under.direction).toBe('under');
   });
@@ -133,7 +135,7 @@ describe('analyzeAccount', () => {
     const result = analyzeAccount(makeAccount({
       sevenDayAvg: 2,              // below $5/day minimum
       monthlyBudget: 100,          // expected daily ~$3.3, also below minimum
-      pacePercent: 130,
+      pacePercent: 30,             // +30% over (variance)
       projectedSpend: 150,
     }), thresholds);
     expect(result).toBeNull();
@@ -143,7 +145,7 @@ describe('analyzeAccount', () => {
     const result = analyzeAccount(makeAccount({
       sevenDayAvg: 2,              // low actual spend
       monthlyBudget: 15000,        // expected ~$500/day → meaningful
-      pacePercent: 80,             // way under
+      pacePercent: -20,            // way under (variance)
       projectedSpend: 10000,
     }), thresholds);
     expect(result).not.toBeNull(); // flagged because budget is significant
@@ -158,9 +160,9 @@ describe('detectInterventions', () => {
 
   test('filters to only flagged accounts', () => {
     const accounts = [
-      makeAccount({ customerId: 'A', pacePercent: 100, projectedSpend: 15000 }),  // ok
-      makeAccount({ customerId: 'B', pacePercent: 118, projectedSpend: 18000 }),  // critical
-      makeAccount({ customerId: 'C', pacePercent: 105, projectedSpend: 15500 }),  // ok
+      makeAccount({ customerId: 'A', pacePercent: 0, projectedSpend: 15000 }),    // ok (on pace)
+      makeAccount({ customerId: 'B', pacePercent: 18, projectedSpend: 18000 }),   // critical (+18%)
+      makeAccount({ customerId: 'C', pacePercent: 5, projectedSpend: 15500 }),    // ok (+5%)
     ];
     const result = detectInterventions(accounts);
     expect(result).toHaveLength(1);
@@ -169,10 +171,10 @@ describe('detectInterventions', () => {
 
   test('sorts by urgency then by variance', () => {
     const accounts = [
-      makeAccount({ customerId: 'A', pacePercent: 109, projectedSpend: 16000 }),  // medium, +9%
-      makeAccount({ customerId: 'B', pacePercent: 120, projectedSpend: 19000 }),  // critical, +20%
-      makeAccount({ customerId: 'C', pacePercent: 112, projectedSpend: 17000 }),  // high, +12%
-      makeAccount({ customerId: 'D', pacePercent: 80, projectedSpend: 11000 }),   // critical, -20%
+      makeAccount({ customerId: 'A', pacePercent: 9, projectedSpend: 16000 }),    // medium, +9%
+      makeAccount({ customerId: 'B', pacePercent: 20, projectedSpend: 19000 }),   // critical, +20%
+      makeAccount({ customerId: 'C', pacePercent: 12, projectedSpend: 17000 }),   // high, +12%
+      makeAccount({ customerId: 'D', pacePercent: -20, projectedSpend: 11000 }),  // critical, -20%
     ];
     const result = detectInterventions(accounts);
     expect(result).toHaveLength(4);
@@ -187,7 +189,7 @@ describe('detectInterventions', () => {
 
   test('allows threshold overrides', () => {
     const accounts = [
-      makeAccount({ pacePercent: 106, projectedSpend: 15500 }),
+      makeAccount({ pacePercent: 6, projectedSpend: 15500 }),  // +6% variance
     ];
     // Default threshold (8%) → not flagged
     expect(detectInterventions(accounts)).toHaveLength(0);

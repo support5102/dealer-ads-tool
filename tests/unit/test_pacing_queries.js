@@ -231,6 +231,46 @@ describe('getImpressionShare', () => {
     ]));
     expect(results[0].campaignId).toBe('999');
   });
+
+  test('uses LAST_30_DAYS when no sinceDate provided', async () => {
+    let capturedQuery = '';
+    const ctx = {
+      accessToken: 'a', developerToken: 'b', customerId: '123', loginCustomerId: '999',
+      _queryFn: async (_t, _d, _c, query) => { capturedQuery = query; return []; },
+    };
+    await getImpressionShare(ctx);
+    expect(capturedQuery).toContain('LAST_30_DAYS');
+    expect(capturedQuery).not.toContain('THIS_MONTH');
+  });
+
+  test('uses BETWEEN with sinceDate when provided', async () => {
+    let capturedQuery = '';
+    const ctx = {
+      accessToken: 'a', developerToken: 'b', customerId: '123', loginCustomerId: '999',
+      _queryFn: async (_t, _d, _c, query) => { capturedQuery = query; return []; },
+    };
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await getImpressionShare(ctx, yesterday);
+    expect(capturedQuery).toContain('BETWEEN');
+    expect(capturedQuery).toContain(yesterday);
+  });
+
+  test('caps sinceDate at 30 days ago', async () => {
+    let capturedQuery = '';
+    const ctx = {
+      accessToken: 'a', developerToken: 'b', customerId: '123', loginCustomerId: '999',
+      _queryFn: async (_t, _d, _c, query) => { capturedQuery = query; return []; },
+    };
+    // sinceDate is 60 days ago — should be capped at 30 days ago
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await getImpressionShare(ctx, sixtyDaysAgo);
+    expect(capturedQuery).toContain('BETWEEN');
+    // Should NOT contain the 60-day-ago date
+    expect(capturedQuery).not.toContain(sixtyDaysAgo);
+    // Should contain the 30-day-ago date (capped)
+    expect(capturedQuery).toContain(thirtyDaysAgo);
+  });
 });
 
 // ===========================================================================

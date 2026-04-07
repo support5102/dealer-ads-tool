@@ -31,9 +31,9 @@ Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from 
 
 | Aspect | Value |
 |--------|-------|
-| **Phase** | 13: Smart Budget Auto-Adjuster — Phase 1 COMPLETE (973 tests: 46 suites) |
-| **Last Session** | 2026-03-27 - CLEAN |
-| **Immediate Next** | Phase 13 continued — Phase 2: Approval workflow backend (scan route, approve/reject) |
+| **Phase** | 14: Recommendation & Pacing Bug Fixes — Phase 1 COMPLETE (809 unit tests) |
+| **Last Session** | 2026-04-07 - CLEAN |
+| **Immediate Next** | Phase 14 Phase 2: Remove "Critical" status verbiage, then persistent history (PostgreSQL) |
 | **Live URL** | https://dealer-ads-tool-production.up.railway.app |
 | **Live Version** | V2 on Railway (V3 pushed to GitHub, PR #1 open) |
 
