@@ -356,7 +356,8 @@ async function applyChange(client, change, dryRun) {
       if (!details.adId) throw new Error('update_rsa requires details.adId');
       if (!details.headlines || !details.descriptions) throw new Error('update_rsa requires details.headlines and details.descriptions');
 
-      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      // Use adGroupId directly if available (avoids name mismatch), fall back to name lookup
+      const agId = details.adGroupId || await getAdGroupId(client, campaignName, adGroupName);
 
       // Build headline and description assets
       const headlines = details.headlines.map(h => ({

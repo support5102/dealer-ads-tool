@@ -773,7 +773,7 @@ async function getAdCopy(restCtx) {
             ad_group_ad.policy_summary.approval_status,
             ad_group_ad.policy_summary.policy_topic_entries,
             ad_group_ad.status,
-            ad_group.name, campaign.name
+            ad_group.id, ad_group.name, campaign.name
      FROM ad_group_ad
      WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
        AND campaign.status != 'REMOVED'
@@ -804,6 +804,7 @@ async function getAdCopy(restCtx) {
         type: e.type || '',
       })),
       status: normalizeStatus(ad.status),
+      adGroupId: String(row.adGroup?.id ?? row.ad_group?.id ?? ''),
       adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
       campaignName: row.campaign?.name ?? '',
     };

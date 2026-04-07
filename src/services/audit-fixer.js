@@ -422,6 +422,7 @@ function diagnoseAllCapsHeadlines(finding, adCopy) {
       adGroupName: info.adGroupName,
       details: {
         adId,
+        adGroupId: fullAd.adGroupId,
         headlines: fixedHeadlines,
         descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
         finalUrls: fullAd.finalUrls || [],
@@ -464,6 +465,7 @@ function diagnoseStaleYears(finding, adCopy) {
       adGroupName: item.adGroupName,
       details: {
         adId: item.adId,
+        adGroupId: fullAd.adGroupId,
         headlines: fullAd.headlines.map(h => ({ text: replaceYears(h.text), ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}) })),
         descriptions: fullAd.descriptions.map(d => ({ text: replaceYears(d.text), ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
         finalUrls: fullAd.finalUrls || [],
@@ -505,6 +507,7 @@ function diagnosePinningOveruse(finding, adCopy) {
       adGroupName: item.adGroupName,
       details: {
         adId: item.adId,
+        adGroupId: fullAd.adGroupId,
         headlines: fixedHeadlines,
         descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
         finalUrls: fullAd.finalUrls || [],
