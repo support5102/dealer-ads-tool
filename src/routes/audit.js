@@ -296,10 +296,13 @@ function createAuditRouter(config) {
             let totalFailed = 0;
             const failedTypes = new Set();
 
-            // Use the library client to dismiss (handles gRPC properly)
+            // Use the library's gRPC dismiss method
             for (const rec of recommendations) {
               try {
-                await client.recommendations.dismiss([{ resource_name: rec.resourceName }]);
+                await client.recommendations.dismissRecommendation({
+                  customer_id: cleanId,
+                  operations: [{ resource_name: rec.resourceName }],
+                });
                 totalDismissed++;
               } catch (err) {
                 console.warn(`[Dismiss] Failed ${rec.type}: ${err.message}`);
