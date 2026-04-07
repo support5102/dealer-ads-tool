@@ -28,6 +28,7 @@ const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { errorHandler }                = require('./middleware/error-handler');
 const spendSync                       = require('./services/spend-sync');
+const database                        = require('./services/database');
 
 /**
  * Creates a configured Express app.
@@ -38,6 +39,11 @@ const spendSync                       = require('./services/spend-sync');
 function createApp(config) {
   const app = express();
   const isProduction = process.env.NODE_ENV === 'production';
+
+  // ── Database initialization (non-blocking) ──
+  database.initialize().catch(err => {
+    console.warn('Database initialization skipped:', err.message);
+  });
 
   // ── Production proxy trust (Railway terminates TLS at its reverse proxy) ──
   if (isProduction) {

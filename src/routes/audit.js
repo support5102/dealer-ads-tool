@@ -377,11 +377,12 @@ function createAuditRouter(config) {
    * GET /api/change-history?limit=100&accountId=X
    * Returns change history log of all API changes made by the tool.
    */
-  router.get('/api/change-history', requireAuth, (req, res) => {
+  router.get('/api/change-history', requireAuth, async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const accountId = req.query.accountId || null;
-    const history = changeHistory.getHistory(limit, accountId);
-    res.json({ entries: history, total: changeHistory.size() });
+    const history = await changeHistory.getHistory(limit, accountId);
+    const total = await changeHistory.size();
+    res.json({ entries: history, total });
   });
 
   /**
