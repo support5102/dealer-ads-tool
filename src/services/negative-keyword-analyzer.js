@@ -301,10 +301,12 @@ function analyzeIrrelevantSearchTerms(searchTerms) {
       }
     }
 
-    // Check against universal negatives from strategy-rules
+    // Check against universal negatives from strategy-rules (word boundary match)
     if (!flagReason) {
       for (const neg of UNIVERSAL_NEGATIVES) {
-        if (termLower.includes(neg.toLowerCase())) {
+        const negLower = neg.toLowerCase();
+        const regex = new RegExp(`\\b${negLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (regex.test(st.searchTerm)) {
           flagReason = `matches universal negative "${neg}"`;
           break;
         }
