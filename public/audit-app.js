@@ -69,8 +69,6 @@ function selectAccount(id) {
   const opt = accountSelect.selectedOptions[0];
   selectedAccountName = opt ? opt.dataset.name : null;
   runAuditBtn.disabled = !id;
-  const editBtn = document.getElementById('editAdsBtn');
-  if (editBtn) editBtn.disabled = !id;
 
   // Hide previous results
   auditResults.style.display = 'none';

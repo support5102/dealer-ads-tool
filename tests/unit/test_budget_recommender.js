@@ -25,12 +25,24 @@ describe('statusToColor', () => {
     expect(statusToColor('on_pace')).toBe('green');
   });
 
-  test('over → yellow', () => {
-    expect(statusToColor('over')).toBe('yellow');
+  test('over moderate (10%) → yellow', () => {
+    expect(statusToColor('over', 10)).toBe('yellow');
   });
 
-  test('under → yellow', () => {
-    expect(statusToColor('under')).toBe('yellow');
+  test('under moderate (-10%) → yellow', () => {
+    expect(statusToColor('under', -10)).toBe('yellow');
+  });
+
+  test('over extreme (>15%) → red', () => {
+    expect(statusToColor('over', 20)).toBe('red');
+  });
+
+  test('under extreme (<-15%) → red', () => {
+    expect(statusToColor('under', -20)).toBe('red');
+  });
+
+  test('over without pacePercent → yellow', () => {
+    expect(statusToColor('over')).toBe('yellow');
   });
 
   test('unknown status → gray', () => {

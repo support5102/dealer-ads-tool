@@ -178,7 +178,11 @@ function showView(id) {
 function renderDashboard(data) {
   renderHeader(data);
   renderMetrics(data);
-  renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
+  if (data.cooldown && data.cooldown.active) {
+    renderCooldown(data.cooldown);
+  } else {
+    renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
+  }
   renderImpressionShare(data.impressionShareSummary, data.changeDate);
   renderCampaignIS(data.campaignIS, data.changeDate);
   // renderInventory(data.inventory); // Temporarily hidden — inventory count is inaccurate for PMax
@@ -257,6 +261,21 @@ function renderMetrics(data) {
     </div>
     ${postChangeCard}
     ${postChangeWarning}
+  `;
+}
+
+function renderCooldown(cooldown) {
+  const section = document.getElementById('recommendationsSection');
+  section.innerHTML = `
+    <div class="dash-section">
+      <div class="dash-section-header">
+        <div class="dash-section-title">Budget Recommendations</div>
+      </div>
+      <div style="padding:20px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:12px;">
+        <div style="font-size:14px;color:var(--green);font-weight:600;margin-bottom:8px;">On Track — No Changes Needed</div>
+        <div style="font-size:13px;color:var(--text2);">${esc(cooldown.message)}</div>
+      </div>
+    </div>
   `;
 }
 

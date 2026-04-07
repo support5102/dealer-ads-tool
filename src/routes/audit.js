@@ -335,6 +335,7 @@ function createAuditRouter(config) {
           const message = await applyChange(client, {
             type: fix.changeType,
             campaignName: fix.campaignName,
+            adGroupName: fix.adGroupName,
             details: fix.details,
           });
           results.applied++;

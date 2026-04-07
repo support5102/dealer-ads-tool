@@ -61,6 +61,14 @@ function diagnose(finding, diagnostics = {}) {
       return { fixable: false, fixes: [], manualNotes: ['The same keyword appears in multiple ad groups within one campaign. Consolidate to one ad group to avoid internal competition.'] };
     case 'MISSING_COMPETING_NEGS':
       return { fixable: false, fixes: [], manualNotes: ['Campaign is missing competing-make negative keywords for traffic sculpting. Add negatives for competitor brands.'] };
+    case 'ad_copy_allcaps_headlines':
+      return diagnoseAllCapsHeadlines(finding, diagnostics.adCopy || []);
+    case 'ad_copy_stale_years':
+      return diagnoseStaleYears(finding, diagnostics.adCopy || []);
+    case 'ad_copy_pinning_overuse':
+      return diagnosePinningOveruse(finding, diagnostics.adCopy || []);
+    case 'ad_copy_short_headlines':
+      return diagnoseShortHeadlines(finding, diagnostics.adCopy || []);
     case 'disapproved_ads':
       return { fixable: false, fixes: [], manualNotes: ['Disapproved ads require manual policy review. Check the Google Ads policy center for specific violations.'] };
     case 'bidding_not_manual_cpc':
@@ -372,6 +380,181 @@ function diagnoseIrrelevantSearchTerms(finding) {
       ? ['Review each term before applying — some may have indirect value. Fixes add as PHRASE match negatives.']
       : [],
   };
+}
+
+// ── Ad copy fix helpers ──
+
+/** Convert text to Title Case */
+function toTitleCase(text) {
+  return text.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * All-caps headlines — convert to Title Case.
+ */
+function diagnoseAllCapsHeadlines(finding, adCopy) {
+  const flagged = finding.details?.headlines || [];
+  const fixes = [];
+  const manualNotes = [];
+
+  // Group by adId to batch fixes per ad
+  const adMap = new Map();
+  for (const item of flagged) {
+    if (!adMap.has(item.adId)) adMap.set(item.adId, { ...item, flaggedTexts: [] });
+    adMap.get(item.adId).flaggedTexts.push(item.headline);
+  }
+
+  for (const [adId, info] of adMap) {
+    const fullAd = adCopy.find(a => a.adId === adId);
+    if (!fullAd) { manualNotes.push(`Could not find ad ${adId} — fix manually.`); continue; }
+
+    const fixedHeadlines = fullAd.headlines.map(h => ({
+      text: info.flaggedTexts.includes(h.text) ? toTitleCase(h.text) : h.text,
+      ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}),
+    }));
+
+    fixes.push({
+      action: 'update_rsa',
+      description: `Title-case ${info.flaggedTexts.length} all-caps headline(s) in "${info.adGroupName}" (${info.campaignName})`,
+      changeType: 'update_rsa',
+      campaignName: info.campaignName,
+      adGroupName: info.adGroupName,
+      details: {
+        adId,
+        headlines: fixedHeadlines,
+        descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
+        finalUrls: fullAd.finalUrls || [],
+      },
+    });
+  }
+
+  if (manualNotes.length === 0 && fixes.length > 0) {
+    manualNotes.push('Acronyms (AWD, 4WD, etc.) may need manual review after title-casing.');
+  }
+
+  return { fixable: fixes.length > 0, fixes, manualNotes };
+}
+
+/**
+ * Stale year references — replace old years with current year.
+ */
+function diagnoseStaleYears(finding, adCopy) {
+  const staleAds = finding.details?.staleAds || [];
+  const fixes = [];
+  const manualNotes = [];
+  const currentYear = new Date().getFullYear();
+
+  for (const item of staleAds) {
+    const fullAd = adCopy.find(a => a.adId === item.adId);
+    if (!fullAd) { manualNotes.push(`Could not find ad ${item.adId} — fix manually.`); continue; }
+
+    const replaceYears = (text) => {
+      return text.replace(/(?<!\d)(20\d{2})(?!\d)/g, (match) => {
+        const y = parseInt(match);
+        return item.staleYears.includes(y) ? String(currentYear) : match;
+      });
+    };
+
+    fixes.push({
+      action: 'update_rsa',
+      description: `Update year ${item.staleYears.join(', ')} → ${currentYear} in "${item.adGroupName}" (${item.campaignName})`,
+      changeType: 'update_rsa',
+      campaignName: item.campaignName,
+      adGroupName: item.adGroupName,
+      details: {
+        adId: item.adId,
+        headlines: fullAd.headlines.map(h => ({ text: replaceYears(h.text), ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}) })),
+        descriptions: fullAd.descriptions.map(d => ({ text: replaceYears(d.text), ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
+        finalUrls: fullAd.finalUrls || [],
+      },
+    });
+  }
+
+  return { fixable: fixes.length > 0, fixes, manualNotes };
+}
+
+/**
+ * Pinning overuse — unpin all headlines except dealer name at HEADLINE_1.
+ */
+function diagnosePinningOveruse(finding, adCopy) {
+  const pinnedAds = finding.details?.ads || [];
+  const fixes = [];
+  const manualNotes = [];
+
+  for (const item of pinnedAds) {
+    const fullAd = adCopy.find(a => a.adId === item.adId);
+    if (!fullAd) { manualNotes.push(`Could not find ad ${item.adId} — fix manually.`); continue; }
+
+    // Keep only the first HEADLINE_1 pin (dealer name), unpin everything else
+    let keptFirstPin = false;
+    const fixedHeadlines = fullAd.headlines.map(h => {
+      if (h.pinnedField === 'HEADLINE_1' && !keptFirstPin) {
+        keptFirstPin = true;
+        return { text: h.text, pinnedField: 'HEADLINE_1' };
+      }
+      return { text: h.text }; // no pinnedField = unpinned
+    });
+
+    const unpinCount = item.pinnedCount - (keptFirstPin ? 1 : 0);
+    fixes.push({
+      action: 'update_rsa',
+      description: `Unpin ${unpinCount} headline(s) in "${item.adGroupName}" (${item.campaignName}) — keep dealer name at Position 1`,
+      changeType: 'update_rsa',
+      campaignName: item.campaignName,
+      adGroupName: item.adGroupName,
+      details: {
+        adId: item.adId,
+        headlines: fixedHeadlines,
+        descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
+        finalUrls: fullAd.finalUrls || [],
+      },
+    });
+  }
+
+  return { fixable: fixes.length > 0, fixes, manualNotes };
+}
+
+/**
+ * Short headlines — remove if ad has >3 headlines, else flag for manual review.
+ */
+function diagnoseShortHeadlines(finding, adCopy) {
+  const flagged = finding.details?.headlines || [];
+  const fixes = [];
+  const manualNotes = [];
+
+  // Group by adId
+  const adMap = new Map();
+  for (const item of flagged) {
+    if (!adMap.has(item.adId)) adMap.set(item.adId, { ...item, shortTexts: [] });
+    adMap.get(item.adId).shortTexts.push(item.headline);
+  }
+
+  for (const [adId, info] of adMap) {
+    const fullAd = adCopy.find(a => a.adId === adId);
+    if (!fullAd) { manualNotes.push(`Could not find ad ${adId} — fix manually.`); continue; }
+
+    // Count how many headlines would remain after removing short ones
+    const remaining = fullAd.headlines.filter(h => !info.shortTexts.includes(h.text));
+    if (remaining.length >= 3) {
+      fixes.push({
+        action: 'update_rsa',
+        description: `Remove ${info.shortTexts.length} short headline(s) from "${info.adGroupName}" (${info.campaignName}) — ${remaining.length} headlines remain`,
+        changeType: 'update_rsa',
+        campaignName: info.campaignName,
+        adGroupName: info.adGroupName,
+        details: {
+          adId,
+          headlines: remaining.map(h => ({ text: h.text, ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}) })),
+          descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
+          finalUrls: fullAd.finalUrls || [],
+        },
+      });
+    } else {
+      manualNotes.push(`"${info.adGroupName}" (${info.campaignName}) has ${info.shortTexts.length} short headline(s) but only ${fullAd.headlines.length} total — removing would drop below 3. Replace manually.`);
+    }
+  }
+
+  return { fixable: fixes.length > 0, fixes, manualNotes };
 }
 
 module.exports = {

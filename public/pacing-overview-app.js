@@ -10,17 +10,22 @@ const STATUS_ORDER = { over: 0, under: 1, on_pace: 2 };
 const STATUS_LABELS = {
   on_pace: 'On Pace', over: 'Overpacing', under: 'Underpacing',
 };
-const STATUS_COLORS = {
-  on_pace: 'green', over: 'yellow', under: 'yellow',
-};
+// Status color is now dynamic — see getStatusColor()
 const PROJ_LABELS = {
   on_track: 'On Track', over: 'Over', under: 'Under',
-  will_over: 'Will Over', will_under: 'Will Under',
+  will_over: 'Over', will_under: 'Under',
 };
 const PROJ_COLORS = {
   on_track: 'green', over: 'yellow', under: 'yellow',
   will_over: 'red', will_under: 'red',
 };
+
+function getStatusColor(account) {
+  if (account.status === 'on_pace') return 'green';
+  const paceRatio = 100 + (account.pacePercent || 0);
+  if (paceRatio > 115 || paceRatio < 85) return 'red';
+  return 'yellow';
+}
 
 let currentData = null;
 let sortCol = 'pacePercent';
@@ -211,7 +216,7 @@ function renderTable(accounts) {
   }).join('');
 
   const rowsHtml = sorted.map(a => {
-    const color = STATUS_COLORS[a.status] || 'gray';
+    const color = getStatusColor(a);
     const paceClass = color === 'green' ? 'pace-green' : color === 'yellow' ? 'pace-yellow' : 'pace-red';
     // On the last day of month, dailyAdjustment is meaningless (required rate = 0)
     // Show remaining budget instead

@@ -13,8 +13,14 @@
  * targets (75-90%). Shared budgets get whatever's left to hit the account target.
  */
 
-const { calculatePacing } = require('./pacing-calculator');
+const { calculatePacing, calculateProjection } = require('./pacing-calculator');
 const { BUDGET_SPLITS } = require('./strategy-rules');
+
+// Post-edit cooldown: suppress recommendations when a recent budget change
+// is already trending the account toward correct pacing.
+const COOLDOWN_MIN_DAYS = 3;   // Minimum post-change observation period
+const COOLDOWN_MAX_DAYS = 7;   // Force re-evaluation after this many days
+const COOLDOWN_TOLERANCE = 10; // Projected miss % within which edit is "working"
 
 // VLA impression share targets — below 75% we're leaving money on the table,
 // above 90% CPC inflates with diminishing returns.
@@ -26,14 +32,16 @@ const MAX_CUT_RATIO = 0.70;          // Allow up to 70% cut per cycle to hit tar
 
 /**
  * Maps pacing status to dashboard color.
+ * Red for extreme variance (>15% off pace), yellow for moderate.
  */
-function statusToColor(status) {
-  switch (status) {
-    case 'on_pace': return 'green';
-    case 'over':
-    case 'under':   return 'yellow';
-    default:        return 'gray';
+function statusToColor(status, pacePercent) {
+  if (status === 'on_pace') return 'green';
+  if (status === 'over' || status === 'under') {
+    const paceRatio = 100 + (pacePercent || 0);
+    if (paceRatio > 115 || paceRatio < 85) return 'red';
+    return 'yellow';
   }
+  return 'gray';
 }
 
 /**
@@ -769,6 +777,58 @@ function generateRecommendation(params) {
 
   const pacing = calculatePacing(pacingParams);
 
+  // Post-edit cooldown check: if a recent budget change is trending on-track,
+  // suppress recommendations to avoid daily churn.
+  if (changeDate && dailyBreakdown && dailyBreakdown.length > 0) {
+    const changeDateObj = new Date(changeDate);
+    const daysSinceChange = Math.floor((Date.now() - changeDateObj.getTime()) / (24 * 60 * 60 * 1000));
+
+    if (daysSinceChange >= COOLDOWN_MIN_DAYS && daysSinceChange <= COOLDOWN_MAX_DAYS
+        && pacing.daysRemaining > 5 && Math.abs(pacing.pacePercent) <= 25) {
+      const projection = calculateProjection({
+        monthlyBudget: goal.monthlyBudget,
+        mtdSpend: totalSpend,
+        dailySpend: dailyBreakdown,
+        changeDate,
+        year, month, currentDay,
+      });
+
+      if (projection.postChangeDailyAvg != null) {
+        const projectedMiss = goal.monthlyBudget > 0
+          ? Math.abs(((projection.projectedSpend - goal.monthlyBudget) / goal.monthlyBudget) * 100)
+          : 0;
+
+        if (projectedMiss <= COOLDOWN_TOLERANCE) {
+          return {
+            dealerName: goal.dealerName,
+            totalSpend,
+            pacing,
+            status: pacing.paceStatus,
+            statusColor: statusToColor(pacing.paceStatus, pacing.pacePercent),
+            recommendations: [],
+            budgetSummary: null,
+            pausableCampaigns: [],
+            impressionShareSummary: summarizeImpressionShare(impressionShare),
+            inventory: {
+              count: inventoryCount,
+              modifier: pacing.inventoryModifier,
+              reason: pacing.inventoryReason,
+            },
+            cooldown: {
+              active: true,
+              changeDate,
+              daysSinceChange,
+              postChangeDailyAvg: projection.postChangeDailyAvg,
+              projectedSpend: projection.projectedSpend,
+              projectedStatus: projection.projectedStatus,
+              message: `Budget changed ${daysSinceChange} day(s) ago. Post-change spend ($${Math.round(projection.postChangeDailyAvg)}/day) projects to $${Math.round(projection.projectedSpend)} (${projection.projectedStatus}). No further changes needed yet.`,
+            },
+          };
+        }
+      }
+    }
+  }
+
   // Distribute account budget: VLA (priority) + shared (remainder)
   const { recommendations, budgetSummary, pausableCampaigns } = distributeAccountBudget({
     pacing,
@@ -790,7 +850,7 @@ function generateRecommendation(params) {
     totalSpend,
     pacing,
     status: pacing.paceStatus,
-    statusColor: statusToColor(pacing.paceStatus),
+    statusColor: statusToColor(pacing.paceStatus, pacing.pacePercent),
     recommendations,
     budgetSummary,
     pausableCampaigns,
