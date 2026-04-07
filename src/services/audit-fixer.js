@@ -536,8 +536,9 @@ async function diagnoseShortHeadlines(finding, adCopy, claudeConfig) {
 
     const dealerName = info.campaignName.split(/\s*[-–—]\s*/)[0].trim();
 
-    // Try AI improvement first
+    // Always try AI improvement — never just remove headlines
     let improved = null;
+    let aiError = null;
     if (claudeConfig?.apiKey) {
       try {
         improved = await generateImprovedHeadlines({
@@ -545,8 +546,11 @@ async function diagnoseShortHeadlines(finding, adCopy, claudeConfig) {
           allHeadlines: fullAd.headlines, shortHeadlines: info.shortTexts, claudeConfig,
         });
       } catch (err) {
+        aiError = err.message;
         console.error('AI headline improvement failed:', err.message);
       }
+    } else {
+      aiError = 'Claude API key not configured';
     }
 
     if (improved && improved.length > 0) {
@@ -574,25 +578,9 @@ async function diagnoseShortHeadlines(finding, adCopy, claudeConfig) {
         },
       });
     } else {
-      // Fallback: remove if enough remain, else flag manual
-      const remaining = fullAd.headlines.filter(h => !info.shortTexts.includes(h.text));
-      if (remaining.length >= 3) {
-        fixes.push({
-          action: 'update_rsa',
-          description: `Remove ${info.shortTexts.length} short headline(s) from "${info.adGroupName}" (${info.campaignName}) — ${remaining.length} headlines remain`,
-          changeType: 'update_rsa',
-          campaignName: info.campaignName,
-          adGroupName: info.adGroupName,
-          details: {
-            adId,
-            headlines: remaining.map(h => ({ text: h.text, ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}) })),
-            descriptions: fullAd.descriptions.map(d => ({ text: d.text, ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}) })),
-            finalUrls: fullAd.finalUrls || [],
-          },
-        });
-      } else {
-        manualNotes.push(`"${info.adGroupName}" (${info.campaignName}) has ${info.shortTexts.length} short headline(s) but only ${fullAd.headlines.length} total — replace manually.`);
-      }
+      // AI failed — flag for manual review (never auto-remove headlines)
+      const shortList = info.shortTexts.map(t => `"${t}"`).join(', ');
+      manualNotes.push(`"${info.adGroupName}" (${info.campaignName}): short headlines ${shortList} need manual improvement.${aiError ? ` (AI error: ${aiError})` : ''}`);
     }
   }
 
