@@ -283,77 +283,44 @@ function createAuditRouter(config) {
 
       if (dismissBatch) {
         try {
+          // Use the google-ads-api library client for dismiss (REST endpoint 404s)
           const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
           const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
-          const axios = require('axios');
-          const dismissHeaders = {
-            'Authorization': `Bearer ${accessToken}`,
-            'developer-token': config.googleAds.developerToken,
-            ...(mccId ? { 'login-customer-id': String(mccId).replace(/-/g, '') } : {}),
-          };
+          const recommendations = await googleAds.getRecommendations(restCtx);
+          console.log(`[Dismiss] Found ${recommendations.length} recommendations`);
 
-          // Run dismiss up to 2 passes — some recommendations regenerate after first dismiss
-          let totalDismissed = 0;
-          let totalFailed = 0;
-          const failedTypes = new Set();
+          if (recommendations.length === 0) {
+            results.details.push({ description: 'No recommendations found to dismiss', success: true });
+          } else {
+            let totalDismissed = 0;
+            let totalFailed = 0;
+            const failedTypes = new Set();
 
-          for (let pass = 0; pass < 2; pass++) {
-            const recommendations = await googleAds.getRecommendations(restCtx);
-            console.log(`[Dismiss pass ${pass + 1}] Found ${recommendations.length} recommendations: ${recommendations.map(r => r.type).join(', ')}`);
-
-            if (recommendations.length === 0) break;
-
-            // Dismiss one at a time for reliability
-            // Try v20 first, fall back to v19 if it fails
-            const API_VERSIONS = ['v20', 'v19'];
-            let workingVersion = API_VERSIONS[0];
-
+            // Use the library client to dismiss (handles gRPC properly)
             for (const rec of recommendations) {
-              let dismissed = false;
-              for (const ver of (dismissed ? [workingVersion] : API_VERSIONS)) {
-                try {
-                  await axios.post(
-                    `https://googleads.googleapis.com/${ver}/customers/${cleanId}/recommendations:dismiss`,
-                    { operations: [{ resourceName: rec.resourceName }] },
-                    { headers: dismissHeaders, timeout: 15000 }
-                  );
-                  totalDismissed++;
-                  workingVersion = ver;
-                  dismissed = true;
-                  break;
-                } catch (err) {
-                  const status = err.response?.status;
-                  if (ver === API_VERSIONS[API_VERSIONS.length - 1]) {
-                    // Last version attempt — log and count as failed
-                    const msg = err.response?.data?.error?.message || err.message;
-                    console.warn(`[Dismiss] Failed ${rec.type}: HTTP ${status} — ${msg}`);
-                    totalFailed++;
-                    failedTypes.add(rec.type || 'unknown');
-                  }
-                  // else try next version
-                }
+              try {
+                await client.recommendations.dismiss([{ resource_name: rec.resourceName }]);
+                totalDismissed++;
+              } catch (err) {
+                console.warn(`[Dismiss] Failed ${rec.type}: ${err.message}`);
+                totalFailed++;
+                failedTypes.add(rec.type || 'unknown');
               }
             }
 
-            // Brief pause before second pass to let API settle
-            if (pass === 0) await new Promise(r => setTimeout(r, 2000));
-          }
-
-          results.applied += totalDismissed;
-          results.failed += totalFailed;
-          if (totalDismissed > 0) {
-            results.details.push({ description: `Dismissed ${totalDismissed} recommendations`, success: true });
-          }
-          if (totalFailed > 0) {
-            const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
-            results.details.push({
-              description: `${totalFailed} recommendation(s) could not be dismissed${typeNote}`,
-              success: false,
-            });
+            results.applied += totalDismissed;
+            results.failed += totalFailed;
+            if (totalDismissed > 0) {
+              results.details.push({ description: `Dismissed ${totalDismissed} of ${recommendations.length} recommendations`, success: true });
+            }
+            if (totalFailed > 0) {
+              const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
+              results.details.push({ description: `${totalFailed} could not be dismissed${typeNote}`, success: false });
+            }
           }
         } catch (err) {
           results.failed++;
-          results.details.push({ description: 'Failed to fetch recommendations', error: err.message, success: false });
+          results.details.push({ description: 'Failed to dismiss recommendations', error: err.message, success: false });
         }
       }
 
