@@ -306,8 +306,11 @@ function analyzeIrrelevantSearchTerms(searchTerms) {
     }
 
     // Check against universal negatives from strategy-rules (word boundary match)
+    // Skip service-related negatives on service campaigns
+    const SERVICE_NEGATIVES = ['oil change', 'tire rotation', 'parts', 'repair manual', 'wiring diagram', 'fuse box'];
     if (!flagReason) {
       for (const neg of UNIVERSAL_NEGATIVES) {
+        if (isServiceCampaign && SERVICE_NEGATIVES.includes(neg.toLowerCase())) continue;
         const negLower = neg.toLowerCase();
         const regex = new RegExp(`\\b${negLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
         if (regex.test(st.searchTerm)) {
