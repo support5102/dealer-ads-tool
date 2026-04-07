@@ -329,8 +329,74 @@ async function applyChange(client, change, dryRun) {
       return `Assigned "${campaignName}" to shared budget "${details.budgetName}"`;
     }
 
+    // ── Ad copy mutations ──
+
+    case 'pause_ad': {
+      if (!details.adId) throw new Error('pause_ad requires details.adId');
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      await client.adGroupAds.update([{
+        resource_name: `customers/${customerId}/adGroupAds/${agId}~${details.adId}`,
+        status: 'PAUSED',
+      }]);
+      return `Paused ad ${details.adId} in ${adGroupName}`;
+    }
+
+    case 'enable_ad': {
+      if (!details.adId) throw new Error('enable_ad requires details.adId');
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      await client.adGroupAds.update([{
+        resource_name: `customers/${customerId}/adGroupAds/${agId}~${details.adId}`,
+        status: 'ENABLED',
+      }]);
+      return `Enabled ad ${details.adId} in ${adGroupName}`;
+    }
+
+    case 'update_rsa': {
+      // Google Ads RSAs are immutable — must remove old + create new
+      if (!details.adId) throw new Error('update_rsa requires details.adId');
+      if (!details.headlines || !details.descriptions) throw new Error('update_rsa requires details.headlines and details.descriptions');
+
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+
+      // Build headline and description assets
+      const headlines = details.headlines.map(h => ({
+        text: h.text,
+        ...(h.pinnedField ? { pinned_field: h.pinnedField } : {}),
+      }));
+      const descriptions = details.descriptions.map(d => ({
+        text: d.text,
+        ...(d.pinnedField ? { pinned_field: d.pinnedField } : {}),
+      }));
+      const finalUrls = details.finalUrls || [];
+
+      const adResource = `customers/${customerId}/adGroupAds/${agId}~${details.adId}`;
+
+      // Step 1: Pause old ad first (safety — if create fails, ad is paused, not deleted)
+      await client.adGroupAds.update([{ resource_name: adResource, status: 'PAUSED' }]);
+
+      // Step 2: Create new ad with updated copy
+      try {
+        await client.adGroupAds.create([{
+          ad_group: `customers/${customerId}/adGroups/${agId}`,
+          status: 'ENABLED',
+          ad: {
+            final_urls: finalUrls,
+            responsive_search_ad: { headlines, descriptions },
+          },
+        }]);
+      } catch (createErr) {
+        // Re-enable old ad if creation failed
+        await client.adGroupAds.update([{ resource_name: adResource, status: 'ENABLED' }]).catch(() => {});
+        throw new Error(`Failed to create new RSA (old ad re-enabled): ${createErr.message}`);
+      }
+
+      // Step 3: Remove old ad only after successful creation
+      await client.adGroupAds.remove([adResource]);
+      return `Updated RSA in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`;
+    }
+
     default:
-      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation, create_shared_budget, assign_campaign_budget`);
+      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation, create_shared_budget, assign_campaign_budget, pause_ad, enable_ad, update_rsa`);
   }
 }
 

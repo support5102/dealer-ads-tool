@@ -24,9 +24,9 @@
   min-width: 320px;
   padding: 0.5rem;
   border-radius: 6px;
-  border: 1px solid #333;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  border: 1px solid var(--border, #333);
+  background: var(--bg3, #1a1a2e);
+  color: var(--text, #e0e0e0);
   font-family: 'DM Mono', monospace;
   font-size: 0.85rem;
 }

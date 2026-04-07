@@ -21,6 +21,25 @@
   --purple:    #a78bfa;
 }
 
+/* Light theme overrides */
+[data-theme="light"] {
+  --bg:        #f8fafc;
+  --bg2:       #f1f5f9;
+  --bg3:       #e2e8f0;
+  --border:    #cbd5e1;
+  --border2:   #e2e8f0;
+  --text:      #1e293b;
+  --text2:     #475569;
+  --text3:     #94a3b8;
+  --text4:     #cbd5e1;
+  --blue:      #2563eb;
+  --blue-dark: #1d4ed8;
+  --green:     #16a34a;
+  --orange:    #ea580c;
+  --red:       #dc2626;
+  --purple:    #7c3aed;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -59,7 +78,7 @@ body {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-size: 16px;
-  color: #f1f5f9;
+  color: var(--text);
   letter-spacing: -.3px;
 }
 .logo-sub {

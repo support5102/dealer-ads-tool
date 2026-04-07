@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dealer Ads Manager</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -24,6 +25,24 @@
       --orange:    #fb923c;
       --red:       #f87171;
       --purple:    #a78bfa;
+    }
+
+    [data-theme="light"] {
+      --bg:        #f8fafc;
+      --bg2:       #f1f5f9;
+      --bg3:       #e2e8f0;
+      --border:    #cbd5e1;
+      --border2:   #e2e8f0;
+      --text:      #1e293b;
+      --text2:     #475569;
+      --text3:     #94a3b8;
+      --text4:     #cbd5e1;
+      --blue:      #2563eb;
+      --blue-dark: #1d4ed8;
+      --green:     #16a34a;
+      --orange:    #ea580c;
+      --red:       #dc2626;
+      --purple:    #7c3aed;
     }
 
     body {
@@ -764,6 +783,7 @@
     <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Builder</a>
     <a href="/change-history.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">History</a>
     <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+    <button id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;font-family:'DM Mono',monospace;">🌙 Dark</button>
   </div>
 </div>
 

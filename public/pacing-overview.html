@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/styles.css"/>
   <link rel="stylesheet" href="/pacing-styles.css"/>
+  <script src="/theme.js"></script>
   <style>
     .overview-main {
       flex: 1;
@@ -27,7 +28,7 @@
       font-family: 'Syne', sans-serif;
       font-weight: 700;
       font-size: 18px;
-      color: #f1f5f9;
+      color: var(--text);
       flex: 1;
     }
 
@@ -172,6 +173,7 @@
     <a href="/builder.html" class="nav-link">Builder</a>
     <a href="/change-history.html" class="nav-link">History</a>
     <span class="connect-btn" id="authStatus" style="pointer-events:none;opacity:0.5">Checking...</span>
+    <button class="nav-link" id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;">🌙 Dark</button>
   </div>
 </div>
 
@@ -180,6 +182,13 @@
 
   <div class="overview-controls">
     <div class="overview-title">All Dealer Accounts</div>
+    <input type="text" id="filterInput" placeholder="Search dealers..." oninput="applyFilters()" style="padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;width:200px;outline:none;"/>
+    <select id="statusFilter" onchange="applyFilters()" style="padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;outline:none;">
+      <option value="all">All Statuses</option>
+      <option value="over">Overpacing</option>
+      <option value="under">Underpacing</option>
+      <option value="on_pace">On Pace</option>
+    </select>
     <button class="btn-primary" id="refreshBtn" onclick="loadOverview()">Refresh</button>
   </div>
 

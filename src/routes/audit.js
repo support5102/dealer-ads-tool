@@ -449,6 +449,98 @@ function createAuditRouter(config) {
     }
   });
 
+  // ── Ad copy endpoints ──
+
+  /**
+   * GET /api/ads?customerId=X — Fetch all RSA ads for an account
+   * Optional: campaignName, adGroupName to filter
+   */
+  router.get('/api/ads', requireAuth, async (req, res, next) => {
+    const customerId = (req.query.customerId || '').replace(/-/g, '');
+    if (!customerId) return res.status(400).json({ error: 'customerId is required' });
+
+    try {
+      const restCtx = {
+        accessToken: req.session.tokens.access_token,
+        developerToken: config.googleAds.developerToken,
+        customerId,
+        loginCustomerId: req.session.mccId,
+      };
+      const ads = await googleAds.getAdCopy(restCtx);
+
+      // Optional filters
+      const campFilter = req.query.campaignName;
+      const agFilter = req.query.adGroupName;
+      let filtered = ads;
+      if (campFilter) filtered = filtered.filter(a => a.campaignName === campFilter);
+      if (agFilter) filtered = filtered.filter(a => a.adGroupName === agFilter);
+
+      res.json({ ads: filtered, total: filtered.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/ads/update — Update (replace) an RSA ad
+   * Body: { customerId, campaignName, adGroupName, adId, headlines, descriptions, finalUrls }
+   */
+  router.post('/api/ads/update', requireAuth, async (req, res, next) => {
+    const { customerId, campaignName, adGroupName, adId, headlines, descriptions, finalUrls } = req.body;
+    if (!customerId || !campaignName || !adGroupName || !adId) {
+      return res.status(400).json({ error: 'customerId, campaignName, adGroupName, and adId are required' });
+    }
+    if (!headlines || !Array.isArray(headlines) || headlines.length < 3) {
+      return res.status(400).json({ error: 'At least 3 headlines are required' });
+    }
+    if (!descriptions || !Array.isArray(descriptions) || descriptions.length < 2) {
+      return res.status(400).json({ error: 'At least 2 descriptions are required' });
+    }
+
+    // Validate headline/description lengths
+    for (const h of headlines) {
+      if (!h.text || h.text.length > 30) return res.status(400).json({ error: `Headline "${h.text}" exceeds 30 characters` });
+    }
+    for (const d of descriptions) {
+      if (!d.text || d.text.length > 90) return res.status(400).json({ error: `Description "${d.text}" exceeds 90 characters` });
+    }
+
+    try {
+      const cleanId = customerId.replace(/-/g, '');
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const customer = googleAds.createClient(config.googleAds, req.session.tokens.refresh_token, cleanId, mccId);
+
+      const result = await applyChange(customer, {
+        type: 'update_rsa',
+        campaignName,
+        adGroupName,
+        details: { adId, headlines, descriptions, finalUrls: finalUrls || [] },
+      });
+
+      changeHistory.addEntry({
+        action: 'update_rsa',
+        accountId: customerId,
+        dealerName: campaignName,
+        details: `Updated RSA ${adId} in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`,
+        source: 'ad_editor',
+        success: true,
+      });
+
+      res.json({ success: true, message: result });
+    } catch (err) {
+      changeHistory.addEntry({
+        action: 'update_rsa',
+        accountId: customerId,
+        dealerName: campaignName,
+        details: `Failed to update RSA ${adId}: ${err.message}`,
+        source: 'ad_editor',
+        success: false,
+        error: err.message,
+      });
+      next(err);
+    }
+  });
+
   return router;
 }
 

@@ -26,6 +26,35 @@ let currentData = null;
 let sortCol = 'pacePercent';
 let sortAsc = false;
 
+// ── Filtering ──
+
+function getFilteredAccounts() {
+  if (!currentData) return [];
+  let accounts = currentData.accounts;
+
+  // Text search filter
+  const searchEl = document.getElementById('filterInput');
+  const search = (searchEl ? searchEl.value : '').toLowerCase().trim();
+  if (search) {
+    accounts = accounts.filter(a => a.dealerName.toLowerCase().includes(search));
+  }
+
+  // Status filter
+  const statusEl = document.getElementById('statusFilter');
+  const statusFilter = statusEl ? statusEl.value : 'all';
+  if (statusFilter !== 'all') {
+    accounts = accounts.filter(a => a.status === statusFilter);
+  }
+
+  return accounts;
+}
+
+function applyFilters() {
+  if (!currentData) return;
+  const filtered = getFilteredAccounts();
+  renderTable(filtered);
+}
+
 // ── Formatting helpers ──
 
 function fmtCurrency(n) {
@@ -157,7 +186,7 @@ function handleSort(col) {
     sortCol = col;
     sortAsc = true;
   }
-  if (currentData) renderTable(currentData.accounts);
+  if (currentData) renderTable(getFilteredAccounts());
 }
 
 function renderTable(accounts) {
