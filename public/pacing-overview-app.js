@@ -6,14 +6,12 @@ function esc(s) {
   return d.innerHTML;
 }
 
-const STATUS_ORDER = { critical_over: 0, critical_under: 1, over: 2, under: 3, on_pace: 4 };
+const STATUS_ORDER = { over: 0, under: 1, on_pace: 2 };
 const STATUS_LABELS = {
-  on_pace: 'On Pace', over: 'Over', under: 'Under',
-  critical_over: 'Critical Over', critical_under: 'Critical Under',
+  on_pace: 'On Pace', over: 'Overpacing', under: 'Underpacing',
 };
 const STATUS_COLORS = {
   on_pace: 'green', over: 'yellow', under: 'yellow',
-  critical_over: 'red', critical_under: 'red',
 };
 const PROJ_LABELS = {
   on_track: 'On Track', over: 'Over', under: 'Under',
@@ -120,14 +118,12 @@ function renderSummary(data) {
   const accts = data.accounts;
   const totalSpend = accts.reduce((s, a) => s + a.mtdSpend, 0);
   const totalBudget = accts.reduce((s, a) => s + a.monthlyBudget, 0);
-  const critical = accts.filter(a => a.status === 'critical_over' || a.status === 'critical_under').length;
   const offPace = accts.filter(a => a.status !== 'on_pace').length;
 
   bar.innerHTML = `
     <div class="summary-stat"><strong>${data.loadedAccounts}</strong> accounts loaded</div>
     <div class="summary-stat"><strong>${fmtCurrency(totalSpend)}</strong> total MTD spend</div>
     <div class="summary-stat"><strong>${fmtCurrency(totalBudget)}</strong> total budget</div>
-    <div class="summary-stat"><strong class="${critical > 0 ? 'pace-red' : 'pace-green'}">${critical}</strong> critical</div>
     <div class="summary-stat"><strong class="${offPace > 0 ? 'pace-yellow' : 'pace-green'}">${offPace}</strong> off-pace</div>
   `;
   bar.style.display = 'flex';

@@ -5,7 +5,7 @@
  * Uses: pacing data from /api/pacing/all, projection data from calculateProjection
  *
  * Detection is stricter than display thresholds. An account needs intervention when:
- * 1. Pacing status is critical (>15% off pace) OR
+ * 1. Pacing variance is severe (>8% off pace) OR
  * 2. Projected end-of-month miss exceeds 10% of budget OR
  * 3. 7-day trend shows accelerating divergence from target
  *

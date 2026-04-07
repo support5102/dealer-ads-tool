@@ -202,24 +202,24 @@ describe('getPacingStatus', () => {
     expect(getPacingStatus(-14.9)).toBe('under');
   });
 
-  test('+15% is critical_over', () => {
-    expect(getPacingStatus(15)).toBe('critical_over');
+  test('+15% is over (no critical distinction)', () => {
+    expect(getPacingStatus(15)).toBe('over');
   });
 
-  test('+50% is critical_over', () => {
-    expect(getPacingStatus(50)).toBe('critical_over');
+  test('+50% is over (no critical distinction)', () => {
+    expect(getPacingStatus(50)).toBe('over');
   });
 
-  test('-15% is critical_under', () => {
-    expect(getPacingStatus(-15)).toBe('critical_under');
+  test('-15% is under (no critical distinction)', () => {
+    expect(getPacingStatus(-15)).toBe('under');
   });
 
-  test('-15.1% is critical_under', () => {
-    expect(getPacingStatus(-15.1)).toBe('critical_under');
+  test('-15.1% is under (no critical distinction)', () => {
+    expect(getPacingStatus(-15.1)).toBe('under');
   });
 
-  test('-50% is critical_under', () => {
-    expect(getPacingStatus(-50)).toBe('critical_under');
+  test('-50% is under (no critical distinction)', () => {
+    expect(getPacingStatus(-50)).toBe('under');
   });
 
   test('floating-point near-boundary 5.0000000000001 is over (not on_pace)', () => {
@@ -367,7 +367,7 @@ describe('calculatePacing', () => {
       expect(result.paceStatus).toBe('under');
     });
 
-    test('returns critical_under when spend is 20% below expected', () => {
+    test('returns under when spend is 20% below expected (no critical)', () => {
       const result = calculatePacing({
         monthlyBudget: 10000,
         spendToDate: 4000,
@@ -378,7 +378,7 @@ describe('calculatePacing', () => {
       });
 
       expect(result.pacePercent).toBe(-20);
-      expect(result.paceStatus).toBe('critical_under');
+      expect(result.paceStatus).toBe('under');
     });
   });
 
@@ -397,7 +397,7 @@ describe('calculatePacing', () => {
       expect(result.paceStatus).toBe('over');
     });
 
-    test('returns critical_over when spend is 25% above expected', () => {
+    test('returns over when spend is 25% above expected (no critical)', () => {
       const result = calculatePacing({
         monthlyBudget: 10000,
         spendToDate: 6250,
@@ -408,7 +408,7 @@ describe('calculatePacing', () => {
       });
 
       expect(result.pacePercent).toBe(25);
-      expect(result.paceStatus).toBe('critical_over');
+      expect(result.paceStatus).toBe('over');
     });
   });
 
@@ -495,7 +495,7 @@ describe('calculatePacing', () => {
       expect(result.daysElapsed).toBe(1);
       expect(result.daysRemaining).toBe(29);
       expect(result.pacePercent).toBe(-100);
-      expect(result.paceStatus).toBe('critical_under');
+      expect(result.paceStatus).toBe('under');
       expect(result.dailyAvgSpend).toBe(0);
       expect(result.projectedSpend).toBe(0);
     });
@@ -542,7 +542,7 @@ describe('calculatePacing', () => {
 
       expect(result.remainingBudget).toBe(0);
       expect(result.requiredDailyRate).toBe(0);
-      expect(result.paceStatus).toBe('critical_over');
+      expect(result.paceStatus).toBe('over');
     });
 
     test('day 0 returns on_pace with zero expected spend', () => {
@@ -575,7 +575,7 @@ describe('calculatePacing', () => {
 
       // remainingBudget = max(10000 - (-500), 0) = 10500
       expect(result.remainingBudget).toBe(10500);
-      expect(result.paceStatus).toBe('critical_under');
+      expect(result.paceStatus).toBe('under');
     });
 
     test('large budget does not lose precision', () => {

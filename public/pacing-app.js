@@ -605,12 +605,10 @@ function renderInventory(inv) {
 // ─────────────────────────────────────────────────────────────
 function formatStatus(status) {
   switch (status) {
-    case 'on_pace':        return 'On Pace';
-    case 'over':           return 'Over-Pacing';
-    case 'under':          return 'Under-Pacing';
-    case 'critical_over':  return 'Critical Over';
-    case 'critical_under': return 'Critical Under';
-    default:               return esc(status) || 'Unknown';
+    case 'on_pace': return 'On Pace';
+    case 'over':    return 'Overpacing';
+    case 'under':   return 'Underpacing';
+    default:        return esc(status) || 'Unknown';
   }
 }
 

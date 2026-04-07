@@ -33,14 +33,6 @@ describe('statusToColor', () => {
     expect(statusToColor('under')).toBe('yellow');
   });
 
-  test('critical_over → red', () => {
-    expect(statusToColor('critical_over')).toBe('red');
-  });
-
-  test('critical_under → red', () => {
-    expect(statusToColor('critical_under')).toBe('red');
-  });
-
   test('unknown status → gray', () => {
     expect(statusToColor('unknown')).toBe('gray');
   });

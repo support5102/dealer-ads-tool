@@ -29,12 +29,10 @@ const MAX_CUT_RATIO = 0.70;          // Allow up to 70% cut per cycle to hit tar
  */
 function statusToColor(status) {
   switch (status) {
-    case 'on_pace':        return 'green';
+    case 'on_pace': return 'green';
     case 'over':
-    case 'under':          return 'yellow';
-    case 'critical_over':
-    case 'critical_under': return 'red';
-    default:               return 'gray';
+    case 'under':   return 'yellow';
+    default:        return 'gray';
   }
 }
 

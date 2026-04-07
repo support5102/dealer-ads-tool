@@ -15,12 +15,12 @@ const DEFAULT_DAY_WEIGHTS = [0.75, 0.95, 1.00, 1.00, 1.05, 1.10, 1.15];
 
 // Consumer-facing reference for threshold values.
 // getPacingStatus() uses these values directly — keep in sync if changing.
+// Only 3 statuses: on_pace, over, under. No "critical" — severity is handled
+// by urgency levels in pacing-detector.js (separate concern).
 const PACING_THRESHOLDS = {
-  ON_PACE:        { min: -5,   max: 5   },
-  OVER:           { min: 5,    max: 15  },
-  UNDER:          { min: -15,  max: -5  },
-  CRITICAL_OVER:  { min: 15               },
-  CRITICAL_UNDER: {            max: -15  },
+  ON_PACE: { min: -5, max: 5 },
+  OVER:    { min: 5           },
+  UNDER:   {          max: -5 },
 };
 
 /**
@@ -132,12 +132,10 @@ function applyInventoryModifier(monthlyBudget, currentInventory, baselineInvento
  * Determines pacing status from variance percentage.
  *
  * @param {number} variancePercent - Pacing variance (positive = over, negative = under)
- * @returns {string} One of: 'on_pace', 'over', 'under', 'critical_over', 'critical_under'
+ * @returns {string} One of: 'on_pace', 'over', 'under'
  */
 function getPacingStatus(variancePercent) {
-  if (variancePercent >= PACING_THRESHOLDS.CRITICAL_OVER.min) return 'critical_over';
   if (variancePercent > PACING_THRESHOLDS.ON_PACE.max) return 'over';
-  if (variancePercent <= PACING_THRESHOLDS.CRITICAL_UNDER.max) return 'critical_under';
   if (variancePercent < PACING_THRESHOLDS.ON_PACE.min) return 'under';
   return 'on_pace';
 }
