@@ -399,7 +399,11 @@ function renderDiagnoses(diagnoses) {
     const totalFixes = fixable.reduce((sum, d) => sum + d.fixes.length, 0);
     html += `<div class="diagnosis-section">`;
     html += `<h3 class="diagnosis-title">Auto-Fixable (${totalFixes} fixes available)</h3>`;
-    html += `<button class="btn-primary" onclick="applyAllFixes()" id="applyAllBtn">Apply All Fixes</button>`;
+    html += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">`;
+    html += `<button class="btn-primary" onclick="toggleSelectAll()" id="selectAllBtn">Select All</button>`;
+    html += `<button class="btn-primary" onclick="applySelectedFixes()" id="applySelectedBtn" disabled style="background:var(--green);">Apply Selected (0)</button>`;
+    html += `<button class="btn-primary" onclick="applyAllFixes()" id="applyAllBtn" style="background:var(--blue);">Apply All Fixes</button>`;
+    html += `</div>`;
 
     for (const d of fixable) {
       html += `<div class="diagnosis-card fixable">`;
@@ -410,8 +414,9 @@ function renderDiagnoses(diagnoses) {
       html += `<ul class="fix-list">`;
       for (let i = 0; i < d.fixes.length; i++) {
         const fix = d.fixes[i];
-        html += `<li class="fix-item">
-          <span class="fix-desc">${escapeHtml(fix.description)}</span>
+        html += `<li class="fix-item" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" class="fix-checkbox" data-check-id="${escapeHtml(d.checkId)}" data-fix-index="${i}" onchange="updateSelectedCount()" style="min-width:16px;">
+          <span class="fix-desc" style="flex:1;">${escapeHtml(fix.description)}</span>
           <button class="btn-fix" onclick="applySingleFix('${escapeHtml(d.checkId)}', ${i})">Fix</button>
         </li>`;
       }
@@ -455,6 +460,42 @@ async function applyFixesForCheck(checkId) {
   if (!d || !d.fixes || d.fixes.length === 0) return;
   if (!confirm(`Apply all ${d.fixes.length} fixes for "${d.title}"? This will modify campaigns in Google Ads.`)) return;
   await executeFixes(d.fixes);
+}
+
+function updateSelectedCount() {
+  const checked = document.querySelectorAll('.fix-checkbox:checked');
+  const btn = document.getElementById('applySelectedBtn');
+  if (btn) {
+    btn.textContent = `Apply Selected (${checked.length})`;
+    btn.disabled = checked.length === 0;
+  }
+}
+
+function toggleSelectAll() {
+  const boxes = document.querySelectorAll('.fix-checkbox');
+  const allChecked = Array.from(boxes).every(cb => cb.checked);
+  boxes.forEach(cb => { cb.checked = !allChecked; });
+  const btn = document.getElementById('selectAllBtn');
+  if (btn) btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+  updateSelectedCount();
+}
+
+async function applySelectedFixes() {
+  if (!currentDiagnoses) return;
+  const checked = document.querySelectorAll('.fix-checkbox:checked');
+  if (checked.length === 0) return alert('No fixes selected.');
+
+  const selectedFixes = [];
+  checked.forEach(cb => {
+    const checkId = cb.dataset.checkId;
+    const fixIndex = parseInt(cb.dataset.fixIndex);
+    const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+    if (d && d.fixes[fixIndex]) selectedFixes.push(d.fixes[fixIndex]);
+  });
+
+  if (selectedFixes.length === 0) return;
+  if (!confirm(`Apply ${selectedFixes.length} selected fixes? This will modify campaigns in Google Ads.`)) return;
+  await executeFixes(selectedFixes);
 }
 
 async function applyAllFixes() {

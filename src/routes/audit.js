@@ -287,40 +287,68 @@ function createAuditRouter(config) {
           const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
           const recommendations = await googleAds.getRecommendations(restCtx);
 
-          // Dismiss via REST API directly — the google-ads-api library
-          // doesn't support client.recommendations.dismiss()
-          // Batch all dismiss operations into a single API call
-          const axios = require('axios');
-          const operations = recommendations.map(rec => ({ resourceName: rec.resourceName }));
-          try {
-            await axios.post(
-              `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
-              { operations, partialFailure: true },
-              {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'developer-token': config.googleAds.developerToken,
-                  ...(mccId ? { 'login-customer-id': String(mccId).replace(/-/g, '') } : {}),
-                },
-                timeout: 30000,
+          if (recommendations.length === 0) {
+            results.details.push({ description: 'No recommendations found to dismiss', success: true });
+          } else {
+            // Dismiss in batches of 100 (Google Ads API limit per call)
+            const axios = require('axios');
+            const BATCH_SIZE = 100;
+            let totalDismissed = 0;
+            let totalFailed = 0;
+            const failedTypes = new Set();
+
+            for (let i = 0; i < recommendations.length; i += BATCH_SIZE) {
+              const batch = recommendations.slice(i, i + BATCH_SIZE);
+              const operations = batch.map(rec => ({ resourceName: rec.resourceName }));
+              try {
+                const resp = await axios.post(
+                  `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
+                  { operations, partialFailure: true },
+                  {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'developer-token': config.googleAds.developerToken,
+                      ...(mccId ? { 'login-customer-id': String(mccId).replace(/-/g, '') } : {}),
+                    },
+                    timeout: 30000,
+                  }
+                );
+
+                // Check for partial failures in the response
+                const respResults = resp.data?.results || [];
+                const partialError = resp.data?.partialFailureError;
+                if (partialError) {
+                  // Count individual successes/failures from the response
+                  for (let j = 0; j < batch.length; j++) {
+                    if (respResults[j] && respResults[j].resourceName) {
+                      totalDismissed++;
+                    } else {
+                      totalFailed++;
+                      failedTypes.add(batch[j].type || 'unknown');
+                    }
+                  }
+                } else {
+                  totalDismissed += batch.length;
+                }
+              } catch (err) {
+                const errData = err.response?.data;
+                console.error('Dismiss batch error:', JSON.stringify(errData, null, 2));
+                totalFailed += batch.length;
               }
-            );
-            results.applied += recommendations.length;
-            results.details.push({ description: `Dismissed ${recommendations.length} recommendations`, success: true });
-          } catch (err) {
-            // Log full error for debugging
-            const errData = err.response?.data;
-            console.error('Dismiss recommendations error:', JSON.stringify(errData, null, 2));
-            const msg = errData?.error?.message || err.message;
-            // Try to extract more specific error details
-            const details = (errData?.error?.details || [])
-              .map(d => d.errors?.map(e => e.message)).flat().filter(Boolean);
-            results.failed += recommendations.length;
-            results.details.push({
-              description: `Failed to dismiss ${recommendations.length} recommendations`,
-              error: details.length > 0 ? details[0] : msg,
-              success: false,
-            });
+            }
+
+            results.applied += totalDismissed;
+            results.failed += totalFailed;
+            if (totalDismissed > 0) {
+              results.details.push({ description: `Dismissed ${totalDismissed} of ${recommendations.length} recommendations`, success: true });
+            }
+            if (totalFailed > 0) {
+              const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
+              results.details.push({
+                description: `${totalFailed} recommendation(s) could not be dismissed${typeNote}`,
+                success: false,
+              });
+            }
           }
         } catch (err) {
           results.failed++;
