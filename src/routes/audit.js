@@ -328,14 +328,13 @@ function createAuditRouter(config) {
           results.failed += totalFailed;
           if (totalDismissed > 0) {
             results.details.push({ description: `Dismissed ${totalDismissed} recommendations`, success: true });
-            }
-            if (totalFailed > 0) {
-              const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
-              results.details.push({
-                description: `${totalFailed} recommendation(s) could not be dismissed${typeNote}`,
-                success: false,
-              });
-            }
+          }
+          if (totalFailed > 0) {
+            const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
+            results.details.push({
+              description: `${totalFailed} recommendation(s) could not be dismissed${typeNote}`,
+              success: false,
+            });
           }
         } catch (err) {
           results.failed++;
