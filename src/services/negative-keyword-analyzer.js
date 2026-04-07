@@ -294,7 +294,11 @@ function analyzeIrrelevantSearchTerms(searchTerms) {
     let flagReason = null;
 
     // Check against irrelevant patterns
+    const campLower = (st.campaignName || '').toLowerCase();
+    const isServiceCampaign = /quick lane|service|parts|fixed ops/i.test(campLower);
     for (const { pattern, reason } of IRRELEVANT_PATTERNS) {
+      // Skip service-intent flags on service campaigns (Quick Lane, Service, etc.)
+      if (isServiceCampaign && (reason === 'service intent' || reason === 'parts/manual intent')) continue;
       if (pattern.test(st.searchTerm)) {
         flagReason = reason;
         break;
