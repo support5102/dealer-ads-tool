@@ -167,7 +167,7 @@ function renderResults(result) {
             <span class="finding-title">${escapeHtml(f.title)}</span>
           </div>
           <div class="finding-message">${escapeHtml(f.message)}</div>
-          ${renderDetails(f.details)}
+          ${renderDetails(f.details, f.checkId)}
         </div>
       `;
     }
@@ -186,27 +186,84 @@ function renderResults(result) {
   findingsSection.innerHTML = html;
 }
 
-function renderDetails(details) {
+function renderDetails(details, checkId) {
   if (!details || Object.keys(details).length === 0) return '';
 
-  // Render sample keywords/campaigns/ads as a compact list
+  // Type-specific rendering for ad copy findings
+  switch (checkId) {
+    case 'ad_copy_short_headlines':
+    case 'ad_copy_allcaps_headlines': {
+      const items = details.headlines || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Headline</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td><code style="color:var(--orange)">${escapeHtml(item.headline)}</code></td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'ad_copy_stale_years': {
+      const items = details.staleAds || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Stale Years</th><th>Sample Text</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td>${escapeHtml(item.staleYears.join(', '))}</td><td><code style="color:var(--orange)">${escapeHtml(item.text)}</code></td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'ad_copy_pinning_overuse': {
+      const items = details.ads || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details">';
+      for (const item of items) {
+        h += `<div style="margin-bottom:8px;font-size:12px;"><strong>${escapeHtml(item.campaignName)}</strong> &rarr; ${escapeHtml(item.adGroupName)} (${item.pinnedCount} pinned)<ul style="margin:4px 0 0 16px;">`;
+        for (const ph of item.pinnedHeadlines) {
+          h += `<li><code style="color:var(--orange)">${escapeHtml(ph.text)}</code> &mdash; ${escapeHtml(ph.position)}</li>`;
+        }
+        h += '</ul></div>';
+      }
+      return h + '</div>';
+    }
+    case 'ad_copy_wrong_dealer_name': {
+      const items = details.ads || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Expected Dealer Name</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td>${escapeHtml(item.dealerPortion)}</td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'broad_match_keywords': {
+      const byCampaign = details.byCampaign || {};
+      const entries = Object.entries(byCampaign);
+      if (entries.length === 0) return '';
+      let h = '<div class="finding-details">';
+      for (const [campaign, keywords] of entries) {
+        h += `<div style="margin-bottom:8px;font-size:12px;"><strong>${escapeHtml(campaign)}</strong><ul style="margin:4px 0 0 16px;">`;
+        for (const kw of keywords.slice(0, 10)) h += `<li><code>${escapeHtml(kw)}</code></li>`;
+        if (keywords.length > 10) h += `<li>...and ${keywords.length - 10} more</li>`;
+        h += '</ul></div>';
+      }
+      return h + '</div>';
+    }
+    default: break;
+  }
+
+  // Generic fallback
   const items = details.sample || details.keywords || details.ads || details.campaigns || details.violations || [];
   if (items.length === 0) return '';
 
   let html = '<div class="finding-details"><table class="details-table">';
-
-  // Auto-detect columns from first item
   const keys = Object.keys(items[0]).filter(k => typeof items[0][k] !== 'object');
   html += '<tr>' + keys.map(k => `<th>${escapeHtml(k)}</th>`).join('') + '</tr>';
-
   for (const item of items.slice(0, 5)) {
     html += '<tr>' + keys.map(k => `<td>${escapeHtml(String(item[k] ?? ''))}</td>`).join('') + '</tr>';
   }
-
   html += '</table>';
   if (items.length > 5) html += `<div class="details-more">...and ${items.length - 5} more</div>`;
   html += '</div>';
-
   return html;
 }
 
@@ -346,7 +403,10 @@ function renderDiagnoses(diagnoses) {
 
     for (const d of fixable) {
       html += `<div class="diagnosis-card fixable">`;
-      html += `<div class="diagnosis-header">${escapeHtml(d.title)}</div>`;
+      html += `<div class="diagnosis-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>${escapeHtml(d.title)}</span>
+        ${d.fixes.length > 1 ? `<button class="btn-fix" style="background:var(--blue);color:#fff;border:none;padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;" data-fixall-check="${escapeHtml(d.checkId)}">Fix All (${d.fixes.length})</button>` : ''}
+      </div>`;
       html += `<ul class="fix-list">`;
       for (let i = 0; i < d.fixes.length; i++) {
         const fix = d.fixes[i];
@@ -382,6 +442,19 @@ function renderDiagnoses(diagnoses) {
   }
 
   resultsDiv.innerHTML = html;
+
+  // Attach Fix All per-category handlers
+  resultsDiv.querySelectorAll('[data-fixall-check]').forEach(btn => {
+    btn.addEventListener('click', () => applyFixesForCheck(btn.dataset.fixallCheck));
+  });
+}
+
+async function applyFixesForCheck(checkId) {
+  if (!currentDiagnoses) return;
+  const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+  if (!d || !d.fixes || d.fixes.length === 0) return;
+  if (!confirm(`Apply all ${d.fixes.length} fixes for "${d.title}"? This will modify campaigns in Google Ads.`)) return;
+  await executeFixes(d.fixes);
 }
 
 async function applyAllFixes() {

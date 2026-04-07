@@ -232,12 +232,12 @@ function createAuditRouter(config) {
 
       // Diagnose each finding (catch per-finding errors so one bad finding doesn't break all)
       const diagnostics = { keywords, adCopy, campaignDiagnostics };
-      const results = auditResult.findings.map(finding => {
+      const results = await Promise.all(auditResult.findings.map(async (finding) => {
         try {
           return {
             checkId: finding.checkId,
             title: finding.title,
-            ...diagnose(finding, diagnostics),
+            ...(await diagnose(finding, diagnostics, config.claude)),
           };
         } catch (err) {
           console.error(`Diagnose error for ${finding.checkId}:`, err.message);
@@ -249,7 +249,7 @@ function createAuditRouter(config) {
             manualNotes: [`Diagnosis failed: ${err.message}`],
           };
         }
-      });
+      }));
 
       res.json({ diagnoses: results });
     } catch (err) {
