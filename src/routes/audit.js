@@ -302,10 +302,12 @@ function createAuditRouter(config) {
                 await client.recommendations.dismissRecommendation({
                   customer_id: cleanId,
                   operations: [{ resource_name: rec.resourceName }],
+                  partial_failure: true,
                 });
                 totalDismissed++;
               } catch (err) {
-                console.warn(`[Dismiss] Failed ${rec.type}: ${err.message}`);
+                const errMsg = err?.message || err?.details || JSON.stringify(err) || 'unknown error';
+                console.warn(`[Dismiss] Failed ${rec.type} (${rec.resourceName}): ${errMsg}`);
                 totalFailed++;
                 failedTypes.add(rec.type || 'unknown');
               }
