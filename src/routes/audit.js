@@ -303,20 +303,35 @@ function createAuditRouter(config) {
 
             if (recommendations.length === 0) break;
 
-            // Dismiss one at a time for reliability (batch can silently skip some)
+            // Dismiss one at a time for reliability
+            // Try v20 first, fall back to v19 if it fails
+            const API_VERSIONS = ['v20', 'v19'];
+            let workingVersion = API_VERSIONS[0];
+
             for (const rec of recommendations) {
-              try {
-                await axios.post(
-                  `https://googleads.googleapis.com/v20/customers/${cleanId}/recommendations:dismiss`,
-                  { operations: [{ resourceName: rec.resourceName }] },
-                  { headers: dismissHeaders, timeout: 15000 }
-                );
-                totalDismissed++;
-              } catch (err) {
-                const msg = err.response?.data?.error?.message || err.message;
-                console.warn(`[Dismiss] Failed to dismiss ${rec.type} (${rec.resourceName}): ${msg}`);
-                totalFailed++;
-                failedTypes.add(rec.type || 'unknown');
+              let dismissed = false;
+              for (const ver of (dismissed ? [workingVersion] : API_VERSIONS)) {
+                try {
+                  await axios.post(
+                    `https://googleads.googleapis.com/${ver}/customers/${cleanId}/recommendations:dismiss`,
+                    { operations: [{ resourceName: rec.resourceName }] },
+                    { headers: dismissHeaders, timeout: 15000 }
+                  );
+                  totalDismissed++;
+                  workingVersion = ver;
+                  dismissed = true;
+                  break;
+                } catch (err) {
+                  const status = err.response?.status;
+                  if (ver === API_VERSIONS[API_VERSIONS.length - 1]) {
+                    // Last version attempt — log and count as failed
+                    const msg = err.response?.data?.error?.message || err.message;
+                    console.warn(`[Dismiss] Failed ${rec.type}: HTTP ${status} — ${msg}`);
+                    totalFailed++;
+                    failedTypes.add(rec.type || 'unknown');
+                  }
+                  // else try next version
+                }
               }
             }
 
