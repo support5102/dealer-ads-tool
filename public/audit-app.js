@@ -235,6 +235,15 @@ function renderDetails(details, checkId) {
       }
       return h + '</table></div>';
     }
+    case 'MISSING_COMPETING_NEGS': {
+      const camp = details.campaignName || '';
+      const makes = details.missingMakes || [];
+      if (!camp) return '';
+      let h = '<div class="finding-details" style="font-size:12px;">';
+      h += `<strong>${escapeHtml(camp)}</strong> (${escapeHtml(details.dealerMake || '')}) — missing ${makes.length} negatives:<ul style="margin:4px 0 0 16px;">`;
+      for (const m of makes) h += `<li><code>${escapeHtml(m)}</code></li>`;
+      return h + '</ul></div>';
+    }
     case 'broad_match_keywords': {
       const byCampaign = details.byCampaign || {};
       const entries = Object.entries(byCampaign);

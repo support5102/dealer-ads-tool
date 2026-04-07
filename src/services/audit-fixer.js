@@ -61,7 +61,7 @@ async function diagnose(finding, diagnostics = {}, claudeConfig = null) {
     case 'KW_CANNIBALIZATION':
       return { fixable: false, fixes: [], manualNotes: ['The same keyword appears in multiple ad groups within one campaign. Consolidate to one ad group to avoid internal competition.'] };
     case 'MISSING_COMPETING_NEGS':
-      return { fixable: false, fixes: [], manualNotes: ['Campaign is missing competing-make negative keywords for traffic sculpting. Add negatives for competitor brands.'] };
+      return diagnoseCompetingNegs(finding);
     case 'ad_copy_allcaps_headlines':
       return diagnoseAllCapsHeadlines(finding, diagnostics.adCopy || []);
     case 'ad_copy_stale_years':
@@ -642,6 +642,31 @@ Rewrite each to be 20-30 characters. Respond in JSON only:
 
 // generateImprovedHeadlines is now inlined in diagnoseShortHeadlines
 // to avoid per-ad API calls — one batch call for all short headlines
+
+/**
+ * Missing competing-make negatives — add them as EXACT negatives.
+ */
+function diagnoseCompetingNegs(finding) {
+  const campaignName = finding.details?.campaignName;
+  const missingMakes = finding.details?.missingMakes || [];
+  if (!campaignName || missingMakes.length === 0) {
+    return { fixable: false, fixes: [], manualNotes: ['No competing makes identified.'] };
+  }
+
+  const fixes = missingMakes.map(make => ({
+    action: 'add_negative',
+    description: `Add negative "${make}" to ${campaignName}`,
+    changeType: 'add_negative_keyword',
+    campaignName,
+    details: { keyword: make, matchType: 'EXACT' },
+  }));
+
+  return {
+    fixable: true,
+    fixes,
+    manualNotes: [`Adding ${fixes.length} competing-make negatives as EXACT match to "${campaignName}".`],
+  };
+}
 
 module.exports = {
   diagnose,

@@ -238,6 +238,9 @@ function checkHeadlineQuality(ads) {
     for (const h of ad.headlines) {
       // Must have at least one letter and all letters are uppercase
       if (/[A-Z]/.test(h.text) && h.text === h.text.toUpperCase() && /[A-Za-z]/.test(h.text)) {
+        // Skip model numbers/designators that are mostly digits (e.g., "2026 F-150", "F-150", "4WD")
+        const letters = (h.text.match(/[A-Za-z]/g) || []).length;
+        if (letters <= 3) continue; // 3 or fewer letters = likely a model number, not spammy all-caps
         allCapsHeadlines.push({
           adId: ad.adId,
           campaignName: ad.campaignName,
