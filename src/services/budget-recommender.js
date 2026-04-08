@@ -256,7 +256,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     return { recommendations: [], budgetSummary: null };
   }
 
-  const requiredDailyRate = pacing.remainingBudget / pacing.daysRemaining;
+  // Use the weighted required daily rate from pacing calculator (accounts for day-of-week traffic)
+  const requiredDailyRate = pacing.requiredDailyRate;
   const daysElapsed = pacing.daysElapsed || 1;
 
   // Fixed VLA/Keyword budget splits (e.g., Alan Jay stores)

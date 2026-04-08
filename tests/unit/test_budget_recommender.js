@@ -143,7 +143,8 @@ describe('isVlaCampaign', () => {
 describe('distributeAccountBudget', () => {
   // Helper: pacing object with remaining budget and days
   function makePacing({ remainingBudget, daysRemaining, daysElapsed }) {
-    return { remainingBudget, daysRemaining, daysElapsed: daysElapsed || 0 };
+    const rate = daysRemaining > 0 ? remainingBudget / daysRemaining : 0;
+    return { remainingBudget, daysRemaining, daysElapsed: daysElapsed || 0, requiredDailyRate: rate };
   }
 
   test('distributes required daily rate: VLA first (IS-driven), shared gets remainder', () => {
