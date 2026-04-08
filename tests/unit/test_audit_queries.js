@@ -245,7 +245,7 @@ describe('getAdCopy', () => {
       },
       status: 'ENABLED',
     },
-    adGroup: { name: 'SD: Civic' },
+    adGroup: { name: 'SD: Civic', id: '300' },
     campaign: { name: 'Honda Civic - Search' },
   }];
 
@@ -265,6 +265,7 @@ describe('getAdCopy', () => {
       approvalStatus: 'APPROVED',
       policyTopics: [],
       status: 'ENABLED',
+      adGroupId: '300',
       adGroupName: 'SD: Civic',
       campaignName: 'Honda Civic - Search',
     });

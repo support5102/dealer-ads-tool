@@ -13,6 +13,7 @@
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 </style>
 <script src="/csv-utils.js"></script>
+<script src="/theme.js"></script>
 </head>
 <body class="bg-gray-100">
 <div style="background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:system-ui,sans-serif;">
@@ -27,6 +28,7 @@
     <a href="/audit.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Auditor</a>
     <a href="/builder.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Builder</a>
     <a href="/change-history.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">History</a>
+    <button id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid #475569;border-radius:6px;padding:4px 10px;color:#94a3b8;font-size:12px;">🌙 Dark</button>
   </div>
 </div>
 <div id="root"></div>

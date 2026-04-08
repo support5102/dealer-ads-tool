@@ -160,6 +160,7 @@ function renderResults(result) {
     html += `<h3 class="findings-group-title severity-${severity}">${icon} ${label} (${findings.length})</h3>`;
 
     for (const f of findings) {
+      const details = renderDetails(f.details, f.checkId);
       html += `
         <div class="finding-card severity-${f.severity}">
           <div class="finding-header">
@@ -167,7 +168,7 @@ function renderResults(result) {
             <span class="finding-title">${escapeHtml(f.title)}</span>
           </div>
           <div class="finding-message">${escapeHtml(f.message)}</div>
-          ${renderDetails(f.details, f.checkId)}
+          ${details ? `<details class="finding-collapse"><summary style="cursor:pointer;color:var(--blue);font-size:12px;margin-top:8px;">Show details</summary>${details}</details>` : ''}
         </div>
       `;
     }
@@ -387,8 +388,8 @@ async function diagnoseFindings() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Diagnosis failed');
 
-    currentDiagnoses = data.diagnoses;
     renderDiagnoses(data.diagnoses);
+    // currentDiagnoses is set inside renderDiagnoses after merging
   } catch (err) {
     resultsDiv.innerHTML = `<div class="error-msg">Diagnosis error: ${escapeHtml(err.message)}</div>`;
   } finally {
@@ -399,8 +400,23 @@ async function diagnoseFindings() {
 
 function renderDiagnoses(diagnoses) {
   const resultsDiv = document.getElementById('diagnosisResults');
-  const fixable = diagnoses.filter(d => d.fixable && d.fixes.length > 0);
-  const manual = diagnoses.filter(d => d.manualNotes && d.manualNotes.length > 0);
+
+  // Merge diagnoses with the same checkId (e.g., multiple "Missing competing-make negatives")
+  const mergedMap = new Map();
+  for (const d of diagnoses) {
+    if (mergedMap.has(d.checkId)) {
+      const existing = mergedMap.get(d.checkId);
+      existing.fixes.push(...(d.fixes || []));
+      existing.manualNotes.push(...(d.manualNotes || []));
+    } else {
+      mergedMap.set(d.checkId, { ...d, fixes: [...(d.fixes || [])], manualNotes: [...(d.manualNotes || [])] });
+    }
+  }
+  const merged = [...mergedMap.values()];
+  currentDiagnoses = merged; // store merged for fix handlers
+
+  const fixable = merged.filter(d => d.fixable && d.fixes.length > 0);
+  const manual = merged.filter(d => d.manualNotes && d.manualNotes.length > 0);
 
   let html = '';
 
@@ -420,13 +436,20 @@ function renderDiagnoses(diagnoses) {
         <span>${escapeHtml(d.title)}</span>
         ${d.fixes.length > 1 ? `<button class="btn-fix" style="background:var(--blue);color:#fff;border:none;padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;" data-fixall-check="${escapeHtml(d.checkId)}">Fix All (${d.fixes.length})</button>` : ''}
       </div>`;
-      html += `<ul class="fix-list">`;
+      const PAGE_SIZE = 10;
+      const listId = `fixlist-${escapeHtml(d.checkId)}`;
+      html += `<ul class="fix-list" id="${listId}">`;
       for (let i = 0; i < d.fixes.length; i++) {
         const fix = d.fixes[i];
-        html += `<li class="fix-item" style="display:flex;align-items:center;gap:8px;">
+        html += `<li class="fix-item" data-fix-row style="display:${i < PAGE_SIZE ? 'flex' : 'none'};align-items:center;gap:8px;">
           <input type="checkbox" class="fix-checkbox" data-check-id="${escapeHtml(d.checkId)}" data-fix-index="${i}" onchange="updateSelectedCount()" style="min-width:16px;">
           <span class="fix-desc" style="flex:1;">${escapeHtml(fix.description)}</span>
           <button class="btn-fix" onclick="applySingleFix('${escapeHtml(d.checkId)}', ${i})">Fix</button>
+        </li>`;
+      }
+      if (d.fixes.length > PAGE_SIZE) {
+        html += `<li class="fix-item" id="more-${escapeHtml(d.checkId)}" style="text-align:center;padding:8px;">
+          <button onclick="showAllFixes('${escapeHtml(d.checkId)}')" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--blue);padding:4px 16px;cursor:pointer;font-size:12px;">Show all ${d.fixes.length} fixes (${d.fixes.length - PAGE_SIZE} more)</button>
         </li>`;
       }
       html += `</ul></div>`;
@@ -469,6 +492,14 @@ async function applyFixesForCheck(checkId) {
   if (!d || !d.fixes || d.fixes.length === 0) return;
   if (!confirm(`Apply all ${d.fixes.length} fixes for "${d.title}"? This will modify campaigns in Google Ads.`)) return;
   await executeFixes(d.fixes);
+}
+
+function showAllFixes(checkId) {
+  const list = document.getElementById(`fixlist-${checkId}`);
+  if (!list) return;
+  list.querySelectorAll('[data-fix-row]').forEach(li => { li.style.display = 'flex'; });
+  const moreBtn = document.getElementById(`more-${checkId}`);
+  if (moreBtn) moreBtn.remove();
 }
 
 function updateSelectedCount() {

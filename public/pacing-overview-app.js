@@ -232,7 +232,7 @@ function renderTable(accounts) {
       <td>${fmtCurrency(a.mtdSpend)}</td>
       <td>${fmtCurrency(a.monthlyBudget)}</td>
       <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
-      <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span></td>
+      <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span>${a.changeDate ? ' <span title="Budget changed ' + esc(a.changeDate) + '" style="font-size:10px;color:var(--text3);">⏳</span>' : ''}</td>
       <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
       <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
       <td class="${trendClass}">${trendArrow} ${fmtPercent(a.sevenDayTrendPercent)}</td>

@@ -52,10 +52,19 @@
 
 <div class="history-main">
   <div class="history-controls">
-    <select id="accountFilter" onchange="loadHistory()">
+    <select id="accountFilter" onchange="loadHistory()" style="min-width:200px;">
       <option value="">All Accounts</option>
     </select>
+    <select id="actionFilter" onchange="filterTable()" style="padding:0.5rem;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-family:'DM Mono',monospace;font-size:0.85rem;">
+      <option value="">All Actions</option>
+      <option value="budget_change">Budget Change</option>
+      <option value="pause_keyword">Pause Keyword</option>
+      <option value="add_negative_keyword">Add Negative</option>
+      <option value="update_rsa">Update RSA</option>
+      <option value="dismiss_recommendations_batch">Dismiss Recs</option>
+    </select>
     <button class="btn-refresh" onclick="loadHistory()">Refresh</button>
+    <button class="btn-refresh" onclick="exportCSV()" style="border-color:var(--blue);color:var(--blue);">Export CSV</button>
     <span class="history-count" id="historyCount"></span>
   </div>
 
@@ -76,6 +85,7 @@ async function loadHistory() {
     if (!res.ok) throw new Error('Failed to load');
     const data = await res.json();
 
+    historyData = data.entries;
     countEl.textContent = data.total + ' total entries';
 
     if (data.entries.length === 0) {
@@ -118,6 +128,39 @@ async function loadHistory() {
   } catch (err) {
     content.innerHTML = '<div class="history-empty">Error: ' + esc(err.message) + '</div>';
   }
+}
+
+let historyData = []; // store for filtering/export
+
+function filterTable() {
+  const action = document.getElementById('actionFilter').value;
+  const rows = document.querySelectorAll('.history-table tbody tr');
+  rows.forEach(row => {
+    const actionCell = row.cells[2]?.textContent?.trim().replace(/\s/g, '_') || '';
+    row.style.display = (!action || actionCell === action.replace(/_/g, ' ')) ? '' : 'none';
+  });
+}
+
+function exportCSV() {
+  if (historyData.length === 0) return alert('No data to export');
+  const headers = ['Time', 'Account', 'Action', 'Details', 'Source', 'Status'];
+  const rows = historyData.map(e => [
+    new Date(e.timestamp).toLocaleString(),
+    e.dealerName || e.accountId || '',
+    e.action,
+    typeof e.details === 'string' ? e.details : JSON.stringify(e.details || {}),
+    e.source,
+    e.success ? 'Success' : 'Failed: ' + (e.error || ''),
+  ]);
+  let csv = headers.join(',') + '\n';
+  for (const row of rows) {
+    csv += row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',') + '\n';
+  }
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'change-history-' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
 }
 
 function esc(text) {
