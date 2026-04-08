@@ -406,6 +406,8 @@ function createPacingRouter(config, deps = {}) {
         year: now.getFullYear(),
         month: now.getMonth() + 1,
         currentDay: now.getDate(),
+        dailyBreakdown,                       // post-change spend rebasing
+        changeDate: lastChange.changeDate,     // cooldown detection
         excludeCampaigns: excludeNames,
         geoTargets,
       });
