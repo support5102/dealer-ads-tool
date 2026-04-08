@@ -842,12 +842,8 @@ function generateRecommendation(params) {
     }
   }
 
-  // If dealer has fixed VLA/Keyword budget splits, override the monthly budget allocation
-  // This changes the required daily rate calculation — VLAs get vlaBudget/daysInMonth,
-  // keyword campaigns get keywordBudget/daysInMonth
-  if (budgetSplit) {
-    goal = { ...goal, vlaBudgetMonthly: budgetSplit.vlaBudget, keywordBudgetMonthly: budgetSplit.keywordBudget };
-  }
+  // Budget split info is passed through to distributeAccountBudget via the budgetSplit param
+  // (no need to modify goal — the split is used directly in the VLA floor calculation)
 
   // Distribute account budget: VLA (priority) + shared (remainder)
   const { recommendations, budgetSummary, pausableCampaigns } = distributeAccountBudget({
