@@ -297,16 +297,16 @@ describe('distributeAccountBudget', () => {
       pacing, dedicatedBudgets: [], sharedBudgets: shared, impressionShareData: [],
     });
 
-    // Both shared should increase proportionally
+    // Both shared should increase but capped at 2x set budget per cycle
     expect(recommendations).toHaveLength(2);
     expect(recommendations[0].recommendedDailyBudget).toBeGreaterThan(300);
     expect(recommendations[1].recommendedDailyBudget).toBeGreaterThan(100);
+    // Capped at 2x: Budget A max $600, Budget B max $200
+    expect(recommendations[0].recommendedDailyBudget).toBeLessThanOrEqual(600);
+    expect(recommendations[1].recommendedDailyBudget).toBeLessThanOrEqual(200);
 
     // Budget A gets more than Budget B (proportional to size)
     expect(recommendations[0].recommendedDailyBudget).toBeGreaterThan(recommendations[1].recommendedDailyBudget);
-    // Total should be enough to hit target (accounting for spend ratio)
-    const total = recommendations.reduce((s, r) => s + r.recommendedDailyBudget, 0);
-    expect(total).toBeGreaterThanOrEqual(1000);
   });
 
   test('under-pacing account: VLA with low IS gets boost, shared absorbs remainder', () => {
