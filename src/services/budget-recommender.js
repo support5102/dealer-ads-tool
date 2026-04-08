@@ -666,16 +666,10 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
           // Floor: never go below $3 or current avg spend
           adjusted = Math.max(adjusted, rec.currentDailyBudget || 0, rec.budgetSetting || 0, 3);
           // Ceiling: cap per-cycle increase to prevent absurd spikes
-          // Shared budgets: max 2x OR +$50/day (whichever is lower)
-          // VLAs: max 5x (IS-driven, no dollar cap — they need room to grow)
-          const base = rec.budgetSetting || rec.currentDailyBudget || 10;
-          if (rec.isVla) {
-            adjusted = Math.min(adjusted, Math.max(base * MAX_INCREASE_MULTIPLIER, 10));
-          } else {
-            const percentCap = Math.max(base * 2, 10);
-            const dollarCap = base + 50;
-            adjusted = Math.min(adjusted, percentCap, dollarCap);
-          }
+          // VLAs can go up to 5x (IS-driven), shared budgets max 2x
+          const capMultiplier = rec.isVla ? MAX_INCREASE_MULTIPLIER : 2;
+          const maxIncrease = Math.max((rec.budgetSetting || rec.currentDailyBudget || 10) * capMultiplier, 10);
+          adjusted = Math.min(adjusted, maxIncrease);
           rec.recommendedDailyBudget = adjusted;
           rec.change = Math.round((rec.recommendedDailyBudget - rec.budgetSetting) * 100) / 100;
         }
