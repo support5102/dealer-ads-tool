@@ -372,14 +372,26 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     `;
   });
 
-  // Pausable campaigns suggestion
+  // Pausable campaigns as actionable recommendations
   let pausableHtml = '';
   if (pausableCampaigns && pausableCampaigns.length > 0) {
     const totalSavings = pausableCampaigns.reduce((s, c) => s + c.dailySpend, 0);
+    const pauseRows = pausableCampaigns.map((c, i) => `
+      <div class="rec-row">
+        <input type="checkbox" class="rec-checkbox" data-type="pause_campaign" data-campaign="${esc(c.campaignName)}" onchange="updateApplyCount()"/>
+        <div class="rec-info">
+          <div class="rec-name"><span style="color:var(--orange);font-size:11px;">PAUSE</span> ${esc(c.campaignName)}</div>
+          <div class="rec-reason">Low priority campaign — saves $${c.dailySpend.toFixed(2)}/day</div>
+        </div>
+        <div class="rec-budget">
+          <span class="rec-change" style="color:var(--red);">-$${c.dailySpend.toFixed(2)}</span>
+        </div>
+      </div>
+    `).join('');
     pausableHtml = `
-      <div class="pausable-section">
-        <div class="pausable-title">Consider pausing (low priority — saves ~$${totalSavings.toFixed(2)}/day):</div>
-        ${pausableCampaigns.map(c => `<span class="pausable-item">&bull; ${esc(c.campaignName)}${c.dailySpend > 0 ? ` ($${c.dailySpend.toFixed(2)}/day)` : ''}</span>`).join('')}
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+        <div style="font-size:12px;color:var(--orange);margin-bottom:8px;">Consider pausing (saves ~$${totalSavings.toFixed(2)}/day):</div>
+        ${pauseRows}
       </div>
     `;
   }
@@ -444,13 +456,23 @@ async function applySelected() {
 
   const recommendations = [];
   checked.forEach(cb => {
-    recommendations.push({
-      resourceName: cb.dataset.resource,
-      target: cb.dataset.target,
-      recommendedDailyBudget: parseFloat(cb.dataset.recommended),
-      currentDailyBudget: parseFloat(cb.dataset.current),
-      change: parseFloat(cb.dataset.change),
-    });
+    if (cb.dataset.type === 'pause_campaign') {
+      // Pausable campaign
+      recommendations.push({
+        type: 'pause_campaign',
+        target: cb.dataset.campaign,
+        campaignName: cb.dataset.campaign,
+      });
+    } else {
+      // Budget change
+      recommendations.push({
+        resourceName: cb.dataset.resource,
+        target: cb.dataset.target,
+        recommendedDailyBudget: parseFloat(cb.dataset.recommended),
+        currentDailyBudget: parseFloat(cb.dataset.current),
+        change: parseFloat(cb.dataset.change),
+      });
+    }
   });
 
   try {

@@ -593,6 +593,23 @@ function createPacingRouter(config, deps = {}) {
 
       for (const rec of recommendations) {
         try {
+          // Handle pause_campaign type
+          if (rec.type === 'pause_campaign') {
+            const { applyChange } = require('../services/change-executor');
+            const client = googleAds.createClient(config.googleAds, req.session.tokens.refresh_token, cleanCustomerId, mccId);
+            const msg = await applyChange(client, { type: 'pause_campaign', campaignName: rec.campaignName });
+            console.log(`[pacing-apply] Paused: ${rec.campaignName}`);
+            results.applied++;
+            results.details.push({ target: rec.target || rec.campaignName, success: true, paused: true });
+            changeHistory.addEntry({
+              action: 'pause_campaign', userEmail: email, accountId: customerId,
+              dealerName: dealerName || customerId,
+              details: { campaignName: rec.campaignName, reason: 'pacing_overpacing' },
+              source: 'pacing_apply', success: true,
+            });
+            continue;
+          }
+
           const newAmountMicros = Math.round(rec.recommendedDailyBudget * 1_000_000);
           console.log(`[pacing-apply] Updating ${rec.target}: ${rec.resourceName} → $${rec.recommendedDailyBudget}/day (${newAmountMicros} micros)`);
 
