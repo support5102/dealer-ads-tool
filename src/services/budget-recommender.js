@@ -264,10 +264,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   // When set, VLA daily target = vlaBudget / daysInMonth, keyword daily = keywordBudget / daysInMonth
   const totalDays = daysElapsed + pacing.daysRemaining;
   let vlaDailyTarget = null;
-  let keywordDailyTarget = null;
   if (budgetSplit && budgetSplit.vlaBudget > 0) {
     vlaDailyTarget = budgetSplit.vlaBudget / totalDays;
-    keywordDailyTarget = budgetSplit.keywordBudget / totalDays;
   }
 
   // Use post-change daily averages when a budget change happened this month,
@@ -382,15 +380,15 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       }
 
       // VLA floor: don't cut below 40% allocation floor.
-      // But if VLA is already below the floor, don't force it UP while over-pacing —
-      // that would worsen over-pacing. Just don't cut it further.
-      const effectiveFloor = Math.min(vlaMinFloor, campaign.dailyBudget || currentSpend);
+      // But if VLA is already below the floor, don't force it UP while over-pacing.
+      // Use currentSpend (not set budget) to prevent restoring a high set budget.
+      const effectiveFloor = Math.min(vlaMinFloor, currentSpend);
       recommended = Math.max(recommended, effectiveFloor);
     } else {
       // Under-pacing: IS-driven allocation
       recommended = currentSpend;
       if (is != null && is < VLA_IS_TARGET.min) {
-        // Cap increase at 2x current budget per cycle (prevents absurd spikes).
+        // Cap increase at MAX_INCREASE_MULTIPLIER (5x) per cycle (prevents absurd spikes).
         // Beyond 2x, changes should happen gradually over multiple cycles.
         const rawBoost = VLA_IS_TARGET.min / Math.max(is, 0.01);
         const boost = Math.min(rawBoost, MAX_INCREASE_MULTIPLIER);
@@ -411,7 +409,7 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       }
       // Under-pacing: never set below avg spend or set budget — can't pace up by cutting
       recommended = Math.max(recommended, currentSpend, campaign.dailyBudget || 0);
-      // Cap increase at 2x current budget per cycle
+      // Cap increase at MAX_INCREASE_MULTIPLIER (5x) per cycle
       const maxBudget = (campaign.dailyBudget || currentSpend) * MAX_INCREASE_MULTIPLIER;
       recommended = Math.min(recommended, Math.max(maxBudget, (campaign.dailyBudget || 1) + 1));
       recommended = Math.max(recommended, 3);
@@ -638,10 +636,10 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   }
 
   // Reconciliation: ensure recommendations get ACTUAL SPEND to the target daily rate.
-  // The key insight: set budgets != actual spend. Google Ads typically spends less than
-  // what's set. So we need to figure out the spend-to-budget ratio and set budgets
-  // high enough that actual spend hits the target.
-  {
+  // Only applies when UNDER-pacing — inflates set budgets to account for Google's
+  // under-delivery ratio (set budget > actual spend). When OVER-pacing, the cuts from
+  // the tier-weighted logic are already correct and should not be inflated.
+  if (!accountOverPacing) {
     const totalCurrentSetBudget = recommendations.reduce((s, r) => s + (r.budgetSetting || 0), 0) + nonVlaDedicatedSpend;
     const totalCurrentSpend = recommendations.reduce((s, r) => s + (r.currentDailyBudget || 0), 0) + nonVlaDedicatedSpend;
 
@@ -656,7 +654,6 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     const reconciliationGap = targetSetTotal - actualRecommendedTotal;
 
     if (Math.abs(reconciliationGap) > 0.50) {
-      // Get all adjustable recommendations (prefer non-brand shared, then all shared, then VLA)
       let adjustableRecs = recommendations.filter(r => r.type === 'shared_budget' && !r.isCapped);
       if (adjustableRecs.length === 0) adjustableRecs = recommendations.filter(r => r.type === 'shared_budget');
       if (adjustableRecs.length === 0) adjustableRecs = recommendations.filter(r => r.type === 'campaign_budget');
@@ -667,12 +664,8 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
           const proportion = rec.recommendedDailyBudget / adjustableTotal;
           const extra = Math.round(reconciliationGap * proportion * 100) / 100;
           let adjusted = Math.round((rec.recommendedDailyBudget + extra) * 100) / 100;
-          // Floor: never go below $3 or current avg spend (if under-pacing)
-          if (!accountOverPacing) {
-            adjusted = Math.max(adjusted, rec.currentDailyBudget || 0, rec.budgetSetting || 0, 3);
-          } else {
-            adjusted = Math.max(adjusted, 3);
-          }
+          // Floor: never go below $3 or current avg spend
+          adjusted = Math.max(adjusted, rec.currentDailyBudget || 0, rec.budgetSetting || 0, 3);
           rec.recommendedDailyBudget = adjusted;
           rec.change = Math.round((rec.recommendedDailyBudget - rec.budgetSetting) * 100) / 100;
         }
@@ -725,13 +718,14 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
 
   // Budget allocation summary — change is relative to set budgets (what you control)
   const currentTotal = currentVlaSpend + currentSharedSpend + nonVlaDedicatedSpend;
-  const recommendedTotal = totalVlaRecommended + recommendedSharedTotal + nonVlaDedicatedSpend;
-  const totalChange = Math.round((recommendedTotal - totalSetBudget) * 100) / 100;
+  // Recompute recommended total from FINAL recommendations (after reconciliation may have changed values)
+  const finalRecommendedTotal = recommendations.reduce((s, r) => s + r.recommendedDailyBudget, 0) + nonVlaDedicatedSpend;
+  const totalChange = Math.round((finalRecommendedTotal - totalSetBudget) * 100) / 100;
 
   const budgetSummary = {
     requiredDailyRate: Math.round(requiredDailyRate * 100) / 100,
     currentDailyTotal: Math.round(currentTotal * 100) / 100,
-    recommendedDailyTotal: Math.round(recommendedTotal * 100) / 100,
+    recommendedDailyTotal: Math.round(finalRecommendedTotal * 100) / 100,
     totalSetBudget: Math.round(totalSetBudget * 100) / 100,
     totalChange,
   };
@@ -798,7 +792,7 @@ function generateRecommendation(params) {
     const daysSinceChange = Math.floor((Date.now() - changeDateObj.getTime()) / (24 * 60 * 60 * 1000));
 
     if (daysSinceChange >= COOLDOWN_MIN_DAYS && daysSinceChange <= COOLDOWN_MAX_DAYS
-        && pacing.daysRemaining > 5 && Math.abs(pacing.pacePercent) <= 25) {
+        && pacing.daysRemaining > 5 && Math.abs(pacing.pacePercent) <= 15) {
       const projection = calculateProjection({
         monthlyBudget: goal.monthlyBudget,
         mtdSpend: totalSpend,
