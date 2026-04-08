@@ -12,7 +12,7 @@ const express = require('express');
 const axios   = require('axios');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
-const { readGoals } = require('../services/goal-reader');
+const { readGoals, readBudgetSplits } = require('../services/goal-reader');
 const { generateRecommendation, findISCappedCampaignIds } = require('../services/budget-recommender');
 const { calculatePacing, calculateSevenDayTrend, calculateProjection } = require('../services/pacing-calculator');
 const { fetchAccountPacing } = require('../services/pacing-fetcher');
@@ -247,8 +247,17 @@ function createPacingRouter(config, deps = {}) {
       // Use injected sheets client (tests) or create one from OAuth token (production)
       const activeSheets = sheetsClient || createSheetsClient(accessToken);
 
+      // Load budget splits sheet (Alan Jay stores — VLA/Keyword allocations)
+      const budgetSplitsSheetId = process.env.BUDGET_SPLITS_SHEET_ID || null;
+      const budgetSplitsPromise = budgetSplitsSheetId
+        ? readBudgetSplits(activeSheets, budgetSplitsSheetId).catch(err => {
+            console.warn('Budget splits fetch failed (non-fatal):', err.message);
+            return new Map();
+          })
+        : Promise.resolve(new Map());
+
       // Phase 1: Fetch all data in parallel — need change date before impression share
-      const [campaignSpend, sharedBudgets, dedicatedBudgets, inventoryResult, goals, lastChange] =
+      const [campaignSpend, sharedBudgets, dedicatedBudgets, inventoryResult, goals, lastChange, budgetSplits] =
         await Promise.all([
           googleAds.getMonthSpend(restCtx),
           googleAds.getSharedBudgets(restCtx),
@@ -265,6 +274,7 @@ function createPacingRouter(config, deps = {}) {
             return [];
           }),
           googleAds.getLastBudgetChange(restCtx),
+          budgetSplitsPromise,
         ]);
 
       // Phase 2: Impression share — use post-change date range if a budget change exists
@@ -381,6 +391,9 @@ function createPacingRouter(config, deps = {}) {
         }
       }
 
+      // Look up dealer-specific VLA/Keyword budget splits (e.g., Alan Jay stores)
+      const dealerSplit = budgetSplits.get(searchName) || null;
+
       const now = new Date();
       const recommendation = generateRecommendation({
         goal,
@@ -389,6 +402,7 @@ function createPacingRouter(config, deps = {}) {
         dedicatedBudgets,
         impressionShare,
         inventoryCount: null, // Inventory scrapped — use null to match overview calculation
+        budgetSplit: dealerSplit, // { vlaBudget, keywordBudget } if set
         year: now.getFullYear(),
         month: now.getMonth() + 1,
         currentDay: now.getDate(),

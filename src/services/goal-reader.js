@@ -117,8 +117,55 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2
   return goals;
 }
 
+/**
+ * Reads dealer-specific budget splits (VLA vs Keyword) from a separate sheet.
+ * Used by Alan Jay stores that have fixed VLA/Keyword budget allocations.
+ *
+ * Column layout: A=Store, B=PPC QTY, C=PPC MGMT FEE, D=PPC Budget, E=VLA Budget, F=Keyword Budget
+ *
+ * @param {Object} sheetsClient - Google Sheets API v4 client
+ * @param {string} spreadsheetId - Spreadsheet ID for the budget splits sheet
+ * @param {string} [sheetName] - Sheet/tab name (defaults to first sheet)
+ * @returns {Promise<Map<string, {vlaBudget: number, keywordBudget: number}>>} Map of dealer name → budget splits
+ */
+async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
+  if (!spreadsheetId) return new Map();
+
+  const range = sheetName ? `${sheetName}!A2:F` : 'A2:F';
+  let response;
+  try {
+    response = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range });
+  } catch (err) {
+    console.warn('readBudgetSplits failed (non-fatal):', err.message);
+    return new Map();
+  }
+
+  const rows = response.data.values || [];
+  const splits = new Map();
+
+  for (const row of rows) {
+    const store = String(row[0] || '').trim();
+    if (!store) continue;
+
+    const ppcBudget = parseNumber(row[3]);    // Column D: PPC Budget
+    const vlaBudget = parseNumber(row[4]);    // Column E: VLA Budget
+    const keywordBudget = parseNumber(row[5]); // Column F: Keyword Budget
+
+    if (vlaBudget != null || keywordBudget != null) {
+      splits.set(store.toLowerCase(), {
+        ppcBudget: ppcBudget || 0,
+        vlaBudget: vlaBudget || 0,
+        keywordBudget: keywordBudget || 0,
+      });
+    }
+  }
+
+  return splits;
+}
+
 module.exports = {
   readGoals,
+  readBudgetSplits,
   parseRow,
   parseNumber,
   cleanCustomerId,

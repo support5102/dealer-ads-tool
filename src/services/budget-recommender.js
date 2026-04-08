@@ -251,13 +251,23 @@ function actualDailySpend(budget, spendMap, useActualOnly) {
  * @param {Object[]} [params.campaignSpend] - From getMonthSpend
  * @returns {Object} { recommendations, budgetSummary }
  */
-function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend, dailyBreakdown, changeDate, excludeCampaigns, geoTargets }) {
+function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impressionShareData, campaignSpend, dailyBreakdown, changeDate, excludeCampaigns, geoTargets, budgetSplit }) {
   if (pacing.daysRemaining === 0) {
     return { recommendations: [], budgetSummary: null };
   }
 
   const requiredDailyRate = pacing.remainingBudget / pacing.daysRemaining;
   const daysElapsed = pacing.daysElapsed || 1;
+
+  // Fixed VLA/Keyword budget splits (e.g., Alan Jay stores)
+  // When set, VLA daily target = vlaBudget / daysInMonth, keyword daily = keywordBudget / daysInMonth
+  const totalDays = daysElapsed + pacing.daysRemaining;
+  let vlaDailyTarget = null;
+  let keywordDailyTarget = null;
+  if (budgetSplit && budgetSplit.vlaBudget > 0) {
+    vlaDailyTarget = budgetSplit.vlaBudget / totalDays;
+    keywordDailyTarget = budgetSplit.keywordBudget / totalDays;
+  }
 
   // Use post-change daily averages when a budget change happened this month,
   // so "Current Daily Spend" reflects actual spend since the change — not the
@@ -337,8 +347,10 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     let recommended;
     let reason;
 
-    // VLA minimum floor: share of 40% allocation from strategy-rules.js
-    const vlaMinFloor = requiredDailyRate * (BUDGET_SPLITS.vla.min || 0.40) / Math.max(vlaCampaigns.length, 1);
+    // VLA minimum floor: fixed daily target if set, else 40% allocation from strategy-rules.js
+    const vlaMinFloor = vlaDailyTarget != null
+      ? vlaDailyTarget / Math.max(vlaCampaigns.length, 1)
+      : requiredDailyRate * (BUDGET_SPLITS.vla.min || 0.40) / Math.max(vlaCampaigns.length, 1);
 
     if (accountOverPacing) {
       // VLAs take a smaller cut than shared budgets
@@ -758,6 +770,7 @@ function generateRecommendation(params) {
     changeDate,
     excludeCampaigns,
     geoTargets,
+    budgetSplit,  // { vlaBudget, keywordBudget } — fixed dollar splits from sheet
   } = params;
 
   // Sum all campaign spend
@@ -829,6 +842,13 @@ function generateRecommendation(params) {
     }
   }
 
+  // If dealer has fixed VLA/Keyword budget splits, override the monthly budget allocation
+  // This changes the required daily rate calculation — VLAs get vlaBudget/daysInMonth,
+  // keyword campaigns get keywordBudget/daysInMonth
+  if (budgetSplit) {
+    goal = { ...goal, vlaBudgetMonthly: budgetSplit.vlaBudget, keywordBudgetMonthly: budgetSplit.keywordBudget };
+  }
+
   // Distribute account budget: VLA (priority) + shared (remainder)
   const { recommendations, budgetSummary, pausableCampaigns } = distributeAccountBudget({
     pacing,
@@ -840,6 +860,7 @@ function generateRecommendation(params) {
     changeDate,
     excludeCampaigns,
     geoTargets,
+    budgetSplit,
   });
 
   // Impression share summary
@@ -860,6 +881,7 @@ function generateRecommendation(params) {
       modifier: pacing.inventoryModifier,
       reason: pacing.inventoryReason,
     },
+    budgetSplit: budgetSplit || null,
   };
 }
 
