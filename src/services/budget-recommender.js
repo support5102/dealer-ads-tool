@@ -294,9 +294,10 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
   const currentSharedSpend = budgets.reduce((s, b) => s + actualDailySpend(b, spendMap, actualOnly), 0);
   const currentAdjustableSpend = currentVlaSpend + currentSharedSpend;
 
-  // Over-pacing: current actual spend exceeds the target.
-  // ALL budgets must decrease, but VLAs are prioritized (smaller cut).
-  const accountOverPacing = targetForAdjustable < currentAdjustableSpend;
+  // Over-pacing: use pacing status from the calculator (based on actual MTD spend vs expected).
+  // The old approach (targetForAdjustable < currentAdjustableSpend) used set budgets as a proxy
+  // for spend, which was wrong when set budgets differ significantly from actual spend.
+  const accountOverPacing = pacing.pacePercent > 5;
 
   // When over-pacing, VLAs take a smaller percentage cut than shared budgets.
   // VLA_PROTECTION = 0.5 means VLAs lose half the percentage that shared loses.
@@ -352,8 +353,11 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
       : requiredDailyRate * (BUDGET_SPLITS.vla.min || 0.40) / Math.max(vlaCampaigns.length, 1);
 
     if (accountOverPacing) {
-      // VLAs take a smaller cut than shared budgets
-      recommended = currentSpend * vlaOverPacingRatio;
+      // VLAs decrease proportionally — scale current budget toward target
+      const overRatio = requiredDailyRate / Math.max(currentAdjustableSpend, requiredDailyRate, 1);
+      recommended = Math.max(currentSpend * overRatio, currentSpend * (1 - MAX_CUT_RATIO));
+      // Never recommend MORE than current spend/set budget when overpacing
+      recommended = Math.min(recommended, currentSpend, campaign.dailyBudget || currentSpend);
       reason = `Account over-pacing — decrease to hit $${requiredDailyRate.toFixed(2)}/day target`;
 
       // Cap cut at 30% per cycle — never slash VLAs aggressively
@@ -511,21 +515,16 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
     });
 
     if (accountOverPacing) {
-      // Over-pacing: tier-weighted cuts
+      // Over-pacing: scale all shared budgets down proportionally to target
+      const overRatio = requiredDailyRate / Math.max(currentAdjustableSpend, requiredDailyRate, 1);
       sharedAllocations.forEach(a => {
         const tierWeight = TIER_CUT_WEIGHTS[a.tier] || 1.0;
-        const baseCut = 1 - sharedOverPacingRatio;
+        const baseCut = 1 - overRatio;
         const tierCut = Math.min(baseCut * tierWeight, MAX_CUT_RATIO);
         a.recommended = a.currentSpend * (1 - tierCut);
+        // Never recommend MORE than current spend/set budget when overpacing
+        a.recommended = Math.min(a.recommended, a.currentSpend, a.budget.dailyBudget || a.currentSpend);
       });
-
-      // Normalize to hit exact target
-      const rawTotal = sharedAllocations.reduce((s, a) => s + a.recommended, 0);
-      const sharedTarget = currentSharedSpend * sharedOverPacingRatio;
-      if (rawTotal > 0 && Math.abs(rawTotal - sharedTarget) > 0.01) {
-        const normFactor = sharedTarget / rawTotal;
-        sharedAllocations.forEach(a => { a.recommended = Math.max(a.recommended * normFactor, 0.01); });
-      }
     } else {
       // Under-pacing: keep all budgets at LEAST at their current set budget.
       // The account needs MORE spend, not less. Start from set budgets and
