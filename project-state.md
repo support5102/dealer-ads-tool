@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-04-08
-**Current Phase:** Phase 18: Polish & Logic Hardening — COMPLETE
+**Last Updated:** 2026-04-09
+**Current Phase:** Phase 19: Campaign Builder Rebuild — PLANNED
 
 ---
 
@@ -27,7 +27,8 @@
 | 15 | Audit UX Overhaul | ✅ COMPLETE | Collapsible findings, paginated fixes, consolidated cards, Fix All buttons |
 | 16 | Pacing & History Polish | ✅ COMPLETE | Cooldown badges, history filters/CSV export, persistent PostgreSQL (Neon) |
 | 17 | Light Mode & UI | ✅ COMPLETE | Full light/dark mode, dealer filtering, theme toggle on all pages |
-| 18 | Logic Hardening & Features | ✅ COMPLETE | Overpacing never increases, reconciliation gated, 4-agent Opus audit, ad copy fixes, AI headlines, dismiss recs, budget splits, pausable campaigns actionable (806 tests, 32 commits) |
+| 18 | Logic Hardening & Features | ✅ COMPLETE | Overpacing never increases, reconciliation gated, 4-agent Opus audit, ad copy fixes, AI headlines, dismiss recs, budget splits, pausable campaigns actionable (806 tests) |
+| 19 | Campaign Builder Rebuild | 📋 PLANNED | Rebuild React+CDN builder as vanilla JS, add collision/body shop mode, cross-model search term detection |
 
 ---
 
