@@ -22,6 +22,75 @@ function finding(checkId, severity, category, title, message, details = {}) {
   return { checkId, severity, category, title, message, details };
 }
 
+// ── Cross-model detection ──
+// When a campaign targets a specific model, search terms for OTHER models
+// from the same make should be flagged as irrelevant.
+
+const MAKE_MODELS = {
+  ford: ['mustang', 'mach-e', 'mach e', 'bronco', 'bronco sport', 'f-150', 'f150', 'f-250', 'f250', 'f-350', 'ranger', 'maverick', 'escape', 'edge', 'explorer', 'expedition', 'raptor', 'lightning', 'transit', 'e-transit', 'super duty', 'ecosport', 'fusion', 'taurus'],
+  chevrolet: ['silverado', 'colorado', 'tahoe', 'suburban', 'traverse', 'equinox', 'blazer', 'trax', 'trailblazer', 'malibu', 'camaro', 'corvette', 'bolt', 'spark'],
+  dodge: ['ram', 'charger', 'challenger', 'durango', 'hornet'],
+  jeep: ['wrangler', 'grand cherokee', 'cherokee', 'compass', 'renegade', 'gladiator', 'wagoneer', 'grand wagoneer'],
+  chrysler: ['pacifica', '300'],
+  gmc: ['sierra', 'canyon', 'yukon', 'terrain', 'acadia', 'hummer'],
+  toyota: ['camry', 'corolla', 'rav4', 'highlander', 'tacoma', 'tundra', '4runner', 'sequoia', 'venza', 'prius', 'supra', 'gr86', 'crown', 'grand highlander', 'land cruiser'],
+  honda: ['civic', 'accord', 'cr-v', 'crv', 'hr-v', 'hrv', 'pilot', 'passport', 'ridgeline', 'odyssey', 'prologue'],
+  nissan: ['altima', 'sentra', 'maxima', 'rogue', 'pathfinder', 'murano', 'frontier', 'titan', 'kicks', 'versa', 'leaf', 'ariya', 'z'],
+  hyundai: ['tucson', 'santa fe', 'palisade', 'kona', 'elantra', 'sonata', 'ioniq', 'venue'],
+  kia: ['sportage', 'telluride', 'sorento', 'forte', 'k5', 'seltos', 'soul', 'carnival', 'ev6', 'ev9', 'niro'],
+  subaru: ['outback', 'forester', 'crosstrek', 'ascent', 'impreza', 'wrx', 'brz', 'legacy', 'solterra'],
+  buick: ['encore', 'envision', 'enclave', 'envista'],
+  cadillac: ['escalade', 'ct4', 'ct5', 'xt4', 'xt5', 'xt6', 'lyriq', 'celestiq'],
+  lincoln: ['navigator', 'aviator', 'corsair', 'nautilus'],
+};
+
+/**
+ * Extract the model name from a campaign name.
+ * Campaign format: "Dealer - Make - New/Used ModelName" or "SD-08 - ModelName"
+ */
+function extractCampaignModel(campaignName) {
+  if (!campaignName) return null;
+  const parts = campaignName.split(' - ').map(p => p.trim());
+  // Look for model in the last part (e.g., "New Mustang" → "mustang", "New F-150" → "f-150")
+  if (parts.length >= 3) {
+    const last = parts[parts.length - 1].toLowerCase();
+    // Strip "new", "used", "lease", "for sale" prefixes/suffixes
+    const cleaned = last.replace(/\b(new|used|lease|for sale|sd-?\d+)\b/gi, '').trim();
+    if (cleaned.length >= 2) return cleaned;
+  }
+  return null;
+}
+
+/**
+ * Check if a search term contains a different model from the same make.
+ * Returns the matched other model name, or null.
+ */
+function findCrossModelMatch(searchTermLower, campaignModel) {
+  // Find which make this model belongs to
+  const campModelClean = campaignModel.toLowerCase().trim();
+  let make = null;
+  for (const [m, models] of Object.entries(MAKE_MODELS)) {
+    if (models.some(model => campModelClean.includes(model) || model.includes(campModelClean))) {
+      make = m;
+      break;
+    }
+  }
+  if (!make) return null;
+
+  // Check if the search term mentions a DIFFERENT model from the same make
+  const sameMarkModels = MAKE_MODELS[make];
+  for (const otherModel of sameMarkModels) {
+    // Skip if it's the same model as the campaign
+    if (campModelClean.includes(otherModel) || otherModel.includes(campModelClean)) continue;
+    // Check if the search term contains this other model
+    const regex = new RegExp(`\\b${otherModel.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(searchTermLower)) {
+      return otherModel;
+    }
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Conflict detection helpers
 // ─────────────────────────────────────────────────────────────
@@ -326,6 +395,17 @@ function analyzeIrrelevantSearchTerms(searchTerms) {
       const isNewCampaign = parts.length >= 2 && parts[1] === 'new';
       if (isNewCampaign && /\bused\b/i.test(st.searchTerm)) {
         flagReason = 'used intent on new vehicle campaign';
+      }
+    }
+
+    // Check cross-model search terms — e.g., "mach e" showing on a Mustang campaign
+    if (!flagReason) {
+      const campModel = extractCampaignModel(st.campaignName);
+      if (campModel) {
+        const otherModel = findCrossModelMatch(termLower, campModel);
+        if (otherModel) {
+          flagReason = `wrong model: "${otherModel}" on ${campModel} campaign`;
+        }
       }
     }
 
