@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-04-07
-**Current Phase:** Phase 14: Recommendation & Pacing Bug Fixes — Phase 1 COMPLETE
+**Last Updated:** 2026-04-08
+**Current Phase:** Phase 18: Polish & Logic Hardening — COMPLETE
 
 ---
 
@@ -22,8 +22,12 @@
 | 10 | Account Health Auditor | ✅ COMPLETE | 11 strategy-aligned checks, audit routes, dashboard UI (621 tests) |
 | 11 | Audit Automation | ✅ COMPLETE | Scheduled MCC-wide audits, token refresh, concurrency guards (651 tests) |
 | 12 | Strategy Rules + Deep Scan | ✅ COMPLETE | Rules engine, negative keyword analyzer, ad copy analyzer, deep scanner (764 tests) |
-| 13 | Smart Budget Auto-Adjuster | 🔨 IN PROGRESS | Phase 1 complete: detection engine, campaign classifier, adjustment generator (973 tests) |
-| 14 | Recommendation & Pacing Bug Fixes | 🔨 IN PROGRESS | Phase 1 complete: 4 critical logic bugs fixed, 5 new tests (809 unit tests) |
+| 13 | Smart Budget Auto-Adjuster | ✅ COMPLETE | Detection engine, campaign classifier, adjustment generator |
+| 14 | Recommendation & Pacing Bug Fixes | ✅ COMPLETE | 4 critical logic bugs, status verbiage, IS date range, pacePercent mismatch |
+| 15 | Audit UX Overhaul | ✅ COMPLETE | Collapsible findings, paginated fixes, consolidated cards, Fix All buttons |
+| 16 | Pacing & History Polish | ✅ COMPLETE | Cooldown badges, history filters/CSV export, persistent PostgreSQL (Neon) |
+| 17 | Light Mode & UI | ✅ COMPLETE | Full light/dark mode, dealer filtering, theme toggle on all pages |
+| 18 | Logic Hardening & Features | ✅ COMPLETE | Overpacing never increases, reconciliation gated, 4-agent Opus audit, ad copy fixes, AI headlines, dismiss recs, budget splits, pausable campaigns actionable (806 tests, 32 commits) |
 
 ---
 

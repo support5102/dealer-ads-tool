@@ -31,11 +31,11 @@ Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from 
 
 | Aspect | Value |
 |--------|-------|
-| **Phase** | 14: Recommendation & Pacing Bug Fixes — Phase 1 COMPLETE (809 unit tests) |
-| **Last Session** | 2026-04-07 - CLEAN |
-| **Immediate Next** | Phase 14 Phase 2: Remove "Critical" status verbiage, then persistent history (PostgreSQL) |
-| **Live URL** | https://dealer-ads-tool-production.up.railway.app |
-| **Live Version** | V2 on Railway (V3 pushed to GitHub, PR #1 open) |
+| **Phase** | 18: Polish & Logic Hardening COMPLETE (806 unit tests, 32 commits) |
+| **Last Session** | 2026-04-08 - CLEAN |
+| **Immediate Next** | User testing & edge case fixes as found |
+| **Live URL** | https://dealer-ads-tool-840281790428.us-east1.run.app |
+| **Live Version** | V3 on Google Cloud Run |
 
 ---
 
