@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Change History</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <script src="/theme.js"></script>
+  <style>
+    .history-main { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem; }
+    .history-controls { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .history-controls select { min-width: 250px; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.85rem; }
+    .history-table { width: 100%; border-collapse: collapse; font-family: 'DM Mono', monospace; font-size: 0.8rem; }
+    .history-table th { text-align: left; padding: 0.5rem 0.75rem; background: var(--bg2); color: var(--text3); font-weight: 400; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; border-bottom: 1px solid var(--border); }
+    .history-table td { padding: 0.5rem 0.75rem; color: var(--text2); border-bottom: 1px solid var(--border2); vertical-align: top; }
+    .history-table tr:hover { background: rgba(255,255,255,0.02); }
+    .status-success { color: #4ade80; }
+    .status-failed { color: #f87171; }
+    .source-badge { font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .source-auto_adjuster { background: #1e3a5f; color: #60a5fa; }
+    .source-audit_fixer { background: #1a3a2e; color: #4ade80; }
+    .source-task_manager { background: #3a2e1a; color: #fbbf24; }
+    .action-badge { font-size: 0.7rem; color: #94a3b8; }
+    .history-empty { text-align: center; padding: 3rem; color: #555; font-family: 'DM Mono', monospace; }
+    .detail-text { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-text:hover { white-space: normal; overflow: visible; }
+    .btn-refresh { padding: 0.4rem 1rem; border-radius: 6px; border: 1px solid #00d4aa; background: transparent; color: #00d4aa; font-family: 'DM Mono', monospace; font-size: 0.8rem; cursor: pointer; }
+    .btn-refresh:hover { background: rgba(0, 212, 170, 0.1); }
+    .history-count { font-size: 0.75rem; color: #555; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">&#x1F4CB;</div>
+    <div>
+      <div class="logo-text">Change History</div>
+      <div class="logo-sub">All API Changes Made by the Tool</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/" class="nav-link">Task Manager</a>
+    <a href="/pacing-overview.html" class="nav-link">Pacing</a>
+    <a href="/audit.html" class="nav-link">Auditor</a>
+    <a href="/builder.html" class="nav-link">Builder</a>
+    <a href="/change-history.html" class="nav-link">History</a>
+    <button class="nav-link" id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;">🌙 Dark</button>
+  </div>
+</div>
+
+<div class="history-main">
+  <div class="history-controls">
+    <select id="accountFilter" onchange="loadHistory()" style="min-width:200px;">
+      <option value="">All Accounts</option>
+    </select>
+    <select id="actionFilter" onchange="filterTable()" style="padding:0.5rem;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-family:'DM Mono',monospace;font-size:0.85rem;">
+      <option value="">All Actions</option>
+      <option value="budget_change">Budget Change</option>
+      <option value="pause_keyword">Pause Keyword</option>
+      <option value="add_negative_keyword">Add Negative</option>
+      <option value="update_rsa">Update RSA</option>
+      <option value="dismiss_recommendations_batch">Dismiss Recs</option>
+    </select>
+    <button class="btn-refresh" onclick="loadHistory()">Refresh</button>
+    <button class="btn-refresh" onclick="exportCSV()" style="border-color:var(--blue);color:var(--blue);">Export CSV</button>
+    <span class="history-count" id="historyCount"></span>
+  </div>
+
+  <div id="historyContent">
+    <div class="history-empty">Loading...</div>
+  </div>
+</div>
+
+<script>
+async function loadHistory() {
+  const accountId = document.getElementById('accountFilter').value;
+  const content = document.getElementById('historyContent');
+  const countEl = document.getElementById('historyCount');
+
+  try {
+    const url = '/api/change-history?limit=200' + (accountId ? '&accountId=' + accountId : '');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to load');
+    const data = await res.json();
+
+    historyData = data.entries;
+    countEl.textContent = data.total + ' total entries';
+
+    if (data.entries.length === 0) {
+      content.innerHTML = '<div class="history-empty">No changes recorded yet. Changes will appear here when you use the auto-adjuster, audit fixer, or task manager.</div>';
+      return;
+    }
+
+    let html = '<table class="history-table"><thead><tr>';
+    html += '<th>Time</th><th>Account</th><th>Action</th><th>Details</th><th>Source</th><th>Status</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const e of data.entries) {
+      const time = new Date(e.timestamp).toLocaleString();
+      const status = e.success
+        ? '<span class="status-success">Success</span>'
+        : '<span class="status-failed">Failed' + (e.error ? ': ' + esc(e.error).substring(0, 50) : '') + '</span>';
+      const source = '<span class="source-badge source-' + esc(e.source) + '">' + esc(e.source.replace(/_/g, ' ')) + '</span>';
+      const action = '<span class="action-badge">' + esc(e.action.replace(/_/g, ' ')) + '</span>';
+
+      let detail = '';
+      if (e.details) {
+        if (e.details.campaignName) detail += esc(e.details.campaignName);
+        if (e.details.previousValue && e.details.newValue) detail += ' | ' + esc(e.details.previousValue) + ' -> ' + esc(e.details.newValue);
+        if (e.details.target && !e.details.campaignName) detail += esc(e.details.target);
+        if (e.details.keyword) detail += (detail ? ' | ' : '') + '"' + esc(e.details.keyword) + '"';
+      }
+
+      html += '<tr>';
+      html += '<td style="white-space:nowrap;font-size:0.75rem;color:#666">' + time + '</td>';
+      html += '<td>' + esc(e.dealerName || e.accountId || '') + '</td>';
+      html += '<td>' + action + '</td>';
+      html += '<td class="detail-text">' + (detail || '-') + '</td>';
+      html += '<td>' + source + '</td>';
+      html += '<td>' + status + '</td>';
+      html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    content.innerHTML = html;
+  } catch (err) {
+    content.innerHTML = '<div class="history-empty">Error: ' + esc(err.message) + '</div>';
+  }
+}
+
+let historyData = []; // store for filtering/export
+
+function filterTable() {
+  const action = document.getElementById('actionFilter').value;
+  const rows = document.querySelectorAll('.history-table tbody tr');
+  rows.forEach(row => {
+    const actionCell = row.cells[2]?.textContent?.trim().replace(/\s/g, '_') || '';
+    row.style.display = (!action || actionCell === action.replace(/_/g, ' ')) ? '' : 'none';
+  });
+}
+
+function exportCSV() {
+  if (historyData.length === 0) return alert('No data to export');
+  const headers = ['Time', 'Account', 'Action', 'Details', 'Source', 'Status'];
+  const rows = historyData.map(e => [
+    new Date(e.timestamp).toLocaleString(),
+    e.dealerName || e.accountId || '',
+    e.action,
+    typeof e.details === 'string' ? e.details : JSON.stringify(e.details || {}),
+    e.source,
+    e.success ? 'Success' : 'Failed: ' + (e.error || ''),
+  ]);
+  let csv = headers.join(',') + '\n';
+  for (const row of rows) {
+    csv += row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',') + '\n';
+  }
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'change-history-' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+}
+
+function esc(text) {
+  const div = document.createElement('div');
+  div.textContent = String(text || '');
+  return div.innerHTML;
+}
+
+// Load accounts for filter dropdown
+async function loadAccounts() {
+  try {
+    const res = await fetch('/api/accounts');
+    if (!res.ok) return;
+    const data = await res.json();
+    const select = document.getElementById('accountFilter');
+    for (const acct of (data.accounts || [])) {
+      const opt = document.createElement('option');
+      opt.value = acct.id;
+      opt.textContent = acct.name + ' (' + acct.id + ')';
+      select.appendChild(opt);
+    }
+  } catch (_) {}
+}
+
+loadAccounts();
+loadHistory();
+</script>
+</body>
+</html>

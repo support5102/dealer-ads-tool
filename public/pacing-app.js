@@ -59,6 +59,7 @@ function connectGoogle() {
 function showConnectedState() {
   const hr = document.getElementById('headerRight');
   hr.innerHTML = `
+    <a href="/pacing-overview.html" class="nav-link">All Accounts</a>
     <a href="/" class="nav-link">Task Manager</a>
     <div class="connected-badge">
       <div class="pulse-dot"></div>
@@ -97,6 +98,14 @@ async function loadAccounts() {
 
     if (state.accounts.length === 0) {
       sel.innerHTML = '<option>No dealer accounts found</option>';
+    }
+
+    // Deep-link: auto-select account from ?account= query param (e.g. from overview)
+    const params = new URLSearchParams(window.location.search);
+    const deepLinkId = params.get('account');
+    if (deepLinkId && state.accounts.some(a => a.id === deepLinkId)) {
+      sel.value = deepLinkId;
+      loadPacing(deepLinkId);
     }
   } catch (err) {
     sel.innerHTML = '<option>Error loading accounts</option>';
@@ -169,9 +178,14 @@ function showView(id) {
 function renderDashboard(data) {
   renderHeader(data);
   renderMetrics(data);
-  renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
-  renderImpressionShare(data.impressionShareSummary);
-  renderInventory(data.inventory);
+  if (data.cooldown && data.cooldown.active) {
+    renderCooldown(data.cooldown);
+  } else {
+    renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
+  }
+  renderImpressionShare(data.impressionShareSummary, data.changeDate);
+  renderCampaignIS(data.campaignIS, data.changeDate);
+  // renderInventory(data.inventory); // Temporarily hidden — inventory count is inaccurate for PMax
 }
 
 function renderHeader(data) {
@@ -199,6 +213,29 @@ function renderMetrics(data) {
   const spendProgress = p.monthlyBudget > 0 ? (data.totalSpend / p.monthlyBudget) * 100 : 0;
   const color = data.statusColor || 'gray';
 
+  // Post-change average card (only shown when a budget change happened this month)
+  let postChangeCard = '';
+  if (data.postChangeAvg && data.postChangeAvg.daysTracked > 0) {
+    const pca = data.postChangeAvg;
+    const changeLabel = pca.changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => `${m}/${d}`);
+    postChangeCard = `
+    <div class="metric-card">
+      <div class="metric-label">Post-Change Daily Avg</div>
+      <div class="metric-value">$${fmt(pca.dailyAvg)}</div>
+      <div class="metric-sub">Since ${changeLabel} (${pca.daysTracked} day${pca.daysTracked !== 1 ? 's' : ''})</div>
+    </div>`;
+  }
+
+  // Warning when post-change data couldn't be loaded
+  let postChangeWarning = '';
+  if (data.postChangeWarning) {
+    postChangeWarning = `
+    <div class="metric-card" style="border-color:#92400e">
+      <div class="metric-label" style="color:#fbbf24">⚠ Data Note</div>
+      <div class="metric-sub" style="color:#fbbf24">${esc(data.postChangeWarning)}</div>
+    </div>`;
+  }
+
   document.getElementById('metricsRow').innerHTML = `
     <div class="metric-card">
       <div class="metric-label">Monthly Budget</div>
@@ -222,6 +259,23 @@ function renderMetrics(data) {
       <div class="metric-value">$${fmt(p.requiredDailyRate)}</div>
       <div class="metric-sub">${p.daysRemaining} days remaining</div>
     </div>
+    ${postChangeCard}
+    ${postChangeWarning}
+  `;
+}
+
+function renderCooldown(cooldown) {
+  const section = document.getElementById('recommendationsSection');
+  section.innerHTML = `
+    <div class="dash-section">
+      <div class="dash-section-header">
+        <div class="dash-section-title">Budget Recommendations</div>
+      </div>
+      <div style="padding:20px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:12px;">
+        <div style="font-size:14px;color:var(--green);font-weight:600;margin-bottom:8px;">On Track — No Changes Needed</div>
+        <div style="font-size:13px;color:var(--text2);">${esc(cooldown.message)}</div>
+      </div>
+    </div>
   `;
 }
 
@@ -242,12 +296,17 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
   // Budget allocation summary bar
   let summaryHtml = '';
   if (budgetSummary) {
-    const { requiredDailyRate, currentDailyTotal, totalChange } = budgetSummary;
-    const gap = requiredDailyRate - currentDailyTotal;
-    const gapSign = gap >= 0 ? '+' : '';
-    const gapColor = Math.abs(gap) < 1 ? '#4ade80' : (gap > 0 ? '#4ade80' : '#f87171');
-    const gapLabel = gap > 0 ? 'Under by' : (gap < 0 ? 'Over by' : 'On target');
-    const gapAmount = Math.abs(gap);
+    const { requiredDailyRate, currentDailyTotal, totalSetBudget, totalChange } = budgetSummary;
+    // Change needed = target rate vs what budgets are set to (what you control)
+    const setTotal = totalSetBudget || 0;
+    // Budget setting gap (what you control)
+    const setGap = requiredDailyRate - setTotal;
+    const setGapColor = Math.abs(setGap) < 1 ? '#4ade80' : (setGap > 0 ? '#fb923c' : '#f87171');
+    const setGapLabel = setGap > 0 ? 'Under by' : (setGap < 0 ? 'Over by' : 'On target');
+    // Actual spend gap (what's really happening)
+    const spendGap = requiredDailyRate - currentDailyTotal;
+    const spendGapColor = Math.abs(spendGap) < 1 ? '#4ade80' : (spendGap > 0 ? '#fb923c' : '#f87171');
+    const spendGapLabel = spendGap > 0 ? 'Under by' : (spendGap < 0 ? 'Over by' : 'On target');
     summaryHtml = `
       <div class="budget-summary">
         <div class="budget-summary-item">
@@ -259,15 +318,23 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
           <span class="budget-summary-value">$${currentDailyTotal.toFixed(2)}/day</span>
         </div>
         <div class="budget-summary-item">
-          <span class="budget-summary-label">Change Needed</span>
-          <span class="budget-summary-value" style="color:${gapColor}">${gapLabel} $${gapAmount.toFixed(2)}/day</span>
+          <span class="budget-summary-label">Set Budget Total</span>
+          <span class="budget-summary-value">$${(totalSetBudget || 0).toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Budget Change Needed</span>
+          <span class="budget-summary-value" style="color:${setGapColor}">${setGapLabel} $${Math.abs(setGap).toFixed(2)}/day</span>
+        </div>
+        <div class="budget-summary-item">
+          <span class="budget-summary-label">Actual Spend Change Needed</span>
+          <span class="budget-summary-value" style="color:${spendGapColor}">${spendGapLabel} $${Math.abs(spendGap).toFixed(2)}/day</span>
         </div>
       </div>
     `;
   }
 
   let rows = '';
-  recs.forEach(r => {
+  recs.forEach((r, idx) => {
     const dir = r.change >= 0 ? 'increase' : 'decrease';
     const sign = r.change >= 0 ? '+' : '';
     const vlaBadge = r.isVla ? '<span class="vla-badge">VLA</span>' : '';
@@ -279,8 +346,17 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
     const setLabel = r.budgetSetting != null
       ? `<span class="rec-setting">Set: $${r.budgetSetting.toFixed(2)}/day</span>` : '';
     rows += `
-      <div class="rec-item">
-        <div>
+      <div class="rec-item" id="rec-${idx}">
+        <label class="rec-checkbox-wrap">
+          <input type="checkbox" class="rec-checkbox" data-idx="${idx}"
+            data-resource="${esc(r.resourceName || '')}"
+            data-target="${esc(r.target)}"
+            data-recommended="${r.recommendedDailyBudget}"
+            data-current="${r.currentDailyBudget}"
+            data-change="${r.change}"
+            onchange="updateApplyCount()" />
+        </label>
+        <div class="rec-content">
           <div class="rec-target">${vlaBadge}${tierBadge}${esc(r.target)}</div>
           <div class="rec-budget-row">
             ${setLabel}
@@ -289,20 +365,33 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
             <span class="rec-recommended ${dir}">$${r.recommendedDailyBudget.toFixed(2)}/day</span>
             <span class="rec-change ${dir}">${sign}$${r.change.toFixed(2)}</span>
           </div>
-          <div class="rec-reason">${esc(r.reason)}</div>
+          <div class="rec-reason"${r.isCapped ? ' style="color:#fbbf24"' : ''}>${esc(r.reason)}</div>
+          ${renderGeoExpansion(r.geoExpansion)}
         </div>
       </div>
     `;
   });
 
-  // Pausable campaigns suggestion
+  // Pausable campaigns as actionable recommendations
   let pausableHtml = '';
   if (pausableCampaigns && pausableCampaigns.length > 0) {
     const totalSavings = pausableCampaigns.reduce((s, c) => s + c.dailySpend, 0);
+    const pauseRows = pausableCampaigns.map((c, i) => `
+      <div class="rec-row">
+        <input type="checkbox" class="rec-checkbox" data-type="pause_campaign" data-campaign="${esc(c.campaignName)}" onchange="updateApplyCount()"/>
+        <div class="rec-info">
+          <div class="rec-name"><span style="color:var(--orange);font-size:11px;">PAUSE</span> ${esc(c.campaignName)}</div>
+          <div class="rec-reason">Low priority campaign — saves $${c.dailySpend.toFixed(2)}/day</div>
+        </div>
+        <div class="rec-budget">
+          <span class="rec-change" style="color:var(--red);">-$${c.dailySpend.toFixed(2)}</span>
+        </div>
+      </div>
+    `).join('');
     pausableHtml = `
-      <div class="pausable-section">
-        <div class="pausable-title">Consider pausing (low priority — saves ~$${totalSavings.toFixed(2)}/day):</div>
-        ${pausableCampaigns.map(c => `<span class="pausable-item">&bull; ${esc(c.campaignName)}${c.dailySpend > 0 ? ` ($${c.dailySpend.toFixed(2)}/day)` : ''}</span>`).join('')}
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+        <div style="font-size:12px;color:var(--orange);margin-bottom:8px;">Consider pausing (saves ~$${totalSavings.toFixed(2)}/day):</div>
+        ${pauseRows}
       </div>
     `;
   }
@@ -320,13 +409,114 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
         <div class="dash-section-count">${countParts.join(' + ')} budget${recs.length !== 1 ? 's' : ''}</div>
       </div>
       ${summaryHtml}
+      <div class="apply-controls">
+        <label class="select-all-wrap">
+          <input type="checkbox" id="selectAllRecs" onchange="toggleSelectAll(this.checked)" />
+          <span>Select All</span>
+        </label>
+        <button class="apply-btn" id="applyBtn" onclick="applySelected()" disabled>
+          Apply Selected (0)
+        </button>
+        <span id="applyStatus"></span>
+      </div>
       ${rows}
       ${pausableHtml}
     </div>
   `;
 }
 
-function renderImpressionShare(is) {
+// ── Apply recommendations ────────────────────────────────────────────
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.rec-checkbox').forEach(cb => { cb.checked = checked; });
+  updateApplyCount();
+}
+
+function updateApplyCount() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  const btn = document.getElementById('applyBtn');
+  if (btn) {
+    btn.textContent = `Apply Selected (${checked.length})`;
+    btn.disabled = checked.length === 0;
+  }
+  // Sync select-all checkbox
+  const all = document.querySelectorAll('.rec-checkbox');
+  const selectAll = document.getElementById('selectAllRecs');
+  if (selectAll) selectAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+async function applySelected() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  if (checked.length === 0) return;
+
+  const btn = document.getElementById('applyBtn');
+  const statusEl = document.getElementById('applyStatus');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  statusEl.textContent = '';
+
+  const recommendations = [];
+  checked.forEach(cb => {
+    if (cb.dataset.type === 'pause_campaign') {
+      // Pausable campaign
+      recommendations.push({
+        type: 'pause_campaign',
+        target: cb.dataset.campaign,
+        campaignName: cb.dataset.campaign,
+      });
+    } else {
+      // Budget change
+      recommendations.push({
+        resourceName: cb.dataset.resource,
+        target: cb.dataset.target,
+        recommendedDailyBudget: parseFloat(cb.dataset.recommended),
+        currentDailyBudget: parseFloat(cb.dataset.current),
+        change: parseFloat(cb.dataset.change),
+      });
+    }
+  });
+
+  try {
+    const res = await fetch('/api/pacing/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: state.selectedId,
+        dealerName: state.data?.dealerName || state.selectedId,
+        recommendations,
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Apply failed');
+
+    // Show per-item results
+    result.details.forEach(d => {
+      const cb = document.querySelector(`.rec-checkbox[data-target="${CSS.escape(d.target)}"]`);
+      if (!cb) return;
+      const row = cb.closest('.rec-item');
+      if (d.success) {
+        row.style.borderLeft = '3px solid #4ade80';
+        row.querySelector('.rec-content').insertAdjacentHTML('beforeend',
+          `<div class="apply-result success">Applied: $${d.previousBudget}/day → $${d.newBudget}/day</div>`);
+      } else {
+        row.style.borderLeft = '3px solid #f87171';
+        row.querySelector('.rec-content').insertAdjacentHTML('beforeend',
+          `<div class="apply-result error">Failed: ${esc(d.error)}</div>`);
+      }
+      cb.disabled = true;
+    });
+
+    statusEl.innerHTML = `<span style="color:#4ade80">${result.applied} applied</span>` +
+      (result.failed > 0 ? `, <span style="color:#f87171">${result.failed} failed</span>` : '') +
+      ` — <a href="#" onclick="loadPacing(state.selectedId);return false" style="color:#93c5fd">Refresh</a>`;
+  } catch (err) {
+    statusEl.innerHTML = `<span style="color:#f87171">Error: ${esc(err.message)}</span>`;
+  }
+
+  btn.textContent = `Apply Selected (0)`;
+  btn.disabled = true;
+}
+
+function renderImpressionShare(is, changeDate) {
   const section = document.getElementById('impressionSection');
   if (!is || is.avgImpressionShare == null) {
     section.innerHTML = '';
@@ -348,7 +538,7 @@ function renderImpressionShare(is) {
   section.innerHTML = `
     <div class="dash-section">
       <div class="dash-section-header">
-        <div class="dash-section-title">Impression Share</div>
+        <div class="dash-section-title">Impression Share${changeDate ? ` <span style="font-size:12px;color:#94a3b8;font-weight:400">(since ${changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => m + '/' + d)})</span>` : ''}</div>
       </div>
       <div class="is-row">
         <span class="is-label">Avg Impression Share</span>
@@ -370,6 +560,47 @@ function renderImpressionShare(is) {
           ${limited.map(c => `<span style="color:#fb923c;font-size:12px;padding-left:8px">&bull; ${esc(c)}</span>`).join('')}
         </div>
       ` : ''}
+    </div>
+  `;
+}
+
+function renderCampaignIS(campaigns, changeDate) {
+  const section = document.getElementById('campaignISSection');
+  if (!campaigns || campaigns.length === 0) {
+    section.innerHTML = '';
+    return;
+  }
+
+  let rows = '';
+  campaigns.forEach(c => {
+    const is = c.impressionShare;
+    let isColor = '#4ade80';
+    if (is < 50) isColor = '#f87171';
+    else if (is < 75) isColor = '#fbbf24';
+
+    const blsText = c.budgetLostShare != null && c.budgetLostShare > 0
+      ? `<span style="color:#fb923c;font-size:11px;margin-left:8px">${c.budgetLostShare}% lost to budget</span>`
+      : '';
+
+    rows += `
+      <div class="is-row" style="gap:8px">
+        <span class="is-label" style="flex:2;font-size:12px">${esc(c.campaignName)}</span>
+        <div class="is-bar-container" style="flex:1">
+          <div class="is-bar" style="width:${is}%;background:${isColor}"></div>
+        </div>
+        <span class="is-value" style="color:${isColor}">${is}%</span>
+        ${blsText}
+      </div>
+    `;
+  });
+
+  section.innerHTML = `
+    <div class="dash-section">
+      <div class="dash-section-header">
+        <div class="dash-section-title">Search Impression Share by Campaign${changeDate ? ` <span style="font-size:12px;color:#94a3b8;font-weight:400">(since ${changeDate.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) => m + '/' + d)})</span>` : ''}</div>
+        <div class="dash-section-count">${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}</div>
+      </div>
+      ${rows}
     </div>
   `;
 }
@@ -415,18 +646,37 @@ function renderInventory(inv) {
 // ─────────────────────────────────────────────────────────────
 function formatStatus(status) {
   switch (status) {
-    case 'on_pace':        return 'On Pace';
-    case 'over':           return 'Over-Pacing';
-    case 'under':          return 'Under-Pacing';
-    case 'critical_over':  return 'Critical Over';
-    case 'critical_under': return 'Critical Under';
-    default:               return esc(status) || 'Unknown';
+    case 'on_pace': return 'On Pace';
+    case 'over':    return 'Overpacing';
+    case 'under':   return 'Underpacing';
+    default:        return esc(status) || 'Unknown';
   }
 }
 
 function fmt(n) {
   if (n == null) return '--';
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderGeoExpansion(geo) {
+  if (!geo) return '';
+  const radiusHtml = geo.currentRadiusMiles && geo.recommendedRadiusMiles
+    ? `<div class="geo-radius">
+        <span class="geo-label">Radius:</span>
+        <span class="geo-current">${geo.currentRadiusMiles}mi</span>
+        <span class="geo-arrow">&rarr;</span>
+        <span class="geo-recommended">${geo.recommendedRadiusMiles}mi</span>
+        ${geo.centerCity ? `<span class="geo-center">from ${esc(geo.centerCity)}</span>` : ''}
+      </div>` : '';
+
+  const nearby = (geo.nearbyLocations || []).slice(0, 5);
+  const nearbyHtml = nearby.length > 0
+    ? `<div class="geo-nearby">
+        <span class="geo-label">Nearby areas with volume:</span>
+        ${nearby.map(loc => `<span class="geo-pill">${loc.geoTargetId || 'Area'} (${loc.impressions} imp)</span>`).join('')}
+      </div>` : '';
+
+  return `<div class="geo-expansion">${radiusHtml}${nearbyHtml}</div>`;
 }
 
 function esc(str) {

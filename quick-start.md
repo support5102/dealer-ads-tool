@@ -1,33 +1,137 @@
-# Dealer Ads Tool — Quick Start
+# Quick Start - Dealer Ads Tool V3
 
-## What is this?
-Google Ads management tool for automotive dealerships. Paste a Freshdesk task in plain English, Claude AI parses it into structured changes, preview them, then apply to Google Ads.
+> **Trigger:** Say `initialize` to have Claude read this and get oriented.
 
-## Run locally
-```bash
-cp env.example .env   # fill in credentials
-npm install
-npm start             # http://localhost:3000
-npm test              # run 29 unit tests
+---
+
+## What Is This?
+
+A web-based Google Ads management tool for car dealer digital marketing teams. Three integrated tools in one:
+
+1. **Task Manager** — Paste Freshdesk tasks in plain English, Claude AI translates to structured Google Ads API changes with review, dry-run, and one-click apply
+2. **Campaign Builder** — Build new dealer campaign structures from scratch (auto-fills dealer info via web scraping, generates Ads Editor CSV with model/brand/competitor/regional campaigns)
+3. **Pacing Dashboard** — Monitor budget pacing across MCC accounts with Google Sheets goal integration
+
+Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from one interface.
+
+---
+
+## Live Deployment
+
+| Environment | URL |
+|-------------|-----|
+| **Production** | Railway (TBD after V3 deploy) |
+| **Local** | http://localhost:3000 |
+| **Repository** | https://github.com/support5102/dealer-ads-tool (branch: V3) |
+| **V2 Reference** | https://github.com/support5102/dealer-ads-tool/tree/V2 |
+
+---
+
+## Current State
+
+| Aspect | Value |
+|--------|-------|
+| **Phase** | 18: Polish & Logic Hardening COMPLETE (806 unit tests, 32 commits) |
+| **Last Session** | 2026-04-08 - CLEAN |
+| **Immediate Next** | User testing & edge case fixes as found |
+| **Live URL** | https://dealer-ads-tool-840281790428.us-east1.run.app |
+| **Live Version** | V3 on Google Cloud Run |
+
+---
+
+## Data Flow
+
+```
+User pastes Freshdesk task in browser
+    ↓
+POST /api/parse-task — routes/changes.js
+    ↓
+Build Claude prompt with account structure — services/claude-parser.js
+    ↓
+Anthropic API → structured JSON change plan
+    ↓
+Display plan in browser (summary, changes, warnings)
+    ↓
+POST /api/apply-changes — routes/changes.js
+    ↓
+Execute each change — services/change-executor.js
+    ↓
+Google Ads API mutations — services/google-ads.js
+    ↓
+Return results to browser
 ```
 
-## Required env vars
-- `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` — OAuth
-- `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_MANAGER_ACCOUNT_ID` — Google Ads
-- `ANTHROPIC_API_KEY` — Claude AI
-- `SESSION_SECRET` — session encryption
-- `PORT` (default 3000)
+---
 
-## Architecture
-- `server.js` — Express routes and orchestration (~1180 lines)
-- `public/index.html` — Frontend UI
-- `lib/apply-change.js` — Google Ads mutation logic
-- `lib/claude-prompts.js` — Claude prompt builders
-- `lib/history.js` — Persistent file-based history
-- `tests/` — Jest unit tests
+## Key Commands
 
-## Deployment
-Railway via Nixpacks. Config in `railway.json`. Health check at `/health`.
+```bash
+# Development
+npm run dev
 
-## Current state
-All 9 phases + budget tracker + production hardening complete. Modular architecture with extracted frontend, libraries, and tests. Supports single/multi-account task parsing, batch apply, persistent change history with undo, smart suggestions, NL reporting, task templates, budget spend tracking, and Freshdesk webhook. Production-ready with secure cookies, CORS restrictions, and trust proxy for Railway. See `project-state.md` for full details.
+# Testing
+npm test                    # All tests
+npm run test:config         # Tier 1 only
+npm run test:unit           # Tier 2 only
+npm run test:integration    # Tier 3 only
+npm run test:coverage       # With coverage report
+
+# Local Server
+npm start
+
+# Deploy to Railway
+git push origin V3          # Railway auto-deploys from branch
+```
+
+---
+
+## File Locations
+
+| What | Where |
+|------|-------|
+| Source code | `src/` |
+| Routes | `src/routes/` |
+| Services | `src/services/` |
+| Middleware | `src/middleware/` |
+| Frontend | `public/` |
+| Tests | `tests/` |
+| Config | `.env` / `src/utils/config.js` |
+| Documentation | root (`claude.md`, `project-state.md`) |
+| V2 reference | V2 branch on GitHub |
+
+---
+
+## Tech Stack
+
+- **Language:** JavaScript (Node.js 18+)
+- **Framework:** Express.js
+- **Testing:** Jest
+- **AI Integration:** Anthropic Claude API (task parsing)
+- **Ads API:** google-ads-api npm package
+- **Deployment:** Railway (Nixpacks)
+
+---
+
+## Machine Mode
+
+**SINGLE:** All work happens locally / in Railway cloud.
+
+---
+
+## Start Here
+
+1. Claude reads THIS file only at initialization
+2. Claude summarizes current state and asks what we're focusing on
+3. Claude confirms session scope: "This session: [task]. Staying focused on this."
+4. Claude loads additional context ONLY for the chosen focus area
+5. Check session log in project-state.md if resuming mid-work
+
+---
+
+## Context Note
+
+Claude: After reading this file, DO NOT automatically read all of claude.md or project-state.md. Ask what we're working on first, then load only what's relevant. See "Context Management" section in claude.md for the full approach.
+
+---
+
+*For full development guidelines, TDD practices, code documentation standards, and architecture details, see `claude.md`.*

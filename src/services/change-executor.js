@@ -10,7 +10,7 @@
  * Supported types: pause_campaign, enable_campaign, update_budget,
  * pause_ad_group, enable_ad_group, pause_keyword, add_keyword,
  * add_negative_keyword, exclude_radius, add_radius, update_keyword_bid,
- * dismiss_recommendation
+ * dismiss_recommendation, create_shared_budget, assign_campaign_budget
  */
 
 const { sanitizeGaqlString, sanitizeGaqlNumber } = require('../utils/sanitize');
@@ -79,6 +79,26 @@ function getCustomerId(client) {
 }
 
 /**
+ * Looks up a shared budget by name and returns its resource_name.
+ *
+ * @param {Object} client - Google Ads API customer client
+ * @param {string} budgetName - Exact shared budget name
+ * @returns {Promise<string>} Budget resource_name
+ * @throws {Error} If shared budget not found
+ */
+async function getSharedBudgetResourceName(client, budgetName) {
+  const safeName = sanitizeGaqlString(budgetName);
+  const rows = await client.query(
+    `SELECT campaign_budget.resource_name, campaign_budget.name ` +
+    `FROM campaign_budget ` +
+    `WHERE campaign_budget.explicitly_shared = TRUE ` +
+    `AND campaign_budget.name = '${safeName}' LIMIT 1`
+  );
+  if (!rows.length) throw new Error(`Shared budget not found: "${budgetName}"`);
+  return rows[0].campaign_budget.resource_name;
+}
+
+/**
  * Applies a single change to a Google Ads account.
  *
  * @param {Object} client - Authenticated Google Ads API client
@@ -96,6 +116,13 @@ async function applyChange(client, change, dryRun) {
   const customerId = getCustomerId(client);
 
   if (dryRun) {
+    if (type === 'create_shared_budget') {
+      const camps = details?.campaignNames?.length ? ` and assign ${details.campaignNames.length} campaign(s)` : '';
+      return `[DRY RUN] Would create shared budget "${details?.budgetName}" at $${details?.dailyAmount}/day${camps}`;
+    }
+    if (type === 'assign_campaign_budget') {
+      return `[DRY RUN] Would assign "${campaignName}" to shared budget "${details?.budgetName}"`;
+    }
     return `[DRY RUN] Would ${type} — ${campaignName || ''}${adGroupName ? ' > ' + adGroupName : ''}`;
   }
 
@@ -261,9 +288,117 @@ async function applyChange(client, change, dryRun) {
       return `Dismissed recommendation: ${details.resourceName}`;
     }
 
+    case 'create_shared_budget': {
+      const amountMicros = Math.round(parseFloat(details.dailyAmount) * 1_000_000);
+      const result = await client.campaignBudgets.create([{
+        name: details.budgetName,
+        amount_micros: amountMicros,
+        explicitly_shared: true,
+      }]);
+      // Extract the new budget's resource_name from create result
+      const budgetResource = result?.results?.[0]?.resource_name || result?.[0]?.resource_name;
+      if (!budgetResource) throw new Error('Budget created but resource_name not returned');
+
+      const messages = [`Created shared budget "${details.budgetName}" at $${details.dailyAmount}/day`];
+
+      // Optionally assign campaigns to the new budget
+      if (details.campaignNames && details.campaignNames.length > 0) {
+        for (const campName of details.campaignNames) {
+          try {
+            const campId = await getCampaignId(client, campName);
+            await client.campaigns.update([{
+              resource_name: `customers/${customerId}/campaigns/${campId}`,
+              campaign_budget: budgetResource,
+            }]);
+            messages.push(`  ✓ Assigned "${campName}"`);
+          } catch (err) {
+            messages.push(`  ✗ Failed to assign "${campName}": ${err.message}`);
+          }
+        }
+      }
+      return messages.join('\n');
+    }
+
+    case 'assign_campaign_budget': {
+      const budgetResource = await getSharedBudgetResourceName(client, details.budgetName);
+      const campId = await getCampaignId(client, campaignName);
+      await client.campaigns.update([{
+        resource_name: `customers/${customerId}/campaigns/${campId}`,
+        campaign_budget: budgetResource,
+      }]);
+      return `Assigned "${campaignName}" to shared budget "${details.budgetName}"`;
+    }
+
+    // ── Ad copy mutations ──
+
+    case 'pause_ad': {
+      if (!details.adId) throw new Error('pause_ad requires details.adId');
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      await client.adGroupAds.update([{
+        resource_name: `customers/${customerId}/adGroupAds/${agId}~${details.adId}`,
+        status: 'PAUSED',
+      }]);
+      return `Paused ad ${details.adId} in ${adGroupName}`;
+    }
+
+    case 'enable_ad': {
+      if (!details.adId) throw new Error('enable_ad requires details.adId');
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      await client.adGroupAds.update([{
+        resource_name: `customers/${customerId}/adGroupAds/${agId}~${details.adId}`,
+        status: 'ENABLED',
+      }]);
+      return `Enabled ad ${details.adId} in ${adGroupName}`;
+    }
+
+    case 'update_rsa': {
+      // Google Ads RSAs are immutable — must remove old + create new
+      if (!details.adId) throw new Error('update_rsa requires details.adId');
+      if (!details.headlines || !details.descriptions) throw new Error('update_rsa requires details.headlines and details.descriptions');
+
+      // Use adGroupId directly if available (avoids name mismatch), fall back to name lookup
+      const agId = details.adGroupId || await getAdGroupId(client, campaignName, adGroupName);
+
+      // Build headline and description assets
+      const headlines = details.headlines.map(h => ({
+        text: h.text,
+        ...(h.pinnedField ? { pinned_field: h.pinnedField } : {}),
+      }));
+      const descriptions = details.descriptions.map(d => ({
+        text: d.text,
+        ...(d.pinnedField ? { pinned_field: d.pinnedField } : {}),
+      }));
+      const finalUrls = details.finalUrls || [];
+
+      const adResource = `customers/${customerId}/adGroupAds/${agId}~${details.adId}`;
+
+      // Step 1: Pause old ad first (safety — if create fails, ad is paused, not deleted)
+      await client.adGroupAds.update([{ resource_name: adResource, status: 'PAUSED' }]);
+
+      // Step 2: Create new ad with updated copy
+      try {
+        await client.adGroupAds.create([{
+          ad_group: `customers/${customerId}/adGroups/${agId}`,
+          status: 'ENABLED',
+          ad: {
+            final_urls: finalUrls,
+            responsive_search_ad: { headlines, descriptions },
+          },
+        }]);
+      } catch (createErr) {
+        // Re-enable old ad if creation failed
+        await client.adGroupAds.update([{ resource_name: adResource, status: 'ENABLED' }]).catch(() => {});
+        throw new Error(`Failed to create new RSA (old ad re-enabled): ${createErr.message}`);
+      }
+
+      // Step 3: Remove old ad only after successful creation
+      await client.adGroupAds.remove([adResource]);
+      return `Updated RSA in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`;
+    }
+
     default:
-      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation`);
+      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation, create_shared_budget, assign_campaign_budget, pause_ad, enable_ad, update_rsa`);
   }
 }
 
-module.exports = { applyChange, getCampaignId, getAdGroupId };
+module.exports = { applyChange, getCampaignId, getAdGroupId, getSharedBudgetResourceName };

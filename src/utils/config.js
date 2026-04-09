@@ -66,6 +66,10 @@ function validateEnv(env = process.env) {
       apiKey: env.ANTHROPIC_API_KEY,
       model:  env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
     },
+    freshdesk: {
+      apiKey: env.FRESHDESK_API_KEY || '',
+      domain: env.FRESHDESK_DOMAIN || 'savvydealer',
+    },
   };
 
   return deepFreeze(config);

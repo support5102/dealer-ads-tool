@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dealer Ads Manager</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -24,6 +25,24 @@
       --orange:    #fb923c;
       --red:       #f87171;
       --purple:    #a78bfa;
+    }
+
+    [data-theme="light"] {
+      --bg:        #f8fafc;
+      --bg2:       #f1f5f9;
+      --bg3:       #e2e8f0;
+      --border:    #cbd5e1;
+      --border2:   #e2e8f0;
+      --text:      #1e293b;
+      --text2:     #475569;
+      --text3:     #94a3b8;
+      --text4:     #cbd5e1;
+      --blue:      #2563eb;
+      --blue-dark: #1d4ed8;
+      --green:     #16a34a;
+      --orange:    #ea580c;
+      --red:       #dc2626;
+      --purple:    #7c3aed;
     }
 
     body {
@@ -727,6 +746,23 @@
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Freshdesk ticket panel */
+    .freshdesk-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+    .freshdesk-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: var(--bg3); border-bottom: 1px solid var(--border2); }
+    .freshdesk-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text4); }
+    .freshdesk-refresh-btn { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); font-size: 14px; cursor: pointer; padding: 2px 7px; line-height: 1; }
+    .freshdesk-refresh-btn:hover { color: var(--text2); border-color: #2d4a6e; }
+    .freshdesk-list { max-height: 220px; overflow-y: auto; }
+    .freshdesk-ticket { display: flex; align-items: center; gap: 10px; padding: 8px 14px; cursor: pointer; border-bottom: 1px solid var(--border2); transition: background 0.15s; }
+    .freshdesk-ticket:last-child { border-bottom: none; }
+    .freshdesk-ticket:hover { background: var(--bg3); }
+    .freshdesk-ticket.selected { background: #0c1a30; border-left: 2px solid var(--blue); }
+    .freshdesk-priority-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .freshdesk-ticket-body { flex: 1; min-width: 0; }
+    .freshdesk-ticket-subject { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .freshdesk-ticket-meta { font-size: 10px; color: var(--text4); margin-top: 2px; }
+    .freshdesk-empty { padding: 14px; text-align: center; color: var(--text4); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -741,10 +777,13 @@
     </div>
   </div>
   <div class="header-right" id="headerRight">
-    <a href="/pacing.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
-    <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Auditor</a>
-    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Campaign Builder</a>
-    <button class="connect-btn" onclick="connectGoogle()">🔗 Connect Google Ads</button>
+    <a href="/" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Task Manager</a>
+    <a href="/pacing-overview.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Pacing</a>
+    <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Auditor</a>
+    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Builder</a>
+    <a href="/change-history.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">History</a>
+    <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+    <button id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;font-family:'DM Mono',monospace;">🌙 Dark</button>
   </div>
 </div>
 
@@ -776,6 +815,17 @@
 
     <div class="task-area" id="taskArea" style="display:none">
       <div class="section-title">Freshdesk Task</div>
+
+      <!-- Freshdesk ticket list -->
+      <div id="freshdeskPanel" class="freshdesk-panel" style="display:none">
+        <div class="freshdesk-header">
+          <span class="freshdesk-title">My Tickets</span>
+          <button class="freshdesk-refresh-btn" onclick="loadFreshdeskTickets()">&#x21bb;</button>
+        </div>
+        <div id="freshdeskList" class="freshdesk-list">
+          <div class="freshdesk-empty">Loading...</div>
+        </div>
+      </div>
 
       <!-- Smart suggestions (populated after account load) -->
       <div id="suggestionsPanel" style="display:none"></div>
@@ -889,6 +939,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   await checkAuthStatus();
+  await checkFreshdeskStatus();
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -920,9 +971,11 @@ function logout() {
 function showConnectedState() {
   const hr = document.getElementById('headerRight');
   hr.innerHTML = `
-    <a href="/pacing.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Pacing</a>
-    <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Auditor</a>
-    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace">Campaign Builder</a>
+    <a href="/" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Task Manager</a>
+    <a href="/pacing-overview.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Pacing</a>
+    <a href="/audit.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Auditor</a>
+    <a href="/builder.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Builder</a>
+    <a href="/change-history.html" style="color:#a78bfa;text-decoration:none;font-size:12px;font-family:'DM Mono',monospace;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">History</a>
     <div class="connected-badge">
       <div class="pulse-dot"></div>
       Google Ads Connected
@@ -1738,6 +1791,88 @@ function showToast(msg, type = 'success') {
   t.style.color         = type === 'error' ? '#f87171'  : '#4ade80';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+// ─────────────────────────────────────────────────────────────
+// FRESHDESK TICKET INTEGRATION
+// ─────────────────────────────────────────────────────────────
+
+async function checkFreshdeskStatus() {
+  try {
+    const res = await fetch('/api/freshdesk/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.configured) {
+      const panel = document.getElementById('freshdeskPanel');
+      if (panel) {
+        panel.style.display = 'block';
+        loadFreshdeskTickets();
+      }
+    }
+  } catch (_) { /* Freshdesk not configured */ }
+}
+
+async function loadFreshdeskTickets() {
+  const list = document.getElementById('freshdeskList');
+  if (!list) return;
+  list.innerHTML = '<div class="freshdesk-empty">Loading tickets...</div>';
+  try {
+    const res = await fetch('/api/freshdesk/tickets');
+    if (!res.ok) throw new Error('Failed to load');
+    const data = await res.json();
+    renderFreshdeskTickets(data.tickets || []);
+  } catch (err) {
+    list.innerHTML = '<div class="freshdesk-empty">Error loading tickets</div>';
+  }
+}
+
+function renderFreshdeskTickets(tickets) {
+  const list = document.getElementById('freshdeskList');
+  if (!list) return;
+  if (tickets.length === 0) {
+    list.innerHTML = '<div class="freshdesk-empty">No open tickets</div>';
+    return;
+  }
+  const colors = { urgent: '#f87171', high: '#fb923c', medium: '#60a5fa', low: '#4ade80' };
+  list.innerHTML = tickets.map(t => {
+    const c = colors[t.priority] || '#94a3b8';
+    const age = formatRelativeTime(t.createdAt || t.created_at);
+    return '<div class="freshdesk-ticket" onclick="selectFreshdeskTicket(' + t.id + ', this)">'
+      + '<div class="freshdesk-priority-dot" style="background:' + c + '"></div>'
+      + '<div class="freshdesk-ticket-body">'
+      + '<div class="freshdesk-ticket-subject">' + esc(t.subject || 'No subject') + '</div>'
+      + '<div class="freshdesk-ticket-meta">' + esc(t.requester || '') + ' &middot; ' + age + '</div>'
+      + '</div></div>';
+  }).join('');
+}
+
+async function selectFreshdeskTicket(ticketId, el) {
+  // Highlight selected ticket immediately
+  document.querySelectorAll('.freshdesk-ticket').forEach(t => t.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+
+  try {
+    const res = await fetch('/api/freshdesk/tickets/' + ticketId);
+    if (!res.ok) throw new Error('Failed to load ticket');
+    const data = await res.json();
+    const textarea = document.getElementById('taskInput');
+    if (textarea && data.ticket) {
+      textarea.value = data.ticket.description || data.ticket.subject || '';
+      textarea.focus();
+    }
+  } catch (err) {
+    showToast('Failed to load ticket', 'error');
+  }
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + 'm ago';
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + 'h ago';
+  return Math.floor(hours / 24) + 'd ago';
 }
 </script>
 </body>

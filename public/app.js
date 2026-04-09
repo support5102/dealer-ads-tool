@@ -38,6 +38,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.history.replaceState({}, '', '/');
   }
   await checkAuthStatus();
+  await checkFreshdeskStatus();
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -494,4 +495,101 @@ function showToast(msg, type = 'success') {
   t.style.color       = type === 'error' ? '#f87171'  : '#4ade80';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+// ─────────────────────────────────────────────────────────────
+// FRESHDESK TICKET INTEGRATION
+// ─────────────────────────────────────────────────────────────
+
+async function checkFreshdeskStatus() {
+  try {
+    const res = await fetch('/api/freshdesk/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.configured) {
+      const panel = document.getElementById('freshdeskPanel');
+      if (panel) {
+        panel.style.display = 'block';
+        loadFreshdeskTickets();
+      }
+    }
+  } catch (_) { /* Freshdesk not configured — hide panel */ }
+}
+
+async function loadFreshdeskTickets() {
+  const list = document.getElementById('freshdeskList');
+  if (!list) return;
+  list.innerHTML = '<div class="freshdesk-empty">Loading tickets...</div>';
+
+  try {
+    const res = await fetch('/api/freshdesk/tickets');
+    if (!res.ok) throw new Error('Failed to load tickets');
+    const data = await res.json();
+    renderFreshdeskTickets(data.tickets || []);
+  } catch (err) {
+    list.innerHTML = `<div class="freshdesk-empty">Error: ${err.message}</div>`;
+  }
+}
+
+function renderFreshdeskTickets(tickets) {
+  const list = document.getElementById('freshdeskList');
+  if (!list) return;
+
+  if (tickets.length === 0) {
+    list.innerHTML = '<div class="freshdesk-empty">No open tickets</div>';
+    return;
+  }
+
+  const priorityColors = { urgent: '#f87171', high: '#fb923c', medium: '#60a5fa', low: '#4ade80' };
+
+  list.innerHTML = tickets.map(t => {
+    const color = priorityColors[t.priority] || '#94a3b8';
+    const age = formatRelativeTime(t.createdAt || t.created_at);
+    return `<div class="freshdesk-ticket" onclick="selectFreshdeskTicket(${t.id})">
+      <div class="freshdesk-priority-dot" style="background:${color}"></div>
+      <div class="freshdesk-ticket-info">
+        <div class="freshdesk-ticket-subject">${escapeHtml(t.subject || 'No subject')}</div>
+        <div class="freshdesk-ticket-meta">${escapeHtml(t.requester || '')} · ${age}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function selectFreshdeskTicket(ticketId) {
+  try {
+    const res = await fetch(`/api/freshdesk/tickets/${ticketId}`);
+    if (!res.ok) throw new Error('Failed to load ticket');
+    const data = await res.json();
+
+    // Auto-fill the task textarea with ticket content
+    const textarea = document.getElementById('taskInput');
+    if (textarea && data.ticket) {
+      textarea.value = data.ticket.description || data.ticket.subject || '';
+      textarea.focus();
+
+      // Highlight selected ticket
+      document.querySelectorAll('.freshdesk-ticket').forEach(el => el.classList.remove('selected'));
+      const clicked = event?.target?.closest('.freshdesk-ticket');
+      if (clicked) clicked.classList.add('selected');
+    }
+  } catch (err) {
+    showToast('Failed to load ticket: ' + err.message, 'error');
+  }
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }

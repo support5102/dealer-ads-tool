@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/styles.css"/>
   <link rel="stylesheet" href="/audit-styles.css"/>
+  <script src="/theme.js"></script>
 </head>
 <body>
 
@@ -16,14 +17,17 @@
     <div class="logo-icon">&#x2714;</div>
     <div>
       <div class="logo-text">Account Health Auditor</div>
-      <div class="logo-sub">11 Automated Checks &middot; Strategy-Aligned</div>
+      <div class="logo-sub">20 Automated Checks &middot; Strategy-Aligned</div>
     </div>
   </div>
   <div class="header-right" id="headerRight">
     <a href="/" class="nav-link">Task Manager</a>
-    <a href="/pacing.html" class="nav-link">Pacing</a>
-    <a href="/builder.html" class="nav-link">Campaign Builder</a>
+    <a href="/pacing-overview.html" class="nav-link">Pacing</a>
+    <a href="/audit.html" class="nav-link">Auditor</a>
+    <a href="/builder.html" class="nav-link">Builder</a>
+    <a href="/change-history.html" class="nav-link">History</a>
     <button class="connect-btn" onclick="connectGoogle()">Connect Google Ads</button>
+    <button class="nav-link" id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;">🌙 Dark</button>
   </div>
 </div>
 
@@ -76,7 +80,7 @@
   <div class="audit-clean" id="auditClean" style="display:none;">
     <div class="clean-icon">&#x2705;</div>
     <h2>Account looks healthy!</h2>
-    <p>All 11 checks passed with no findings.</p>
+    <p>All 19 checks passed with no findings.</p>
   </div>
 
 </div>

@@ -79,6 +79,17 @@ function createAuthRouter(config) {
         // Non-fatal — audit log will show 'unknown' if this fails
       }
 
+      // Auto-enable daily spend sync when user authenticates
+      if (data.refresh_token && process.env.GOOGLE_SHEETS_SPREADSHEET_ID) {
+        const spendSync = require('../services/spend-sync');
+        spendSync.enableSpendSync({
+          config: config.googleAds,
+          refreshToken: data.refresh_token,
+          mccId: config.googleAds.mccId || '',
+          spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+        });
+      }
+
       res.redirect('/?connected=true');
     } catch (err) {
       console.error('OAuth error:', err.response?.data || err.message);
