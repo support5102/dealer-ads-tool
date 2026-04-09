@@ -1079,7 +1079,7 @@ function App() {
         <p className="text-orange-700 text-xs">Campaigns will be generated for: Collision Repair, Auto Body, Paint, Dent Repair, Insurance Claims, and Brand. All with location targeting, negative keywords, and optimized ad copy for your area.</p>
       </div>}
 
-      {bizType==="dealer"&&<><div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      {bizType==="dealer"&&<div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="bg-green-50 px-5 py-3 border-b border-green-100 flex items-center gap-2"><span>🚘</span><b className="text-sm text-gray-800">Makes &amp; Models</b></div>
         <div className="p-5">
           <p className="text-xs font-bold text-gray-600 mb-1">COMBOS</p>
@@ -1096,6 +1096,8 @@ function App() {
           <button onClick={()=>setGroups([...groups,newG()])} className="mt-3 w-full text-green-600 text-sm font-bold py-2" style={{border:"2px dashed #86efac",borderRadius:16}}>+ Add Another Make</button>
         </div>
       </div>
+
+
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="bg-blue-50 px-5 py-3 border-b border-blue-100 flex items-center gap-2"><span>🗺️</span><b className="text-sm text-gray-800">Regional Campaign — Nearby Cities</b></div>
@@ -1133,7 +1135,7 @@ function App() {
           </div>
           <button onClick={()=>setComps([...comps,""])} className="mt-2 text-xs text-red-500 font-semibold">+ Add Competitor</button>
         </div>
-      </div></>}
+      </div>}
 
       <button onClick={go} className="w-full text-white font-bold text-lg py-4 rounded-2xl shadow-xl" style={{background:"#1d4ed8"}}>
         ⬇️ Generate &amp; Download Google Ads CSV
