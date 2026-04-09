@@ -180,175 +180,6 @@ function buildInventoryUrl(baseUrl, make, model, city, state, siteType) {
   return base + "/search/new-" + sl(make) + "-" + sl(model) + "-" + sl(city) + "-" + sl(state).slice(0,2) + "/?tp=new";
 }
 
-// ── COLLISION/SERVICE SHOP CAMPAIGN BUILDER ──────────────────────────────
-
-function buildCollisionRows(dealer, city, state, startDate, locs, services, websiteUrl) {
-  var rows = [];
-  var VL = locs.filter(function(l){ return l.lat && l.lng && l.radius; });
-  function bk(){ return blankAdsRow(); }
-  function h30(s){ return String(s||"").slice(0,30); }
-  function d90(s){ return String(s||"").slice(0,90); }
-  var D = h30(dealer);
-
-  // Budget row
-  var budgetRow = bk();
-  budgetRow["Budget name"] = "Main";
-  budgetRow["Budget"] = "20";
-  rows.push(budgetRow);
-
-  // Campaign row builder
-  function CR(name){
-    var r=bk(); r.Campaign=name;
-    r["Campaign Type"]="Search"; r["Budget name"]="Main"; r["Budget"]="20"; r["Budget type"]="Daily";
-    r["EU political ads"]="Doesn't have EU political ads"; r["Standard conversion goals"]="Account-level";
-    r["Customer acquisition"]="Bid equally"; r["Languages"]="en";
-    r["Bid Strategy Type"]="Manual CPC"; r["Enhanced CPC"]="Disabled";
-    r["Broad match keywords"]="Off"; r["Ad rotation"]="Optimize for clicks";
-    r["Targeting method"]="Location of presence"; r["Exclusion method"]="Location of presence";
-    r["Audience targeting"]="Audience segments"; r["Flexible Reach"]="Audience segments";
-    r["AI Max"]="Disabled"; r["Text customization"]="Disabled"; r["Final URL expansion"]="Disabled";
-    r["Image enhancement"]="Disabled"; r["Image generation"]="Disabled";
-    r["Campaign Status"]="Paused"; r["Start Date"]=startDate; r["Networks"]="Google search";
-    return r;
-  }
-  function AR(camp, ag, cpc){
-    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag; r["Max CPC"]=cpc;
-    r["Languages"]="All"; r["Audience targeting"]="Audience segments";
-    r["Flexible Reach"]="Audience segments;Genders;Ages;Parental status;Household incomes";
-    r["Optimized targeting"]="Disabled"; r["Ad Group Type"]="Standard";
-    r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled";
-    return r;
-  }
-  function KR(camp, ag, kw, type){
-    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag; r.Keyword=kw; r["Criterion Type"]=type;
-    if(type.indexOf("Negative")===-1){ r["Max CPC"]="9"; r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled"; r.Status="Enabled"; }
-    return r;
-  }
-  function AD(camp, ag, hl, ds, p1, p2, url){
-    var r=bk(); r.Campaign=camp; r["Ad Group"]=ag;
-    var seen={}, deduped=[];
-    for(var i=0;i<hl.length;i++){ var v=h30(hl[i]); if(v&&!seen[v.toLowerCase()]){seen[v.toLowerCase()]=true;deduped.push(v);}}
-    for(var i=0;i<Math.min(deduped.length,15);i++) r["Headline "+(i+1)]=deduped[i];
-    for(var j=0;j<Math.min(ds.length,4);j++) r["Description "+(j+1)]=d90(ds[j]);
-    r["Path 1"]=String(p1||"").slice(0,15); r["Path 2"]=String(p2||"").slice(0,15);
-    r["Final URL"]=url||""; r["Ad type"]="Responsive search ad";
-    r["Campaign Status"]="Enabled"; r["Ad Group Status"]="Enabled"; r.Status="Enabled";
-    for(var k=1;k<=15;k++) r["Headline "+k+" position"]=" -";
-    for(var m=1;m<=4;m++) r["Description "+m+" position"]=" -";
-    return r;
-  }
-  function addLocs(campName){
-    VL.forEach(function(l){
-      var r=bk(); r.Campaign=campName;
-      r.Location="("+l.radius+"mi:"+(+l.lat).toFixed(6)+":"+(+l.lng).toFixed(6)+")";
-      r.Radius=String(l.radius); r.Unit="mi"; r["Campaign Status"]="Enabled"; r.Status="Enabled";
-      rows.push(r);
-    });
-  }
-
-  var url = websiteUrl || "";
-  var cityShort = city.length > 15 ? city.slice(0,12)+"..." : city;
-
-  // ── COLLISION REPAIR CAMPAIGN ──
-  var collCamp = dealer + " - Collision Repair";
-  rows.push(CR(collCamp)); addLocs(collCamp);
-
-  var collAGs = [
-    { ag: "Collision Repair", cpc: "8", kws: ["collision repair near me","collision repair "+city,"auto collision repair","car collision repair","collision repair shop","collision center near me","best collision repair near me"], p1: "Collision", p2: "Repair" },
-    { ag: "Auto Body", cpc: "7", kws: ["auto body shop near me","auto body repair "+city,"auto body shop "+city,"body shop near me","car body repair","auto body work near me","best body shop near me"], p1: "Auto-Body", p2: "Shop" },
-    { ag: "Paint", cpc: "6", kws: ["auto paint shop near me","car paint repair","auto paint "+city,"car paint job near me","paint scratch repair","auto paint services","vehicle paint repair"], p1: "Paint", p2: "Services" },
-    { ag: "Dent Repair", cpc: "6", kws: ["dent repair near me","dent removal near me","paintless dent repair","car dent repair "+city,"door ding repair","hail damage repair","dent removal "+city], p1: "Dent", p2: "Repair" },
-  ];
-
-  collAGs.forEach(function(agDef) {
-    rows.push(AR(collCamp, agDef.ag, agDef.cpc));
-    agDef.kws.forEach(function(kw){ rows.push(KR(collCamp, agDef.ag, kw, "Phrase")); });
-    rows.push(AD(collCamp, agDef.ag, [
-      D, h30("Collision Repair "+cityShort), h30("Expert Auto Body Repair"), h30("Free Estimates Available"),
-      h30("Certified Collision Center"), h30(city+" Collision Repair"), h30("Insurance Claims Welcome"),
-      h30("Lifetime Warranty"), h30("Get Your Car Fixed Today"), h30("Trusted "+cityShort+" Body Shop"),
-      h30("Quality Collision Repairs"), h30("Schedule Your Estimate"), h30("All Makes & Models"),
-      h30("Fast Turnaround Time"), h30("We Work With Insurance")
-    ], [
-      d90("Expert collision repair at "+dealer+" in "+city+". Free estimates, insurance claims, and lifetime warranty on all work."),
-      d90("Certified technicians, state-of-the-art equipment. Get your vehicle looking like new. Call today for a free estimate!"),
-      d90("Trusted by "+city+" drivers for quality auto body and collision repair. All makes and models welcome."),
-      d90("From minor dents to major collision damage, we restore your vehicle to pre-accident condition. Free estimates!")
-    ], agDef.p1, agDef.p2, url));
-  });
-
-  // ── INSURANCE CLAIMS CAMPAIGN ──
-  var insCamp = dealer + " - Insurance Claims";
-  rows.push(CR(insCamp)); addLocs(insCamp);
-
-  var insAGs = [
-    { ag: "Insurance Claims", cpc: "7", kws: ["insurance claim body shop","insurance approved body shop","insurance collision repair","file insurance claim car","body shop that works with insurance","insurance estimate auto body","direct repair facility near me"], p1: "Insurance", p2: "Claims" },
-    { ag: "Car Accident", cpc: "8", kws: ["car accident repair near me","car accident body shop","auto accident repair "+city,"car wreck repair","vehicle accident damage repair","accident repair shop near me","car crash repair near me"], p1: "Accident", p2: "Repair" },
-  ];
-
-  insAGs.forEach(function(agDef) {
-    rows.push(AR(insCamp, agDef.ag, agDef.cpc));
-    agDef.kws.forEach(function(kw){ rows.push(KR(insCamp, agDef.ag, kw, "Phrase")); });
-    rows.push(AD(insCamp, agDef.ag, [
-      D, h30("We Handle Insurance Claims"), h30("Insurance Approved Shop"), h30("Car Accident? We Can Help"),
-      h30("Direct Repair Facility"), h30("Free Insurance Estimates"), h30("All Insurance Accepted"),
-      h30(city+" Accident Repair"), h30("Get Back On The Road Fast"), h30("Stress-Free Claims Process"),
-      h30("Certified Repair Center"), h30("OEM Quality Parts"), h30("Hassle-Free Repairs"),
-      h30("Towing Available"), h30("Rental Car Assistance"), h30("We Fight For You")
-    ], [
-      d90("Had an accident? "+dealer+" handles your insurance claim from start to finish. Free estimates, all insurance accepted."),
-      d90("Insurance approved collision center in "+city+". We work directly with your insurance company for hassle-free repairs."),
-      d90("Don't stress after an accident. Our certified team handles everything — insurance claims, repairs, and rental car coordination."),
-      d90("Trusted direct repair facility. Fast, quality repairs with lifetime warranty. Get your free estimate today!")
-    ], agDef.p1, agDef.p2, url));
-  });
-
-  // ── BRAND CAMPAIGN ──
-  var brandCamp = dealer + " - Brand";
-  rows.push(CR(brandCamp)); addLocs(brandCamp);
-  rows.push(AR(brandCamp, "Brand", "3"));
-  var brandKws = [dealer.toLowerCase(), dealer.toLowerCase()+" collision", dealer.toLowerCase()+" body shop", dealer.toLowerCase()+" "+city.toLowerCase()];
-  brandKws.forEach(function(kw){ rows.push(KR(brandCamp, "Brand", kw, "Phrase")); });
-  rows.push(AD(brandCamp, "Brand", [
-    D, h30(city+"'s #1 Collision Center"), h30("Expert Auto Body Repair"), h30("Free Estimates"),
-    h30("All Makes & Models"), h30("Insurance Claims Welcome"), h30("Lifetime Warranty"),
-    h30("Certified Technicians"), h30("Call Us Today"), h30("Quality You Can Trust"),
-  ], [
-    d90(dealer+" — "+city+"'s trusted collision repair center. Free estimates, all insurance accepted, lifetime warranty."),
-    d90("Expert auto body and collision repair. Certified technicians, quality parts, and fast turnaround. Visit us today!"),
-  ], "Collision", "Center", url));
-
-  // ── NEGATIVE KEYWORDS (account-level) ──
-  var negatives = ["jobs","careers","hiring","salary","employment","training","school","course","certification","parts","junkyard","used parts","wholesale","tow truck","towing company","lawyer","attorney","lawsuit"];
-  negatives.forEach(function(neg){
-    rows.push(KR(collCamp, "", neg, "Negative Phrase"));
-    rows.push(KR(insCamp, "", neg, "Negative Phrase"));
-  });
-
-  // Add any custom services as additional ad groups
-  if (services && services.length > 0) {
-    services.forEach(function(svc) {
-      if (!svc.name) return;
-      var svcAg = svc.name;
-      rows.push(AR(collCamp, svcAg, "6"));
-      (svc.keywords || []).forEach(function(kw){ rows.push(KR(collCamp, svcAg, kw, "Phrase")); });
-      if (svc.keywords && svc.keywords.length > 0) {
-        rows.push(AD(collCamp, svcAg, [
-          D, h30(svc.name+" "+cityShort), h30("Expert "+svc.name), h30("Free Estimates Available"),
-          h30("Quality "+svc.name), h30("Call Today"), h30("All Makes & Models"),
-        ], [
-          d90(svc.name+" at "+dealer+" in "+city+". Free estimates, quality work, and lifetime warranty."),
-          d90("Professional "+svc.name.toLowerCase()+" services. Certified technicians, fast turnaround. Call for your free estimate!"),
-        ], svc.name.slice(0,15), "", url));
-      }
-    });
-  }
-
-  return rows;
-}
-
-// ── DEALER CAMPAIGN BUILDER (existing) ──────────────────────────────────
-
 function buildRows(dealer, city, state, groups, startDate, comps, locs, nearbyCities) {
   var rows = [];
   var VL = locs.filter(function(l){ return l.lat && l.lng && l.radius; });
@@ -920,11 +751,9 @@ function MakeCard({g,gi,groups,setGroups,city,state}) {
 }
 
 function App() {
-  const [bizType,setBizType]=useState("dealer"); // "dealer" or "collision"
   const [dealer,setDealer]=useState(""), [city,setCity]=useState(""), [state,setState]=useState("");
   const [start,setStart]=useState(new Date().toISOString().slice(0,10));
   const [groups,setGroups]=useState([newG()]);
-  const [collisionUrl,setCollisionUrl]=useState("");
   const [comps,setComps]=useState([""]);
   const [nearbyCities,setNearbyCities]=useState([""]);
 
@@ -971,13 +800,11 @@ function App() {
 
   const go = async () => {
     const e=[];
-    if(!dealer.trim())e.push("Business name required");
+    if(!dealer.trim())e.push("Dealer name required");
     if(!city.trim())e.push("City required");
     if(!state.trim())e.push("State required");
-    if(bizType==="dealer"){
-      const hasModel=groups.some(g=>g.make.trim()&&g.models.some(m=>m.name.trim()));
-      if(!hasModel)e.push("At least one make + model required");
-    }
+    const hasModel=groups.some(g=>g.make.trim()&&g.models.some(m=>m.name.trim()));
+    if(!hasModel)e.push("At least one make + model required");
     if(e.length){setErrs(e);return;}
     setErrs([]);
 
@@ -997,13 +824,8 @@ function App() {
 
   const doGenerate = (resolvedLocs) => {
     try{
-      let rows;
-      if (bizType === "collision") {
-        rows = buildCollisionRows(dealer.trim(), city.trim(), state.trim(), start, resolvedLocs, [], collisionUrl.trim());
-      } else {
-        const fg=groups.filter(g=>g.make.trim()).map(g=>({...g,models:g.models.filter(m=>m.name.trim())}));
-        rows=buildRows(dealer.trim(),city.trim(),state.trim(),fg,start,comps,resolvedLocs,nearbyCities);
-      }
+      const fg=groups.filter(g=>g.make.trim()).map(g=>({...g,models:g.models.filter(m=>m.name.trim())}));
+      const rows=buildRows(dealer.trim(),city.trim(),state.trim(),fg,start,comps,resolvedLocs,nearbyCities);
       if(!rows||rows.length===0){setErrs(["No rows generated — check makes & models"]);return;}
       const csv=buildAdsCSV(rows);
       const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
@@ -1057,29 +879,16 @@ function App() {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="bg-blue-50 px-5 py-3 border-b border-blue-100 flex items-center gap-2"><span>🏢</span><b className="text-sm text-gray-800">Business Information</b></div>
+        <div className="bg-blue-50 px-5 py-3 border-b border-blue-100 flex items-center gap-2"><span>🏢</span><b className="text-sm text-gray-800">Dealer Information</b></div>
         <div className="p-5 grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <p className="text-xs text-gray-500 mb-1">Business Type</p>
-            <div className="flex gap-2">
-              <button onClick={()=>setBizType("dealer")} className={"px-4 py-2 rounded-lg text-sm font-bold border-2 "+(bizType==="dealer"?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-600 border-gray-300")}>🚗 Dealership</button>
-              <button onClick={()=>setBizType("collision")} className={"px-4 py-2 rounded-lg text-sm font-bold border-2 "+(bizType==="collision"?"bg-orange-600 text-white border-orange-600":"bg-white text-gray-600 border-gray-300")}>🔧 Collision / Body Shop</button>
-            </div>
-          </div>
-          <div className="col-span-2"><p className="text-xs text-gray-500 mb-1">Business Name</p><input className={I} placeholder={bizType==="collision"?"Bob Weaver Collision":"Alan Jay CDJR of Wauchula"} value={dealer} onChange={e=>setDealer(e.target.value)}/></div>
+          <div className="col-span-2"><p className="text-xs text-gray-500 mb-1">Dealer Name</p><input className={I} placeholder="Alan Jay CDJR of Wauchula" value={dealer} onChange={e=>setDealer(e.target.value)}/></div>
           <div><p className="text-xs text-gray-500 mb-1">City</p><input className={I} placeholder="Wauchula" value={city} onChange={e=>setCity(e.target.value)}/></div>
           <div><p className="text-xs text-gray-500 mb-1">State</p><input className={I} placeholder="FL" value={state} onChange={e=>setState(e.target.value)}/></div>
           <div><p className="text-xs text-gray-500 mb-1">Start Date</p><input className={I} type="date" value={start} onChange={e=>setStart(e.target.value)}/></div>
-          {bizType==="collision"&&<div><p className="text-xs text-gray-500 mb-1">Website URL</p><input className={I} placeholder="https://bobweavercollision.com" value={collisionUrl} onChange={e=>setCollisionUrl(e.target.value)}/></div>}
         </div>
       </div>
 
-      {bizType==="collision"&&<div className="bg-orange-50 border border-orange-200 rounded-2xl p-5">
-        <p className="text-orange-800 font-bold text-sm mb-2">🔧 Collision / Body Shop Mode</p>
-        <p className="text-orange-700 text-xs">Campaigns will be generated for: Collision Repair, Auto Body, Paint, Dent Repair, Insurance Claims, and Brand. All with location targeting, negative keywords, and optimized ad copy for your area.</p>
-      </div>}
-
-      {bizType==="dealer"&&<div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="bg-green-50 px-5 py-3 border-b border-green-100 flex items-center gap-2"><span>🚘</span><b className="text-sm text-gray-800">Makes &amp; Models</b></div>
         <div className="p-5">
           <p className="text-xs font-bold text-gray-600 mb-1">COMBOS</p>
@@ -1135,7 +944,7 @@ function App() {
           </div>
           <button onClick={()=>setComps([...comps,""])} className="mt-2 text-xs text-red-500 font-semibold">+ Add Competitor</button>
         </div>
-      </div>}
+      </div>
 
       <button onClick={go} className="w-full text-white font-bold text-lg py-4 rounded-2xl shadow-xl" style={{background:"#1d4ed8"}}>
         ⬇️ Generate &amp; Download Google Ads CSV
