@@ -26,6 +26,7 @@ const { createAuditRouter }           = require('./routes/audit');
 const { createOptimizationRouter }    = require('./routes/optimization');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
+const { createCommandCenterRouter }    = require('./routes/command-center');
 const { errorHandler }                = require('./middleware/error-handler');
 const spendSync                       = require('./services/spend-sync');
 const database                        = require('./services/database');
@@ -68,6 +69,11 @@ function createApp(config) {
     },
   }));
 
+  // ── Default route → Command Center (before static, so index.html doesn't take over) ──
+  app.get('/', (req, res) => {
+    res.redirect('/command-center.html');
+  });
+
   // ── Static files ──
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -82,6 +88,7 @@ function createApp(config) {
   app.use(createOptimizationRouter(config));
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
+  app.use('/api/cc', createCommandCenterRouter(config));
 
   // ── Spend Sync — daily 8 AM EST spend pull from Google Ads → Sheets ──
   const { requireAuth } = require('./middleware/auth');

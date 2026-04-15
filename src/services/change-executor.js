@@ -123,6 +123,21 @@ async function applyChange(client, change, dryRun) {
     if (type === 'assign_campaign_budget') {
       return `[DRY RUN] Would assign "${campaignName}" to shared budget "${details?.budgetName}"`;
     }
+    if (type === 'create_campaign') {
+      return `[DRY RUN] Would create campaign "${campaignName}" (budget: ${details?.budgetName || '$' + (details?.budgetAmount || 20) + '/day'})`;
+    }
+    if (type === 'create_ad_group') {
+      return `[DRY RUN] Would create ad group "${adGroupName}" in "${campaignName}" (CPC: $${details?.defaultCpc || 9})`;
+    }
+    if (type === 'create_rsa') {
+      return `[DRY RUN] Would create RSA in "${adGroupName}" with ${details?.headlines?.length || 0} headlines → ${details?.finalUrl || ''}`;
+    }
+    if (type === 'set_location_targeting') {
+      return `[DRY RUN] Would set ${details?.locations?.length || 0} location target(s) on "${campaignName}"`;
+    }
+    if (type === 'set_ad_schedule') {
+      return `[DRY RUN] Would set ad schedule (${details?.schedule?.length || 0} days) on "${campaignName}"`;
+    }
     return `[DRY RUN] Would ${type} — ${campaignName || ''}${adGroupName ? ' > ' + adGroupName : ''}`;
   }
 
@@ -196,6 +211,24 @@ async function applyChange(client, change, dryRun) {
         status: 'PAUSED',
       }]);
       return `Paused keyword: [${details.matchType}] "${details.keyword}"`;
+    }
+
+    case 'enable_keyword': {
+      const safeCamp = sanitizeGaqlString(campaignName);
+      const safeKw   = sanitizeGaqlString(details.keyword);
+      const safeMatch = sanitizeGaqlString(details.matchType);
+      const rows = await client.query(
+        `SELECT ad_group_criterion.resource_name FROM ad_group_criterion ` +
+        `WHERE campaign.name = '${safeCamp}' ` +
+        `AND ad_group_criterion.keyword.text = '${safeKw}' ` +
+        `AND ad_group_criterion.keyword.match_type = '${safeMatch}' LIMIT 1`
+      );
+      if (!rows.length) throw new Error(`Keyword not found: ${details.keyword}`);
+      await client.adGroupCriteria.update([{
+        resource_name: rows[0].ad_group_criterion.resource_name,
+        status: 'ENABLED',
+      }]);
+      return `Enabled keyword: [${details.matchType}] "${details.keyword}"`;
     }
 
     case 'add_negative_keyword': {
@@ -396,8 +429,136 @@ async function applyChange(client, change, dryRun) {
       return `Updated RSA in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`;
     }
 
+    // ── Full account creation mutations ──
+
+    case 'create_campaign': {
+      // details: { budgetName, budgetAmount, settings: { networks, biddingStrategy, ... } }
+      const d = details || {};
+      const settings = d.settings || {};
+
+      // Create or find the budget
+      let budgetResource;
+      if (d.budgetName) {
+        try {
+          budgetResource = await getSharedBudgetResourceName(client, d.budgetName);
+        } catch {
+          // Budget doesn't exist yet — create it
+          const amountMicros = Math.round(parseFloat(d.budgetAmount || 20) * 1_000_000);
+          const budgetResult = await client.campaignBudgets.create([{
+            name: d.budgetName,
+            amount_micros: amountMicros,
+            explicitly_shared: true,
+          }]);
+          budgetResource = budgetResult?.results?.[0]?.resource_name || budgetResult?.[0]?.resource_name;
+        }
+      } else {
+        // Individual budget
+        const amountMicros = Math.round(parseFloat(d.budgetAmount || 20) * 1_000_000);
+        const budgetResult = await client.campaignBudgets.create([{
+          name: campaignName,
+          amount_micros: amountMicros,
+          explicitly_shared: false,
+        }]);
+        budgetResource = budgetResult?.results?.[0]?.resource_name || budgetResult?.[0]?.resource_name;
+      }
+
+      const campResult = await client.campaigns.create([{
+        name: campaignName,
+        status: settings.status || 'ENABLED',
+        advertising_channel_type: 'SEARCH',
+        campaign_budget: budgetResource,
+        manual_cpc: { enhanced_cpc_enabled: false },
+        network_settings: {
+          target_google_search: true,
+          target_search_network: true,
+          target_content_network: false,
+        },
+        geo_target_type_setting: {
+          positive_geo_target_type: 'PRESENCE',
+          negative_geo_target_type: 'PRESENCE',
+        },
+        start_date: settings.startDate || new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+      }]);
+      const campResource = campResult?.results?.[0]?.resource_name || campResult?.[0]?.resource_name;
+      return `Created campaign: ${campaignName}` + (campResource ? ` (${campResource})` : '');
+    }
+
+    case 'create_ad_group': {
+      const d = details || {};
+      const campId = await getCampaignId(client, campaignName);
+      const cpcMicros = Math.round(parseFloat(d.defaultCpc || 9) * 1_000_000);
+      await client.adGroups.create([{
+        campaign: `customers/${customerId}/campaigns/${campId}`,
+        name: adGroupName,
+        status: 'ENABLED',
+        type: 'SEARCH_STANDARD',
+        cpc_bid_micros: cpcMicros,
+      }]);
+      return `Created ad group: ${adGroupName} in ${campaignName} (CPC: $${d.defaultCpc || 9})`;
+    }
+
+    case 'create_rsa': {
+      const d = details || {};
+      if (!d.headlines || !d.descriptions || !d.finalUrl) {
+        throw new Error('create_rsa requires details.headlines, details.descriptions, and details.finalUrl');
+      }
+      const agId = await getAdGroupId(client, campaignName, adGroupName);
+      // All headlines/descriptions UNPINNED (no pinned_field)
+      const headlines = d.headlines.map(h => ({ text: typeof h === 'string' ? h : h.text }));
+      const descriptions = d.descriptions.map(desc => ({ text: typeof desc === 'string' ? desc : desc.text }));
+      await client.adGroupAds.create([{
+        ad_group: `customers/${customerId}/adGroups/${agId}`,
+        status: 'ENABLED',
+        ad: {
+          final_urls: [d.finalUrl],
+          responsive_search_ad: { headlines, descriptions },
+          ...(d.path1 || d.path2 ? { path1: d.path1 || '', path2: d.path2 || '' } : {}),
+        },
+      }]);
+      return `Created RSA in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`;
+    }
+
+    case 'set_location_targeting': {
+      const d = details || {};
+      if (!d.locations || !d.locations.length) throw new Error('set_location_targeting requires details.locations[]');
+      const campId = await getCampaignId(client, campaignName);
+      const criteria = d.locations.map(loc => ({
+        campaign: `customers/${customerId}/campaigns/${campId}`,
+        negative: !!loc.negative,
+        proximity: {
+          geo_point: {
+            longitude_in_micro_degrees: Math.round(loc.lng * 1_000_000),
+            latitude_in_micro_degrees:  Math.round(loc.lat * 1_000_000),
+          },
+          radius:       loc.radius,
+          radius_units: loc.units || 'MILES',
+        },
+      }));
+      await client.campaignCriteria.create(criteria);
+      return `Set ${d.locations.length} location target(s) on ${campaignName}`;
+    }
+
+    case 'set_ad_schedule': {
+      const d = details || {};
+      if (!d.schedule || !d.schedule.length) throw new Error('set_ad_schedule requires details.schedule[]');
+      const campId = await getCampaignId(client, campaignName);
+      // schedule: [{ dayOfWeek, startHour, startMinute, endHour, endMinute }]
+      const criteria = d.schedule.map(s => ({
+        campaign: `customers/${customerId}/campaigns/${campId}`,
+        ad_schedule: {
+          day_of_week: s.dayOfWeek,
+          start_hour: s.startHour,
+          start_minute: s.startMinute === 30 ? 'THIRTY' : 'ZERO',
+          end_hour: s.endHour,
+          end_minute: s.endMinute === 30 ? 'THIRTY' : 'ZERO',
+        },
+      }));
+      await client.campaignCriteria.create(criteria);
+      return `Set ad schedule on ${campaignName}: ${d.schedule.length} day(s)`;
+    }
+
     default:
-      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation, create_shared_budget, assign_campaign_budget, pause_ad, enable_ad, update_rsa`);
+      throw new Error(`Unknown change type: "${type}". Supported: pause_campaign, enable_campaign, update_budget, pause_ad_group, enable_ad_group, pause_keyword, enable_keyword, add_keyword, add_negative_keyword, exclude_radius, add_radius, update_keyword_bid, dismiss_recommendation, create_shared_budget, assign_campaign_budget, pause_ad, enable_ad, update_rsa, create_campaign, create_ad_group, create_rsa, set_location_targeting, set_ad_schedule`);
   }
 }
 

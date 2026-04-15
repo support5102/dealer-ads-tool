@@ -109,23 +109,63 @@ const COMPETING_MAKES = {
 };
 
 const ALL_KNOWN_MAKES = [
-  'ford', 'chevrolet', 'chevy', 'toyota', 'honda', 'nissan', 'hyundai',
-  'kia', 'dodge', 'ram', 'jeep', 'gmc', 'buick', 'cadillac', 'chrysler',
-  'subaru', 'mazda',
+  'ford', 'lincoln', 'chevrolet', 'chevy', 'buick', 'gmc', 'cadillac',
+  'toyota', 'lexus', 'honda', 'acura', 'nissan', 'infiniti',
+  'hyundai', 'kia', 'genesis',
+  'dodge', 'ram', 'jeep', 'chrysler',
+  'subaru', 'mazda', 'volkswagen', 'vw', 'audi',
+  'bmw', 'mercedes-benz', 'mercedes', 'volvo', 'porsche',
 ];
+
+// ─────────────────────────────────────────────────────────────
+// Ad group default CPC by campaign type
+// ─────────────────────────────────────────────────────────────
+
+const DEFAULT_CPC = {
+  brand: 3,
+  competitor: 9,
+  general: 9,
+  regional: 9,
+  new_high: 9,
+  new_low: 9,
+  used: 9,
+};
+
+// ─────────────────────────────────────────────────────────────
+// Multi-make combos for dealer groups
+// ─────────────────────────────────────────────────────────────
+
+const MAKE_COMBOS = {
+  'CDJR':           ['Chrysler', 'Dodge', 'Jeep', 'Ram'],
+  'Dodge/Jeep':     ['Dodge', 'Jeep'],
+  'Dodge/Ram':      ['Dodge', 'Ram'],
+  'Jeep/Ram':       ['Jeep', 'Ram'],
+  'GM All':         ['Chevrolet', 'Buick', 'GMC', 'Cadillac'],
+  'Chevy/GMC/CDJR': ['Chevrolet', 'GMC', 'Chrysler', 'Jeep', 'Dodge', 'Ram'],
+  'Chevy/GMC':      ['Chevrolet', 'GMC'],
+  'Buick/GMC':      ['Buick', 'GMC'],
+  'Ford/Lincoln':   ['Ford', 'Lincoln'],
+  'Toyota/Lexus':   ['Toyota', 'Lexus'],
+  'Honda/Acura':    ['Honda', 'Acura'],
+  'Hyundai/Kia':    ['Hyundai', 'Kia'],
+  'Nissan/Infiniti':['Nissan', 'Infiniti'],
+  'VW/Audi':        ['Volkswagen', 'Audi'],
+};
 
 // ─────────────────────────────────────────────────────────────
 // URL patterns by website platform
 // ─────────────────────────────────────────────────────────────
 
 const URL_PATTERNS = {
-  dealeron:       { new: '/new-inventory/index.htm?make={Make}&model={Model}' },
-  dealerinspire:  { new: '/new-vehicles/?_dFR[model][0]={Model}&_dFR[type][0]=New' },
-  dealercom:      { new: '/vcp/new/{make}/{model-slug}' },
-  dealereprocess: { new: '/new-inventory/{make}-{model-slug}' },
-  foxdealer:      { new: '/new-vehicles/{model-slug}' },
-  sincro:         { new: '/new-inventory/?model={Model}' },
-  savvydealer:    { new: '/inventory/new?make={Make}&model={Model}' },
+  autofusion:     { new: '/search/New+{Make}+{Model}+tmM',                          used: '/search/Used+{Make}+{Model}+tmM' },
+  teamvelocity:   { new: '/inventory/new/{make-lower}/{model-slug}',                 used: '/inventory/used/{make-lower}/{model-slug}' },
+  dealerinspire:  { new: '/new-vehicles/{model-slug}/',                              used: '/used-vehicles/{model-slug}/' },
+  eprocess:       { new: '/search/new-{make-slug}-{model-slug}-{city-slug}-{state-lower}/?tp=new', used: '/search/used-{make-slug}-{model-slug}-{city-slug}-{state-lower}/?tp=used' },
+  dealeron:       { new: '/new-inventory/index.htm?make={Make}&model={Model}',       used: '/used-inventory/index.htm?make={Make}&model={Model}' },
+  dealercom:      { new: '/vcp/new/{make-lower}/{model-slug}',                       used: '/vcp/used/{make-lower}/{model-slug}' },
+  foxdealer:      { new: '/new-vehicles/{model-slug}',                               used: '/used-vehicles/{model-slug}' },
+  sincro:         { new: '/new-inventory/?model={Model}',                            used: '/used-inventory/?model={Model}' },
+  savvydealer:    { new: '/inventory/new?make={Make}&model={Model}',                 used: '/inventory/used?make={Make}&model={Model}' },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -258,6 +298,8 @@ module.exports = {
   IMPRESSION_SHARE,
   COMPETING_MAKES,
   ALL_KNOWN_MAKES,
+  DEFAULT_CPC,
+  MAKE_COMBOS,
   URL_PATTERNS,
   UNIVERSAL_NEGATIVES,
   classifyCampaignType,

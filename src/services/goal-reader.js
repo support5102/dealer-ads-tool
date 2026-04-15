@@ -4,8 +4,8 @@
  * Called by: routes/pacing.js
  * Calls: Google Sheets API v4 (via injected sheets client)
  *
- * Reads the "PPC Spend Pace" sheet with columns:
- * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory | E: Dealer Notes | F: Freshdesk Tag
+ * Reads the "PPC Control" sheet with columns:
+ * A: Account (dealer name) | B: Budget | C: New | D: Used | E: Misc
  *
  * The sheets client is injected (not created here) so tests can provide a fake.
  */
@@ -43,9 +43,9 @@ function cleanCustomerId(id) {
 }
 
 /**
- * Parses a single row from the PPC Spend Pace sheet into a DealerGoal object.
+ * Parses a single row from the PPC Control sheet into a DealerGoal object.
  *
- * Column layout: A=Account Name, B=Cost (USD), C=Total Budget, D=Baseline Inventory, E=Dealer Notes, F=Freshdesk Tag
+ * Column layout: A=Account Name, B=Budget, C=New, D=Used, E=Misc
  *
  * @param {string[]} row - Array of cell values from one sheet row
  * @returns {DealerGoal|null} Parsed goal, or null if row is invalid
@@ -54,22 +54,25 @@ function parseRow(row) {
   if (!row || !Array.isArray(row)) return null;
 
   const dealerName = String(row[0] || '').trim();
-  const monthlyBudget = parseNumber(row[2]);
+  const monthlyBudget = parseNumber(row[1]); // Column B = Budget
   // Minimum viable: must have dealer name and a valid budget
   if (!dealerName || monthlyBudget == null || monthlyBudget <= 0) {
     return null;
   }
 
-  const baselineInventory = parseNumber(row[3]);
-  const dealerNotes = row[4] != null ? String(row[4]).trim() : null;
-  const freshdeskTag = row[5] != null ? String(row[5]).trim() : null;
+  // PPC Control columns: C=New, D=Used, E=Misc
+  const newBudget = parseNumber(row[2]);
+  const usedBudget = parseNumber(row[3]);
+  const miscNotes = row[4] != null ? String(row[4]).trim() : null;
 
   return {
     dealerName,
     monthlyBudget,
-    baselineInventory: baselineInventory || null,
-    dealerNotes: dealerNotes || null,
-    freshdeskTag: freshdeskTag || null,
+    baselineInventory: null,
+    dealerNotes: miscNotes || null,
+    freshdeskTag: null,
+    newBudget: newBudget || null,
+    usedBudget: usedBudget || null,
   };
 }
 
@@ -82,7 +85,7 @@ function parseRow(row) {
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Spend Pace!A2:F') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:E') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
