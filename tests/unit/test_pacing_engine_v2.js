@@ -57,7 +57,7 @@ describe('proposeAdjustment - safety rails', () => {
       currentDailyBudget: 100,
     }));
     expect(result.newDailyBudget).toBeLessThanOrEqual(120.0 + 0.01);
-    expect(result.cappedAtLimit).toBe(true);
+    expect(result.clampedBy).toBe('max_increase');
   });
 
   test('caps single-day decrease at -20%', () => {
@@ -66,7 +66,7 @@ describe('proposeAdjustment - safety rails', () => {
       currentDailyBudget: 100,
     }));
     expect(result.newDailyBudget).toBeGreaterThanOrEqual(80.0 - 0.01);
-    expect(result.cappedAtLimit).toBe(true);
+    expect(result.clampedBy).toBe('max_decrease');
   });
 
   test('freeze window: skips last 2 days of month', () => {
@@ -155,6 +155,7 @@ describe('proposeAdjustment - safety rails', () => {
     }));
     expect(result.skipped).toBe(false);
     expect(result.newDailyBudget).toBe(5);
+    expect(result.clampedBy).toBe('floor');
   });
 
   test('absolute ceiling: never proposes above 3x naive daily rate', () => {
@@ -165,6 +166,40 @@ describe('proposeAdjustment - safety rails', () => {
       currentDailyBudget: 100,
     }));
     expect(result.newDailyBudget).toBeLessThanOrEqual(300 + 0.01);
+  });
+
+  test('bidStrategyType is case-insensitive for target strategy detection', () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    // Lowercase 'target_cpa' should still trigger the 72h cooldown (48h < 72h → skipped)
+    const lower = proposeAdjustment({
+      monthlyBudget: 3000, mtdSpend: 1200, currentDailyBudget: 100,
+      curveId: 'linear', year: 2026, month: 4, currentDay: 15,
+      lastChangeTimestamp: twoDaysAgo, bidStrategyType: 'target_cpa',
+    });
+    expect(lower.skipped).toBe(true);
+    expect(lower.reason).toMatch(/target.*cooldown|3.*day/i);
+
+    // Mixed case 'Target_Roas' should also trigger
+    const mixed = proposeAdjustment({
+      monthlyBudget: 3000, mtdSpend: 1200, currentDailyBudget: 100,
+      curveId: 'linear', year: 2026, month: 4, currentDay: 15,
+      lastChangeTimestamp: twoDaysAgo, bidStrategyType: 'Target_Roas',
+    });
+    expect(mixed.skipped).toBe(true);
+  });
+
+  test('clampedBy is null when proposed value is within all bounds', () => {
+    // Day 15 of 30, mtd=$1380 → underpacing by 8%. Target=$1500.
+    // rawRequired = (3000-1380)/15 = $108. maxIncrease=120. 108 < 120 → no cap.
+    // Ceiling=300, floor=5. 108 within. No clamp fires.
+    const result = proposeAdjustment({
+      monthlyBudget: 3000, mtdSpend: 1380, currentDailyBudget: 100,
+      curveId: 'linear', year: 2026, month: 4, currentDay: 15,
+      lastChangeTimestamp: null, bidStrategyType: 'MAXIMIZE_CLICKS',
+    });
+    expect(result.skipped).toBe(false);
+    expect(result.clampedBy).toBeNull();
+    expect(result.newDailyBudget).toBe(108);
   });
 
   // STRENGTHENING: forces ceiling to actually fire
@@ -181,6 +216,7 @@ describe('proposeAdjustment - safety rails', () => {
     }));
     expect(result.skipped).toBe(false);
     expect(result.newDailyBudget).toBe(300);
+    expect(result.clampedBy).toBe('ceiling');
   });
 });
 

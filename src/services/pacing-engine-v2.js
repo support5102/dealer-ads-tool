@@ -29,6 +29,16 @@ const SAFETY_LIMITS = Object.freeze({
 const TARGET_STRATEGIES = new Set(['TARGET_CPA', 'TARGET_ROAS']);
 
 /**
+ * @typedef {Object} AdjustmentResult
+ * @property {boolean} skipped - True if no adjustment was proposed
+ * @property {string|null} reason - Skip reason (e.g. 'freeze_window:last_2_days'); null if not skipped
+ * @property {number|null} newDailyBudget - Proposed daily budget in dollars, rounded to cents; null if skipped
+ * @property {number|null} variance - Fractional variance from curve target (0.15 = 15% over); null for freeze/cooldown skips
+ * @property {number|null} curveTarget - Curve target in dollars, rounded to cents; null for freeze/cooldown skips
+ * @property {'max_increase'|'max_decrease'|'floor'|'ceiling'|null} clampedBy - Name of the binding constraint if the proposed budget was clamped; null if no clamp fired or if skipped
+ */
+
+/**
  * Proposes a new daily budget for one account based on curve + safety rails.
  *
  * @param {Object} params
@@ -41,7 +51,7 @@ const TARGET_STRATEGIES = new Set(['TARGET_CPA', 'TARGET_ROAS']);
  * @param {number} params.currentDay - Day of month (1-based)
  * @param {string|null} params.lastChangeTimestamp - ISO timestamp of last budget change, or null
  * @param {string} params.bidStrategyType - Google Ads bid strategy enum (e.g. MAXIMIZE_CLICKS, TARGET_CPA)
- * @returns {Object} { skipped, reason, newDailyBudget, variance, curveTarget, cappedAtLimit }
+ * @returns {AdjustmentResult}
  */
 function proposeAdjustment(params) {
   const {
@@ -67,14 +77,14 @@ function proposeAdjustment(params) {
       newDailyBudget: null,
       variance: null,
       curveTarget: null,
-      cappedAtLimit: false,
+      clampedBy: null,
     };
   }
 
   // Rail 2: cooldown
   if (lastChangeTimestamp) {
     const hoursSince = (Date.now() - new Date(lastChangeTimestamp).getTime()) / (1000 * 60 * 60);
-    const isTargetStrategy = TARGET_STRATEGIES.has(bidStrategyType);
+    const isTargetStrategy = TARGET_STRATEGIES.has(String(bidStrategyType).toUpperCase());
     const cooldown = isTargetStrategy
       ? SAFETY_LIMITS.COOLDOWN_HOURS_TARGET_STRATEGY
       : SAFETY_LIMITS.COOLDOWN_HOURS_DEFAULT;
@@ -87,7 +97,7 @@ function proposeAdjustment(params) {
         newDailyBudget: null,
         variance: null,
         curveTarget: null,
-        cappedAtLimit: false,
+        clampedBy: null,
       };
     }
   }
@@ -107,8 +117,8 @@ function proposeAdjustment(params) {
       reason: 'dead_zone:on_pace_within_2pct',
       newDailyBudget: null,
       variance: variancePct,
-      curveTarget: curveTargetDollars,
-      cappedAtLimit: false,
+      curveTarget: Math.round(curveTargetDollars * 100) / 100,
+      clampedBy: null,
     };
   }
 
@@ -121,21 +131,27 @@ function proposeAdjustment(params) {
   // Rail 4: ±20% cap on single-day adjustment
   const maxIncrease = currentDailyBudget * (1 + SAFETY_LIMITS.MAX_ADJUSTMENT_PCT);
   const maxDecrease = currentDailyBudget * (1 - SAFETY_LIMITS.MAX_ADJUSTMENT_PCT);
-  let capped = false;
+  let clampedBy = null;
   let proposed = rawRequiredDaily;
   if (proposed > maxIncrease) {
     proposed = maxIncrease;
-    capped = true;
+    clampedBy = 'max_increase';
   } else if (proposed < maxDecrease) {
     proposed = maxDecrease;
-    capped = true;
+    clampedBy = 'max_decrease';
   }
 
-  // Rail 5: absolute floor + ceiling
+  // Rail 5: absolute floor + ceiling (overrides Rail 4 if they fire)
   const naiveDaily = monthlyBudget / totalDays;
   const ceiling = naiveDaily * SAFETY_LIMITS.CEILING_MULTIPLIER;
-  if (proposed > ceiling) proposed = ceiling;
-  if (proposed < SAFETY_LIMITS.ABSOLUTE_FLOOR) proposed = SAFETY_LIMITS.ABSOLUTE_FLOOR;
+  if (proposed > ceiling) {
+    proposed = ceiling;
+    clampedBy = 'ceiling';
+  }
+  if (proposed < SAFETY_LIMITS.ABSOLUTE_FLOOR) {
+    proposed = SAFETY_LIMITS.ABSOLUTE_FLOOR;
+    clampedBy = 'floor';
+  }
 
   return {
     skipped: false,
@@ -143,7 +159,7 @@ function proposeAdjustment(params) {
     newDailyBudget: Math.round(proposed * 100) / 100,
     variance: variancePct,
     curveTarget: Math.round(curveTargetDollars * 100) / 100,
-    cappedAtLimit: capped,
+    clampedBy,
   };
 }
 
