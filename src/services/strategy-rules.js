@@ -288,6 +288,32 @@ function detectDealerMake(campaignName) {
  */
 const ACCOUNT_OVERRIDES = {};
 
+/**
+ * Per-account pacing curve fallback registry — used when the Google Sheets
+ * "Pacing Curve" column is blank. Keys are lowercase dealer names.
+ * Values are curve IDs from src/services/pacing-curve.js PACING_CURVES.
+ *
+ * Default if unmapped: 'linear'.
+ */
+const ACCOUNT_CURVES = {};
+
+/**
+ * Resolves the curve ID for an account.
+ * Precedence: sheet value -> ACCOUNT_CURVES fallback -> 'linear' default.
+ *
+ * @param {string} dealerName - Human-readable dealer name
+ * @param {string|null|undefined} sheetCurveId - Value from sheet's "Pacing Curve" column
+ * @returns {string} Curve ID (always a valid key into PACING_CURVES)
+ */
+function resolveCurveId(dealerName, sheetCurveId) {
+  if (sheetCurveId && String(sheetCurveId).trim() !== '') {
+    return String(sheetCurveId).trim();
+  }
+  const key = String(dealerName || '').toLowerCase().trim();
+  if (ACCOUNT_CURVES[key]) return ACCOUNT_CURVES[key];
+  return 'linear';
+}
+
 module.exports = {
   CPC_RANGES,
   MATCH_TYPE_POLICY,
@@ -308,4 +334,6 @@ module.exports = {
   detectDealerMake,
   HIGH_DEMAND_MODELS,
   ACCOUNT_OVERRIDES,
+  ACCOUNT_CURVES,
+  resolveCurveId,
 };
