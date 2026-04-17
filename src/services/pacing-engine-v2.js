@@ -1,0 +1,153 @@
+/**
+ * Pacing Engine v2 — damped daily budget controller.
+ *
+ * Called by: services/scheduler.js (daily job, registered in server.js),
+ *            routes/pacing.js (optional preview endpoint).
+ * Calls: pacing-curve.js (cumulativeTarget), pacing-calculator.js (daysInMonth).
+ *
+ * Core algorithm:
+ *   1. Compute target cumulative spend from curve + day-of-month.
+ *   2. Compute required daily rate for remaining days to hit EOM target.
+ *   3. Apply safety rails: ±20% cap, freeze last 2 days, 24h/72h cooldown,
+ *      dead-zone (±2% variance), absolute floor/ceiling.
+ *   4. Return either { skipped: true, reason } or { newDailyBudget, ... }.
+ */
+
+const { cumulativeTarget } = require('./pacing-curve');
+const { daysInMonth } = require('./pacing-calculator');
+
+const SAFETY_LIMITS = Object.freeze({
+  MAX_ADJUSTMENT_PCT: 0.20,           // ±20% per day
+  FREEZE_DAYS_AT_EOM: 2,              // no adjustments in last N days
+  COOLDOWN_HOURS_DEFAULT: 24,         // minimum hours between adjustments
+  COOLDOWN_HOURS_TARGET_STRATEGY: 72, // for TARGET_CPA / TARGET_ROAS
+  DEAD_ZONE_PCT: 0.02,                // skip if variance < 2%
+  ABSOLUTE_FLOOR: 5,                  // never propose below $5/day
+  CEILING_MULTIPLIER: 3,              // never propose above 3x naive daily rate
+});
+
+const TARGET_STRATEGIES = new Set(['TARGET_CPA', 'TARGET_ROAS']);
+
+/**
+ * Proposes a new daily budget for one account based on curve + safety rails.
+ *
+ * @param {Object} params
+ * @param {number} params.monthlyBudget - Monthly budget target ($)
+ * @param {number} params.mtdSpend - Month-to-date total spend ($)
+ * @param {number} params.currentDailyBudget - Current daily budget ($)
+ * @param {string} params.curveId - Curve ID from pacing-curve.PACING_CURVES
+ * @param {number} params.year - Year (e.g. 2026)
+ * @param {number} params.month - Month 1-12
+ * @param {number} params.currentDay - Day of month (1-based)
+ * @param {string|null} params.lastChangeTimestamp - ISO timestamp of last budget change, or null
+ * @param {string} params.bidStrategyType - Google Ads bid strategy enum (e.g. MAXIMIZE_CLICKS, TARGET_CPA)
+ * @returns {Object} { skipped, reason, newDailyBudget, variance, curveTarget, cappedAtLimit }
+ */
+function proposeAdjustment(params) {
+  const {
+    monthlyBudget,
+    mtdSpend,
+    currentDailyBudget,
+    curveId,
+    year,
+    month,
+    currentDay,
+    lastChangeTimestamp,
+    bidStrategyType,
+  } = params;
+
+  const totalDays = daysInMonth(year, month);
+  const daysRemaining = Math.max(totalDays - currentDay, 0);
+
+  // Rail 1: freeze window (last 2 days)
+  if (daysRemaining < SAFETY_LIMITS.FREEZE_DAYS_AT_EOM) {
+    return {
+      skipped: true,
+      reason: `freeze_window:last_${SAFETY_LIMITS.FREEZE_DAYS_AT_EOM}_days`,
+      newDailyBudget: null,
+      variance: null,
+      curveTarget: null,
+      cappedAtLimit: false,
+    };
+  }
+
+  // Rail 2: cooldown
+  if (lastChangeTimestamp) {
+    const hoursSince = (Date.now() - new Date(lastChangeTimestamp).getTime()) / (1000 * 60 * 60);
+    const isTargetStrategy = TARGET_STRATEGIES.has(bidStrategyType);
+    const cooldown = isTargetStrategy
+      ? SAFETY_LIMITS.COOLDOWN_HOURS_TARGET_STRATEGY
+      : SAFETY_LIMITS.COOLDOWN_HOURS_DEFAULT;
+    if (hoursSince < cooldown) {
+      return {
+        skipped: true,
+        reason: isTargetStrategy
+          ? `target_strategy_cooldown:${cooldown}h`
+          : `cooldown:${cooldown}h_recent_change`,
+        newDailyBudget: null,
+        variance: null,
+        curveTarget: null,
+        cappedAtLimit: false,
+      };
+    }
+  }
+
+  // Compute curve target and variance
+  const cumFrac = cumulativeTarget(curveId, currentDay, totalDays);
+  const curveTargetDollars = monthlyBudget * cumFrac;
+  const varianceDollars = mtdSpend - curveTargetDollars;
+  const variancePct = curveTargetDollars > 0
+    ? varianceDollars / curveTargetDollars
+    : 0;
+
+  // Rail 3: dead zone
+  if (Math.abs(variancePct) < SAFETY_LIMITS.DEAD_ZONE_PCT) {
+    return {
+      skipped: true,
+      reason: 'dead_zone:on_pace_within_2pct',
+      newDailyBudget: null,
+      variance: variancePct,
+      curveTarget: curveTargetDollars,
+      cappedAtLimit: false,
+    };
+  }
+
+  // Required daily rate for remaining days to hit EOM target
+  const remainingBudget = monthlyBudget - mtdSpend;
+  const rawRequiredDaily = daysRemaining > 0
+    ? remainingBudget / daysRemaining
+    : 0;
+
+  // Rail 4: ±20% cap on single-day adjustment
+  const maxIncrease = currentDailyBudget * (1 + SAFETY_LIMITS.MAX_ADJUSTMENT_PCT);
+  const maxDecrease = currentDailyBudget * (1 - SAFETY_LIMITS.MAX_ADJUSTMENT_PCT);
+  let capped = false;
+  let proposed = rawRequiredDaily;
+  if (proposed > maxIncrease) {
+    proposed = maxIncrease;
+    capped = true;
+  } else if (proposed < maxDecrease) {
+    proposed = maxDecrease;
+    capped = true;
+  }
+
+  // Rail 5: absolute floor + ceiling
+  const naiveDaily = monthlyBudget / totalDays;
+  const ceiling = naiveDaily * SAFETY_LIMITS.CEILING_MULTIPLIER;
+  if (proposed > ceiling) proposed = ceiling;
+  if (proposed < SAFETY_LIMITS.ABSOLUTE_FLOOR) proposed = SAFETY_LIMITS.ABSOLUTE_FLOOR;
+
+  return {
+    skipped: false,
+    reason: null,
+    newDailyBudget: Math.round(proposed * 100) / 100,
+    variance: variancePct,
+    curveTarget: Math.round(curveTargetDollars * 100) / 100,
+    cappedAtLimit: capped,
+  };
+}
+
+module.exports = {
+  proposeAdjustment,
+  SAFETY_LIMITS,
+};
