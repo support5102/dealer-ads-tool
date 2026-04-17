@@ -70,11 +70,9 @@ function validateEnv(env = process.env) {
       apiKey: env.FRESHDESK_API_KEY || '',
       domain: env.FRESHDESK_DOMAIN || 'savvydealer',
     },
-    features: {
-      // Pacing Engine v2 - controls whether the daily scheduler job runs and
-      // whether /api/pacing/all returns v2 columns. false = v1 behavior unchanged.
-      pacingEngineV2Enabled: env.PACING_ENGINE_V2_ENABLED === 'true',
-    },
+    // Pacing Engine v2 - controls whether the daily scheduler job runs and
+    // whether /api/pacing/all returns v2 columns. false = v1 behavior unchanged.
+    pacingEngineV2Enabled: env.PACING_ENGINE_V2_ENABLED === 'true',
   };
 
   return deepFreeze(config);
