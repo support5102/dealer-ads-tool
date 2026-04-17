@@ -17,9 +17,14 @@
  * @property {number|null} baselineInventory - Normal new vehicle count (for inventory modifier)
  * @property {string|null} dealerNotes - Free-text notes about dealer preferences, priorities, constraints
  * @property {string|null} freshdeskTag - Freshdesk tag for matching tickets to this dealer
- * @property {'auto_apply'|'one_click'|'advisory'} pacingMode - Pacing strategy mode; defaults to 'one_click'
+ * @property {'auto_apply'|'one_click'|'advisory'} pacingMode - Pacing strategy mode; defaults to 'one_click'. Case-insensitive on input; stored as lowercase canonical form.
  * @property {string|null} pacingCurveId - Curve registry ID, or null to use account default
  */
+
+/**
+ * Valid pacing mode allowlist. Exported for use by Task 4.x consumers.
+ */
+const VALID_PACING_MODES = new Set(['auto_apply', 'one_click', 'advisory']);
 
 /**
  * Cleans a numeric string: strips $, commas, whitespace, then parses as float.
@@ -68,9 +73,8 @@ function parseRow(row) {
   const miscNotes = row[4] != null ? String(row[4]).trim() : null;
 
   // Phase 1 additions: columns F (Pacing Mode) + G (Pacing Curve)
-  const VALID_MODES = new Set(['auto_apply', 'one_click', 'advisory']);
-  const rawMode = row[5] != null ? String(row[5]).trim() : '';
-  const pacingMode = VALID_MODES.has(rawMode) ? rawMode : 'one_click';
+  const rawMode = row[5] != null ? String(row[5]).trim().toLowerCase() : '';
+  const pacingMode = VALID_PACING_MODES.has(rawMode) ? rawMode : 'one_click';
 
   const rawCurve = row[6] != null ? String(row[6]).trim() : '';
   const pacingCurveId = rawCurve === '' ? null : rawCurve;
@@ -184,4 +188,5 @@ module.exports = {
   parseRow,
   parseNumber,
   cleanCustomerId,
+  VALID_PACING_MODES,
 };

@@ -8,7 +8,7 @@
  * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory
  */
 
-const { readGoals, parseRow, parseNumber, cleanCustomerId } = require('../../src/services/goal-reader');
+const { readGoals, parseRow, parseNumber, cleanCustomerId, VALID_PACING_MODES } = require('../../src/services/goal-reader');
 const {
   createFakeSheetsClient,
   SAMPLE_GOALS_ROWS,
@@ -381,5 +381,17 @@ describe('parseRow - pacing mode and curve (Phase 1 additions)', () => {
       const row = ['D', '5000', '3000', '2000', '', mode];
       expect(parseRow(row).pacingMode).toBe(mode);
     }
+  });
+
+  test('whitespace-only pacingMode cell defaults to one_click', () => {
+    const row = ['Dealer X', '5000', '3000', '2000', '', '   ', '   '];
+    const goal = parseRow(row);
+    expect(goal.pacingMode).toBe('one_click');
+    expect(goal.pacingCurveId).toBeNull();
+  });
+
+  test('normalizes uppercase/mixed-case pacingMode to canonical lowercase', () => {
+    expect(parseRow(['D', '5000', '3000', '2000', '', 'AUTO_APPLY']).pacingMode).toBe('auto_apply');
+    expect(parseRow(['D', '5000', '3000', '2000', '', 'Advisory']).pacingMode).toBe('advisory');
   });
 });
