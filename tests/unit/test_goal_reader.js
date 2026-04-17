@@ -344,3 +344,42 @@ describe('readGoals', () => {
     expect(goals[1].monthlyBudget).toBe(12000);
   });
 });
+
+// ===========================================================================
+// parseRow - pacing mode and curve (Phase 1 additions)
+// ===========================================================================
+
+describe('parseRow - pacing mode and curve (Phase 1 additions)', () => {
+  test('parses pacingMode from column F', () => {
+    // A=Account, B=Budget, C=New, D=Used, E=Misc, F=Pacing Mode, G=Pacing Curve
+    const row = ['Alan Jay Ford', '5000', '3000', '2000', '', 'auto_apply', 'alanJay9505'];
+    const goal = parseRow(row);
+    expect(goal.pacingMode).toBe('auto_apply');
+    expect(goal.pacingCurveId).toBe('alanJay9505');
+  });
+
+  test('defaults pacingMode to one_click when blank', () => {
+    const row = ['Dealer X', '5000', '3000', '2000'];
+    const goal = parseRow(row);
+    expect(goal.pacingMode).toBe('one_click');
+  });
+
+  test('defaults pacingCurveId to null when blank (resolver applies linear)', () => {
+    const row = ['Dealer X', '5000', '3000', '2000'];
+    const goal = parseRow(row);
+    expect(goal.pacingCurveId).toBeNull();
+  });
+
+  test('rejects invalid pacingMode value, defaults to one_click', () => {
+    const row = ['Dealer X', '5000', '3000', '2000', '', 'yolo_mode'];
+    const goal = parseRow(row);
+    expect(goal.pacingMode).toBe('one_click');
+  });
+
+  test('accepts the three valid pacing modes', () => {
+    for (const mode of ['auto_apply', 'one_click', 'advisory']) {
+      const row = ['D', '5000', '3000', '2000', '', mode];
+      expect(parseRow(row).pacingMode).toBe(mode);
+    }
+  });
+});

@@ -5,7 +5,7 @@
  * Calls: Google Sheets API v4 (via injected sheets client)
  *
  * Reads the "PPC Control" sheet with columns:
- * A: Account (dealer name) | B: Budget | C: New | D: Used | E: Misc
+ * A: Account (dealer name) | B: Budget | C: New | D: Used | E: Misc | F: Pacing Mode | G: Pacing Curve
  *
  * The sheets client is injected (not created here) so tests can provide a fake.
  */
@@ -17,6 +17,8 @@
  * @property {number|null} baselineInventory - Normal new vehicle count (for inventory modifier)
  * @property {string|null} dealerNotes - Free-text notes about dealer preferences, priorities, constraints
  * @property {string|null} freshdeskTag - Freshdesk tag for matching tickets to this dealer
+ * @property {'auto_apply'|'one_click'|'advisory'} pacingMode - Pacing strategy mode; defaults to 'one_click'
+ * @property {string|null} pacingCurveId - Curve registry ID, or null to use account default
  */
 
 /**
@@ -45,7 +47,7 @@ function cleanCustomerId(id) {
 /**
  * Parses a single row from the PPC Control sheet into a DealerGoal object.
  *
- * Column layout: A=Account Name, B=Budget, C=New, D=Used, E=Misc
+ * Column layout: A=Account Name, B=Budget, C=New, D=Used, E=Misc, F=Pacing Mode, G=Pacing Curve
  *
  * @param {string[]} row - Array of cell values from one sheet row
  * @returns {DealerGoal|null} Parsed goal, or null if row is invalid
@@ -65,6 +67,14 @@ function parseRow(row) {
   const usedBudget = parseNumber(row[3]);
   const miscNotes = row[4] != null ? String(row[4]).trim() : null;
 
+  // Phase 1 additions: columns F (Pacing Mode) + G (Pacing Curve)
+  const VALID_MODES = new Set(['auto_apply', 'one_click', 'advisory']);
+  const rawMode = row[5] != null ? String(row[5]).trim() : '';
+  const pacingMode = VALID_MODES.has(rawMode) ? rawMode : 'one_click';
+
+  const rawCurve = row[6] != null ? String(row[6]).trim() : '';
+  const pacingCurveId = rawCurve === '' ? null : rawCurve;
+
   return {
     dealerName,
     monthlyBudget,
@@ -73,6 +83,8 @@ function parseRow(row) {
     freshdeskTag: null,
     newBudget: newBudget || null,
     usedBudget: usedBudget || null,
+    pacingMode,
+    pacingCurveId,
   };
 }
 
@@ -81,11 +93,11 @@ function parseRow(row) {
  *
  * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
- * @param {string} [range='PPC Spend Pace!A2:C'] - Cell range to read (skip header row)
+ * @param {string} [range='PPC Control!A2:G'] - Cell range to read (skip header row)
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
  * @throws {Error} If the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:E') {
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
