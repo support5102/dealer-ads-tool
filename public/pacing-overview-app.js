@@ -194,6 +194,20 @@ function handleSort(col) {
   if (currentData) renderTable(getFilteredAccounts());
 }
 
+function renderPacingSinceLastChange(a) {
+  if (a.pacingSinceLastChange == null) return '<span style="color:var(--text3);">—</span>';
+  const pct = a.pacingSinceLastChange;
+  const cls = pct >= 95 && pct <= 105 ? 'pace-green'
+            : pct > 105 ? 'pace-red'
+            : 'pace-yellow';
+  return `<span class="${cls}">${pct.toFixed(1)}%</span>`;
+}
+
+function renderDaysSinceLastChange(a) {
+  if (a.daysSinceLastChange == null) return '<span style="color:var(--text3);">Never</span>';
+  return `${a.daysSinceLastChange}d`;
+}
+
 function renderTable(accounts) {
   const sorted = sortAccounts(accounts);
   const content = document.getElementById('content');
@@ -205,8 +219,8 @@ function renderTable(accounts) {
     { key: 'pacePercent', label: 'Pacing' },
     { key: 'status', label: 'Status' },
     { key: 'dailyAdjustment', label: 'Daily Adj.' },
-    { key: 'sevenDayAvg', label: '7-Day Avg' },
-    { key: 'sevenDayTrendPercent', label: '7-Day Trend' },
+    { key: 'pacingSinceLastChange', label: 'Pacing Since Last Change' },
+    { key: 'daysSinceLastChange', label: 'Days Since Change' },
     { key: 'projectedStatus', label: 'Projection' },
   ];
 
@@ -224,8 +238,6 @@ function renderTable(accounts) {
     const isLastDay = new Date().getDate() === new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
     const adjValue = isLastDay ? remainingBudget : a.dailyAdjustment;
     const adjClass = adjValue >= 0 ? 'adj-positive' : 'adj-negative';
-    const trendClass = a.sevenDayTrend === 'up' ? 'trend-up' : a.sevenDayTrend === 'down' ? 'trend-down' : 'trend-flat';
-    const trendArrow = a.sevenDayTrend === 'up' ? '↑' : a.sevenDayTrend === 'down' ? '↓' : '→';
 
     return `<tr onclick="window.location.href='/pacing.html?account=${esc(a.customerId)}'">
       <td>${esc(a.dealerName)}</td>
@@ -234,8 +246,8 @@ function renderTable(accounts) {
       <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span>${a.changeDate ? ' <span title="Budget changed ' + esc(a.changeDate) + '" style="font-size:10px;color:var(--text3);">⏳</span>' : ''}</td>
       <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
-      <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
-      <td class="${trendClass}">${trendArrow} ${fmtPercent(a.sevenDayTrendPercent)}</td>
+      <td>${renderPacingSinceLastChange(a)}</td>
+      <td>${renderDaysSinceLastChange(a)}</td>
       <td title="${a.changeDate ? 'Since ' + esc(a.changeDate) + ': ' + fmtCurrency(a.postChangeDailyAvg || 0) + '/day → Proj: ' + fmtCurrency(a.projectedSpend) : 'Full-month avg → Proj: ' + fmtCurrency(a.projectedSpend)}"><span class="status-mini ${PROJ_COLORS[a.projectedStatus] || 'gray'}">${PROJ_LABELS[a.projectedStatus] || 'N/A'}</span></td>
     </tr>`;
   }).join('');
