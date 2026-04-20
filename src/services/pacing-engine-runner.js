@@ -9,7 +9,7 @@
  * Skipped if config.pacingEngineV2Enabled is false.
  */
 
-const config = require('../utils/config');
+const { validateEnv } = require('../utils/config');
 const changeHistory = require('./change-history');
 const pacingEngineV2 = require('./pacing-engine-v2');
 
@@ -22,13 +22,15 @@ const pacingEngineV2 = require('./pacing-engine-v2');
  * @returns {Promise<{processed: number, applied: number, skipped: number, errors: number, disabled?: boolean}>}
  */
 async function run(deps) {
+  const config = validateEnv();
   if (!config.pacingEngineV2Enabled) {
     console.log('[pacing-engine-v2] disabled via PACING_ENGINE_V2_ENABLED; skipping run');
-    return { processed: 0, applied: 0, skipped: 0, errors: 0, disabled: true };
+    return { processed: 0, applied: 0, skipped: 0, errors: 0, disabled: true, results: [] };
   }
 
   const accounts = await deps.listAccounts();
   const summary = { processed: 0, applied: 0, skipped: 0, errors: 0 };
+  const results = [];
 
   for (const account of accounts) {
     summary.processed += 1;
@@ -38,6 +40,7 @@ async function run(deps) {
         applyBudgetChange: deps.applyBudgetChange,
         logChange: (entry) => changeHistory.addEntry(entry),
       });
+      results.push(result);
       if (result.applied) summary.applied += 1;
       if (result.skipped) summary.skipped += 1;
       if (result.error) summary.errors += 1;
@@ -48,7 +51,7 @@ async function run(deps) {
   }
 
   console.log('[pacing-engine-v2] run complete', summary);
-  return summary;
+  return { ...summary, results };
 }
 
 module.exports = { run };

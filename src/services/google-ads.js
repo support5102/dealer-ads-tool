@@ -312,6 +312,64 @@ async function getMonthSpend(restCtx) {
 }
 
 /**
+ * Fetches total enabled-campaign daily budget and the account's primary
+ * bid strategy type. Used by the pacing engine to determine current state
+ * before proposing adjustments.
+ *
+ * Strategy is "most common bid_strategy_type across enabled campaigns" — if
+ * the account has mixed strategies (e.g. one tROAS campaign + several Maximize
+ * Clicks), the majority wins.
+ *
+ * @param {Object} restCtx - { accessToken, developerToken, customerId, loginCustomerId, _queryFn? }
+ * @returns {Promise<{totalDailyBudget: number, primaryBidStrategy: string|null}>}
+ */
+async function getAccountLevelDailyBudget(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.bidding_strategy_type, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign.status = 'ENABLED'`,
+    restCtx.loginCustomerId
+  );
+
+  let totalMicros = 0;
+  const strategyCounts = new Map();
+  const seenBudgets = new Set();
+
+  for (const row of rows) {
+    const resName = row.campaignBudget?.resourceName;
+    // Dedupe shared budgets (two campaigns pointing at the same budget
+    // resource count as one): use the resource name as dedup key when present.
+    if (resName && seenBudgets.has(resName)) {
+      // still count the strategy, but don't double-count the budget
+    } else {
+      totalMicros += row.campaignBudget?.amountMicros ?? 0;
+      if (resName) seenBudgets.add(resName);
+    }
+
+    const strat = row.campaign?.biddingStrategyType;
+    if (strat) {
+      strategyCounts.set(strat, (strategyCounts.get(strat) || 0) + 1);
+    }
+  }
+
+  let primaryBidStrategy = null;
+  let maxCount = 0;
+  for (const [strat, count] of strategyCounts) {
+    if (count > maxCount) {
+      primaryBidStrategy = strat;
+      maxCount = count;
+    }
+  }
+
+  return {
+    totalDailyBudget: totalMicros / 1_000_000,
+    primaryBidStrategy,
+  };
+}
+
+/**
  * Fetches all explicitly shared budgets with their linked campaigns via REST.
  * Returns one entry per shared budget, with an array of campaign names.
  *
@@ -1244,6 +1302,7 @@ module.exports = {
   buildStructureTree,
   queryWithTimeout,
   getMonthSpend,
+  getAccountLevelDailyBudget,
   getSharedBudgets,
   getDedicatedBudgets,
   getImpressionShare,

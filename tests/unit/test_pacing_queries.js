@@ -4,7 +4,8 @@
  * Tier 2 (unit): uses _queryFn injection with fake data, no real API calls.
  * Data is in REST/camelCase format (what Google Ads REST API returns).
  *
- * Tests: getMonthSpend, getSharedBudgets, getImpressionShare, getInventory
+ * Tests: getMonthSpend, getSharedBudgets, getImpressionShare, getInventory,
+ *        getAccountLevelDailyBudget
  */
 
 const {
@@ -12,6 +13,7 @@ const {
   getSharedBudgets,
   getImpressionShare,
   getInventory,
+  getAccountLevelDailyBudget,
 } = require('../../src/services/google-ads');
 
 /**
@@ -378,5 +380,45 @@ describe('getInventory', () => {
     expect(result.totalCount).toBe(2);
     expect(result.newInventoryByModel.civic).toBe(1);
     expect(result.newInventoryByModel.camry).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// getAccountLevelDailyBudget
+// ===========================================================================
+
+describe('getAccountLevelDailyBudget', () => {
+  test('sums amount_micros across campaigns, dedupes shared budgets, picks majority bid strategy', async () => {
+    const fakeQuery = async () => ([
+      { campaign: { id: 1, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: 50_000_000 } },
+      { campaign: { id: 2, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/b', amountMicros: 100_000_000 } },
+      { campaign: { id: 3, biddingStrategyType: 'TARGET_CPA' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: 50_000_000 } }, // shared with campaign 1
+    ]);
+    const result = await getAccountLevelDailyBudget({
+      accessToken: 't', developerToken: 'd', customerId: 'c', loginCustomerId: 'm',
+      _queryFn: fakeQuery,
+    });
+    expect(result.totalDailyBudget).toBe(150); // $50 + $100 (shared dedup: campaign 3's budget is same as campaign 1's)
+    expect(result.primaryBidStrategy).toBe('MAXIMIZE_CLICKS'); // 2 vs 1
+  });
+
+  test('returns nulls when no campaigns', async () => {
+    const result = await getAccountLevelDailyBudget({
+      accessToken: 't', developerToken: 'd', customerId: 'c', loginCustomerId: 'm',
+      _queryFn: async () => [],
+    });
+    expect(result.totalDailyBudget).toBe(0);
+    expect(result.primaryBidStrategy).toBeNull();
+  });
+
+  test('handles missing bidding_strategy_type gracefully', async () => {
+    const result = await getAccountLevelDailyBudget({
+      accessToken: 't', developerToken: 'd', customerId: 'c', loginCustomerId: 'm',
+      _queryFn: async () => ([
+        { campaign: { id: 1 }, campaignBudget: { resourceName: 'r1', amountMicros: 10_000_000 } },
+      ]),
+    });
+    expect(result.totalDailyBudget).toBe(10);
+    expect(result.primaryBidStrategy).toBeNull();
   });
 });

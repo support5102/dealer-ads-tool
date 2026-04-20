@@ -563,11 +563,33 @@ function createPacingRouter(config, deps = {}) {
         }
       }
 
+      // Pacing Engine v2 — advisory-mode hook (route-triggered until service auth exists).
+      // Runs only when the operator opts in via ?advise=true AND the feature flag is on.
+      let engineSummary = null;
+      if (config.pacingEngineV2Enabled && req.query.advise === 'true') {
+        try {
+          const runner = require('../services/pacing-engine-runner');
+          const deps = require('../services/pacing-engine-deps');
+          const ctx = { accessToken, developerToken: config.googleAds.developerToken, loginCustomerId: mccId };
+          const enriched = await deps.listAccountsFromResults(ctx, results);
+          engineSummary = await runner.run({
+            listAccounts: async () => enriched,
+            applyBudgetChange: async () => {
+              throw new Error('apply disabled in route-triggered advisory mode (first release)');
+            },
+          });
+        } catch (err) {
+          console.error('[pacing-engine-v2] route-triggered run failed:', err.message);
+          engineSummary = { error: err.message };
+        }
+      }
+
       res.json({
         accounts: results,
         failed,
         totalAccounts: matched.length,
         loadedAccounts: results.length,
+        ...(engineSummary ? { engineSummary } : {}),
       });
     } catch (err) {
       console.error('Pacing overview error:', err.message);
