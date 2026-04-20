@@ -67,8 +67,25 @@ async function initialize() {
       CREATE INDEX IF NOT EXISTS idx_change_history_account ON change_history (account_id)
     `);
 
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS dealer_groups (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        curve_id TEXT NOT NULL DEFAULT 'linear',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS dealer_group_members (
+        group_id INT REFERENCES dealer_groups(id) ON DELETE CASCADE,
+        dealer_name TEXT NOT NULL,
+        PRIMARY KEY (group_id, dealer_name)
+      )
+    `);
+
     initialized = true;
-    console.log('Database initialized: change_history table ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }

@@ -297,35 +297,12 @@ const ACCOUNT_OVERRIDES = {};
  */
 const ACCOUNT_CURVES = {};
 
-// ─────────────────────────────────────────────────────────────
-// Dealer Groups — name-pattern based bucketing for filtering
-// and default curve assignment. Evaluated in declaration order;
-// first match wins. The 'default' entry MUST be last (catch-all).
-// ─────────────────────────────────────────────────────────────
-
-const DEALER_GROUPS = [
-  { key: 'alan_jay', label: 'Alan Jay',  pattern: /^Alan Jay\b/i, curve: 'alanJay9505' },
-  { key: 'default',  label: 'All Others', pattern: /./,            curve: 'linear' },
-];
-
-/**
- * Returns the group entry matching a dealer name. Always returns a group
- * (the 'default' catch-all ensures this).
- *
- * @param {string} dealerName - Human-readable dealer name
- * @returns {{key: string, label: string, pattern: RegExp, curve: string}}
- */
-function groupFor(dealerName) {
-  const name = String(dealerName || '').trim();
-  for (const group of DEALER_GROUPS) {
-    if (group.pattern.test(name)) return group;
-  }
-  return DEALER_GROUPS[DEALER_GROUPS.length - 1]; // unreachable if 'default' is last
-}
-
 /**
  * Resolves the curve ID for an account.
  * Precedence: sheet value -> ACCOUNT_CURVES fallback -> group's curve default.
+ *
+ * Groups are now DB-backed (dealer-groups-store.js). The groupFor lookup
+ * is synchronous via the store's in-memory cache.
  *
  * @param {string} dealerName - Human-readable dealer name
  * @param {string|null|undefined} sheetCurveId - Value from sheet's "Pacing Curve" column
@@ -337,6 +314,7 @@ function resolveCurveId(dealerName, sheetCurveId) {
   }
   const key = String(dealerName || '').toLowerCase().trim();
   if (ACCOUNT_CURVES[key]) return ACCOUNT_CURVES[key];
+  const { groupFor } = require('./dealer-groups-store');
   return groupFor(dealerName).curve;
 }
 
@@ -361,7 +339,5 @@ module.exports = {
   HIGH_DEMAND_MODELS,
   ACCOUNT_OVERRIDES,
   ACCOUNT_CURVES,
-  DEALER_GROUPS,
-  groupFor,
   resolveCurveId,
 };

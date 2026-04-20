@@ -27,9 +27,11 @@ const { createOptimizationRouter }    = require('./routes/optimization');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { createCommandCenterRouter }    = require('./routes/command-center');
+const { createGroupsRouter }           = require('./routes/groups');
 const { errorHandler }                = require('./middleware/error-handler');
 const spendSync                       = require('./services/spend-sync');
 const database                        = require('./services/database');
+const dealerGroupsStore               = require('./services/dealer-groups-store');
 
 /**
  * Creates a configured Express app.
@@ -42,9 +44,11 @@ function createApp(config) {
   const isProduction = process.env.NODE_ENV === 'production';
 
   // ── Database initialization (non-blocking) ──
-  database.initialize().catch(err => {
-    console.warn('Database initialization skipped:', err.message);
-  });
+  database.initialize()
+    .then(() => dealerGroupsStore.seedDefaults())
+    .catch(err => {
+      console.warn('Database initialization skipped:', err.message);
+    });
 
   // ── Production proxy trust (Railway terminates TLS at its reverse proxy) ──
   if (isProduction) {
@@ -89,6 +93,7 @@ function createApp(config) {
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
   app.use('/api/cc', createCommandCenterRouter(config));
+  app.use(createGroupsRouter());
 
   // ── Spend Sync — daily 8 AM EST spend pull from Google Ads → Sheets ──
   const { requireAuth } = require('./middleware/auth');

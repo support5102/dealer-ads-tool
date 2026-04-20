@@ -63,7 +63,7 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     currentDay: now.getDate(),
   });
 
-  const { groupFor } = require('./strategy-rules');
+  const { groupFor } = require('./dealer-groups-store');
   const group = groupFor(account.name);
 
   const since = computeSinceLastChange({
