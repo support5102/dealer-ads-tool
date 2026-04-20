@@ -208,6 +208,23 @@ function renderDaysSinceLastChange(a) {
   return `${a.daysSinceLastChange}d`;
 }
 
+function buildPacingExplanation(a) {
+  const parts = [];
+  parts.push(`Current pacing: ${(100 + a.pacePercent).toFixed(1)}%`);
+  if (a.changeDate) {
+    parts.push(`Last budget change: ${a.changeDate} (${a.daysSinceLastChange ?? '?'} days ago)`);
+    if (a.pacingSinceLastChange != null) {
+      parts.push(`Since change: pacing at ${a.pacingSinceLastChange.toFixed(1)}%`);
+    }
+  } else {
+    parts.push(`No budget changes recorded this month`);
+  }
+  if (a.pacingCurveId && a.pacingCurveId !== 'linear') {
+    parts.push(`Curve: ${a.pacingCurveId}`);
+  }
+  return parts.join(' · ');
+}
+
 function renderTable(accounts) {
   const sorted = sortAccounts(accounts);
   const content = document.getElementById('content');
@@ -243,7 +260,7 @@ function renderTable(accounts) {
       <td>${esc(a.dealerName)}</td>
       <td>${fmtCurrency(a.mtdSpend)}</td>
       <td>${fmtCurrency(a.monthlyBudget)}</td>
-      <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
+      <td class="${paceClass}" title="${esc(buildPacingExplanation(a))}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span>${a.changeDate ? ' <span title="Budget changed ' + esc(a.changeDate) + '" style="font-size:10px;color:var(--text3);">⏳</span>' : ''}</td>
       <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
       <td>${renderPacingSinceLastChange(a)}</td>
