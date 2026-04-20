@@ -327,7 +327,8 @@ async function getAccountLevelDailyBudget(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-    `SELECT campaign.id, campaign.bidding_strategy_type, campaign_budget.amount_micros
+    `SELECT campaign.id, campaign.bidding_strategy_type,
+            campaign_budget.resource_name, campaign_budget.amount_micros
      FROM campaign
      WHERE campaign.status = 'ENABLED'`,
     restCtx.loginCustomerId
