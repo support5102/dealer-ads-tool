@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-04-09
-**Current Phase:** Phase 19: Campaign Builder Rebuild — PLANNED
+**Last Updated:** 2026-04-20
+**Current Phase:** Pacing Engine v2 (feat branch) — IN PROGRESS, 7 of 14 tasks done
 
 ---
 
@@ -28,11 +28,45 @@
 | 16 | Pacing & History Polish | ✅ COMPLETE | Cooldown badges, history filters/CSV export, persistent PostgreSQL (Neon) |
 | 17 | Light Mode & UI | ✅ COMPLETE | Full light/dark mode, dealer filtering, theme toggle on all pages |
 | 18 | Logic Hardening & Features | ✅ COMPLETE | Overpacing never increases, reconciliation gated, 4-agent Opus audit, ad copy fixes, AI headlines, dismiss recs, budget splits, pausable campaigns actionable (806 tests) |
-| 19 | Campaign Builder Rebuild | 📋 PLANNED | Rebuild React+CDN builder as vanilla JS, add collision/body shop mode, cross-model search term detection |
+| 19 | Campaign Builder Rebuild | ✅ COMPLETE | Vanilla JS rebuild, Command Center merged Task Manager + Builder (commit `d7699ac`) |
+| 20 | Pacing Engine v2 | 🟡 IN PROGRESS | Damped daily controller on branch `feat/pacing-engine-v2` — 7/14 tasks done (see detail below) |
 
 ---
 
 ## Current Phase Detail
+
+### Phase 20: Pacing Engine v2 — IN PROGRESS (branch `feat/pacing-engine-v2`)
+
+**Goal:** Replace weekly pacing with a damped daily budget controller. Curves per account (linear default, `alanJay9505` step 95/105). Three automation modes: `auto_apply` / `one_click` / `advisory`. Safety rails: ±20% cap, freeze last 2 days, 24h/72h cooldown, dead-zone, floor/ceiling.
+
+**Completed (7 of 14 tasks, 13 commits on branch, tree clean):**
+- [x] **0.1** Feature flag `PACING_ENGINE_V2_ENABLED` (commits `4a6bb00`, `4e956f4`)
+- [x] **1.1** Pacing curve registry (`linear` + `alanJay9505`) in `pacing-curve.js` (commits `05aec6d`, `b57ea0d`) — 13 tests
+- [x] **2.1** `ACCOUNT_CURVES` + `resolveCurveId()` in `strategy-rules.js` (commit `1e172e6`) — 6 tests
+- [x] **3.1** `goal-reader.js` parses columns F (Pacing Mode) + G (Pacing Curve); `VALID_PACING_MODES` exported (commits `2c4b5bf`, `b250202`) — 7 tests
+- [x] **4.1** `proposeAdjustment` controller with 5 safety rails in `pacing-engine-v2.js` (commits `bc98e82`, `0ad12a8`) — 20 tests. Return shape: `AdjustmentResult` with `clampedBy` enum
+- [x] **4.2** `runForAccount` orchestrator with `pacingMode` dispatch (commits `d421f95`, `38d750c`) — 8 tests. Return shape: `RunForAccountResult` with `outcome` discriminator
+- [x] **5.1** `computeSinceLastChange` in `pacing-fetcher.js`, `pacingSinceLastChange` + `daysSinceLastChange` in API response (commit `37ef1e5`) — 6 tests
+- [x] **6.1** Frontend: replaced 7-day trend columns with "since last change" columns in `pacing-overview-app.js` (commit `5ead5ac`). Static-verified; visual smoke check deferred
+
+**Remaining (7 tasks):**
+- [ ] **6.2** Hover tooltip on Pacing column with change context
+- [ ] **7.1** Scheduler hook — daily pacing engine job (addresses `TODO(7.1)` timezone comments)
+- [ ] **8.1** API: expose v2 columns in `/api/pacing/all`
+- [ ] **8.2** Real runner deps + `runAllAccounts` iteration (the plan's Task 4.2 title mislabel lives here)
+- [ ] **9.1** CLAUDE.md update
+- [ ] Final review + decide V3 pre-existing test-failure triage (23 failures not caused by this branch)
+
+**Test state:** 1091 passed, 23 failed (all 23 pre-existing on V3 — verified by checking out `d7699ac` and running the same suites). This branch adds 0 new failures. All 53 pacing-v2 authored tests are green.
+
+**Known risks:**
+- `TODO(7.1)` timezone alignment between `pacing-fetcher.js` (local) and `pacing-engine-v2.js` (UTC) — must land in Task 7.1
+- 3 deferred null-state UX questions from 5.1 code review (date-format drift, cross-month change, clock skew all silently return null) — decide when 6.1 visual shows whether `—` is acceptable or needs differentiation
+- 23 pre-existing V3 test failures span `test_goal_reader`, `test_strategy_rules`, `test_account_iterator`, `apply-change.test`, `test_change_executor`, `test_pacing_routes`, `test_account_routes`. Triage before merge
+
+**Continuation doc:** `C:/Users/bprev/.claude/docs/2026-04-17-pacing-engine-v2-continuation.md` (authoritative resume pointer — includes commit list, AdjustmentResult/RunForAccountResult typedefs, model-selection notes, lessons learned)
+
+---
 
 ### Deploy Steps (remaining from Phase 4)
 

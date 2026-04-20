@@ -31,11 +31,13 @@ Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from 
 
 | Aspect | Value |
 |--------|-------|
-| **Phase** | 19: Campaign Builder Rebuild (planned, not started) |
-| **Last Session** | 2026-04-09 - CLEAN |
-| **Immediate Next** | Rebuild campaign builder as vanilla JS with collision/body shop mode |
+| **Phase** | 20: Pacing Engine v2 — IN PROGRESS (branch `feat/pacing-engine-v2`) |
+| **Progress** | 7 of 14 tasks complete (13 commits on branch, tree clean) |
+| **Last Session** | 2026-04-20 - CLEAN. Tasks 6.1 committed; 5.1/4.2/4.1/3.1 review-feedback fixes landed |
+| **Immediate Next** | Task 6.2 — hover tooltip on Pacing column |
+| **Resume Pointer** | Say "Resume pacing engine v2" — memory auto-loads continuation doc at `C:/Users/bprev/.claude/docs/2026-04-17-pacing-engine-v2-continuation.md` |
 | **Live URL** | https://dealer-ads-tool-840281790428.us-east1.run.app |
-| **Live Version** | V3 on Google Cloud Run |
+| **Live Version** | V3 on Google Cloud Run (NOT yet the pacing-v2 branch) |
 
 ---
 
