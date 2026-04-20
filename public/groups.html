@@ -319,10 +319,11 @@
     <div id="createFeedback"></div>
   </div>
 
+  <!-- Empty state (sibling of groupList so innerHTML resets don't destroy it) -->
+  <div class="empty-groups" id="emptyState" style="display:none">No groups yet. Create one above or seed defaults.</div>
+
   <!-- Group list -->
-  <div id="groupList" class="group-list">
-    <div class="empty-groups" id="emptyState" style="display:none">No groups yet. Create one above or seed defaults.</div>
-  </div>
+  <div id="groupList" class="group-list"></div>
 
 </div>
 

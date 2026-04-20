@@ -67,15 +67,14 @@ function render() {
   const seedBar = document.getElementById('seedBar');
 
   if (state.groups.length === 0) {
-    empty.style.display = 'block';
-    seedBar.style.display = 'flex';
-    list.innerHTML = '';
-    list.appendChild(empty);
+    if (empty) empty.style.display = 'block';
+    if (seedBar) seedBar.style.display = 'flex';
+    if (list) list.innerHTML = '';
     return;
   }
 
-  empty.style.display = 'none';
-  seedBar.style.display = 'none';
+  if (empty) empty.style.display = 'none';
+  if (seedBar) seedBar.style.display = 'none';
 
   // Preserve open/close state across re-renders
   const openIds = new Set();
