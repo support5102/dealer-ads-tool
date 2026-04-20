@@ -282,6 +282,7 @@ async function applyChange(client, change, dryRun) {
 | `PORT` | `3000` | Server listen port |
 | `ANTHROPIC_API_KEY` | (required) | Claude API key for task parsing |
 | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` | Claude model for task parsing |
+| `PACING_ENGINE_V2_ENABLED` | `false` | Enables daily pacing scheduler + new "since last change" overview columns |
 
 ### Key Files
 
@@ -294,6 +295,11 @@ async function applyChange(client, change, dryRun) {
 | `src/services/google-ads.js` | Google Ads API client factory + GAQL queries |
 | `src/services/claude-parser.js` | Claude prompt building + API call |
 | `src/services/change-executor.js` | 10 change type handlers |
+| `src/services/pacing-curve.js` | Pacing Engine v2 — pure-function curve registry (linear, alanJay9505) |
+| `src/services/pacing-engine-v2.js` | Pacing Engine v2 — damped daily controller (`proposeAdjustment` + `runForAccount`) |
+| `src/services/pacing-engine-runner.js` | Pacing Engine v2 — daily scheduler entry point |
+| `src/services/pacing-engine-deps.js` | Pacing Engine v2 — enriches route pacing results with `currentDailyBudget` + `bidStrategyType` for the advisory hook |
+| `src/services/pacing-fetcher.js` | Per-account pacing data fetcher (spend, curve target, pacingSinceLastChange) |
 | `src/middleware/auth.js` | requireAuth middleware |
 | `src/middleware/error-handler.js` | Centralized error response formatting |
 | `src/utils/config.js` | Environment variable validation |
