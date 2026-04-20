@@ -307,8 +307,10 @@ describe('runForAccount', () => {
 
     expect(result.skipped).toBe(false);
     expect(result.applied).toBe(true);
+    expect(result.outcome).toBe('applied');
     expect(applied.length).toBe(1);
     expect(applied[0].customerId).toBe('123-456-7890');
+    expect(applied[0].newBudget).toBe(result.proposed.newDailyBudget);
     expect(logged.length).toBe(1);
     expect(logged[0].source).toBe('pacing_engine_v2');
     expect(logged[0].action).toBe('update_budget');
@@ -322,6 +324,7 @@ describe('runForAccount', () => {
 
     expect(result.skipped).toBe(false);
     expect(result.applied).toBe(false);
+    expect(result.outcome).toBe('logged');
     expect(applied.length).toBe(0);
     expect(logged.length).toBe(1);
     expect(logged[0].source).toBe('pacing_engine_v2_pending');
@@ -334,6 +337,7 @@ describe('runForAccount', () => {
     const result = await runForAccount(fakeAccount, deps);
 
     expect(result.applied).toBe(false);
+    expect(result.outcome).toBe('advisory');
     expect(applied.length).toBe(0);
     expect(logged.length).toBe(0);
     expect(result.proposed).toBeDefined();
@@ -346,6 +350,8 @@ describe('runForAccount', () => {
     const result = await runForAccount(fakeAccount, deps);
 
     expect(result.skipped).toBe(true);
+    expect(result.outcome).toBe('skipped');
+    expect(result.reason).toMatch(/dead.?zone/i);
     expect(applied.length).toBe(0);
     expect(logged.length).toBe(0);
   });
@@ -357,8 +363,46 @@ describe('runForAccount', () => {
     const result = await runForAccount(fakeAccount, deps);
 
     expect(result.applied).toBe(false);
+    expect(result.outcome).toBe('failed');
     expect(result.error).toMatch(/API blew up/);
     expect(logged.length).toBe(1);
     expect(logged[0].success).toBe(false);
+  });
+
+  test('apply success but logChange fails: reports applied=true + logError, no throw', async () => {
+    const { fakeAccount, deps, applied } = makeFakes();
+    deps.logChange = async () => { throw new Error('Sheets 429'); };
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    // Money moved — must not be hidden from caller
+    expect(applied.length).toBe(1);
+    expect(result.outcome).toBe('applied');
+    expect(result.applied).toBe(true);
+    // Log failure surfaced, does not mask the applied state
+    expect(result.logError).toMatch(/Sheets 429/);
+  });
+
+  test('apply fails AND log fails: reports failed outcome with both error + logError', async () => {
+    const { fakeAccount, deps } = makeFakes();
+    deps.applyBudgetChange = async () => { throw new Error('Ads API down'); };
+    deps.logChange = async () => { throw new Error('Sheets down too'); };
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.outcome).toBe('failed');
+    expect(result.applied).toBe(false);
+    expect(result.error).toMatch(/Ads API down/);
+    expect(result.logError).toMatch(/Sheets down too/);
+  });
+
+  test('handles non-Error throw from applyBudgetChange (string throw)', async () => {
+    const { fakeAccount, deps } = makeFakes();
+    deps.applyBudgetChange = async () => { throw 'raw string error'; };
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.outcome).toBe('failed');
+    expect(result.error).toBe('raw string error');
   });
 });

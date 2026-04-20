@@ -164,18 +164,33 @@ function proposeAdjustment(params) {
 }
 
 /**
+ * @typedef {Object} RunForAccountResult
+ * @property {'skipped'|'advisory'|'logged'|'applied'|'failed'} outcome - Discriminator for the five exit paths
+ * @property {boolean} skipped - Redundant with outcome === 'skipped' but kept for backwards reading
+ * @property {boolean} applied - True only if Google Ads budget actually changed (outcome === 'applied')
+ * @property {AdjustmentResult} proposed - The raw proposal object from proposeAdjustment
+ * @property {string} [reason] - Set when outcome === 'skipped'; the skip reason from proposeAdjustment
+ * @property {string} [error] - Set when outcome === 'failed'; message from the failing applyBudgetChange
+ * @property {string} [logError] - Set when logChange itself threw; independent of error
+ */
+
+/**
  * Runs the pacing engine for one account end-to-end.
  * Computes a proposal, then applies/logs according to pacingMode.
  *
  * @param {Object} account - { customerId, dealerName, goal, mtdSpend,
  *                             currentDailyBudget, bidStrategyType, lastChangeTimestamp }
  * @param {Object} deps - { now: Date, applyBudgetChange(cid, $), logChange(entry) }
- * @returns {Promise<Object>} { skipped, applied, proposed, error? }
+ * @returns {Promise<RunForAccountResult>}
  */
 async function runForAccount(account, deps) {
+  const getErrorMessage = (err) => (err && err.message) ? err.message : String(err);
+
   const now = deps.now || new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;
+  // TODO(7.1): verify timezone semantics — getUTCDate() on a midnight-ET scheduler run
+  // returns the *next* day in UTC, which could cause off-by-one day-of-month for US dealers.
   const day = now.getUTCDate();
 
   const proposal = proposeAdjustment({
@@ -191,68 +206,87 @@ async function runForAccount(account, deps) {
   });
 
   if (proposal.skipped) {
-    return { skipped: true, applied: false, proposed: proposal, reason: proposal.reason };
+    return { outcome: 'skipped', skipped: true, applied: false, proposed: proposal, reason: proposal.reason };
   }
 
   const mode = account.goal.pacingMode || 'one_click';
 
   // Advisory: no side effects
   if (mode === 'advisory') {
-    return { skipped: false, applied: false, proposed: proposal };
+    return { outcome: 'advisory', skipped: false, applied: false, proposed: proposal };
   }
 
   // one_click: log as pending, do not apply
   if (mode === 'one_click') {
-    await deps.logChange({
-      action: 'update_budget',
-      accountId: account.customerId,
-      dealerName: account.dealerName,
-      details: {
-        oldDailyBudget: account.currentDailyBudget,
-        newDailyBudget: proposal.newDailyBudget,
-        curveTarget: proposal.curveTarget,
-        variance: proposal.variance,
-        clampedBy: proposal.clampedBy,
-      },
-      source: 'pacing_engine_v2_pending',
-      success: true,
-    });
-    return { skipped: false, applied: false, proposed: proposal };
+    try {
+      await deps.logChange({
+        action: 'update_budget',
+        accountId: account.customerId,
+        dealerName: account.dealerName,
+        details: {
+          oldDailyBudget: account.currentDailyBudget,
+          newDailyBudget: proposal.newDailyBudget,
+          curveTarget: proposal.curveTarget,
+          variance: proposal.variance,
+          clampedBy: proposal.clampedBy,
+        },
+        source: 'pacing_engine_v2_pending',
+        success: true,
+      });
+    } catch (logErr) {
+      return { outcome: 'logged', skipped: false, applied: false, proposed: proposal, logError: getErrorMessage(logErr) };
+    }
+    return { outcome: 'logged', skipped: false, applied: false, proposed: proposal };
   }
 
   // auto_apply: push to Google Ads, then log
   try {
     await deps.applyBudgetChange(account.customerId, proposal.newDailyBudget);
-    await deps.logChange({
-      action: 'update_budget',
-      accountId: account.customerId,
-      dealerName: account.dealerName,
-      details: {
-        oldDailyBudget: account.currentDailyBudget,
-        newDailyBudget: proposal.newDailyBudget,
-        curveTarget: proposal.curveTarget,
-        variance: proposal.variance,
-        clampedBy: proposal.clampedBy,
-      },
-      source: 'pacing_engine_v2',
-      success: true,
-    });
-    return { skipped: false, applied: true, proposed: proposal };
+    try {
+      await deps.logChange({
+        action: 'update_budget',
+        accountId: account.customerId,
+        dealerName: account.dealerName,
+        details: {
+          oldDailyBudget: account.currentDailyBudget,
+          newDailyBudget: proposal.newDailyBudget,
+          curveTarget: proposal.curveTarget,
+          variance: proposal.variance,
+          clampedBy: proposal.clampedBy,
+        },
+        source: 'pacing_engine_v2',
+        success: true,
+      });
+    } catch (logErr) {
+      return { outcome: 'applied', skipped: false, applied: true, proposed: proposal, logError: getErrorMessage(logErr) };
+    }
+    return { outcome: 'applied', skipped: false, applied: true, proposed: proposal };
   } catch (err) {
-    await deps.logChange({
-      action: 'update_budget',
-      accountId: account.customerId,
-      dealerName: account.dealerName,
-      details: {
-        oldDailyBudget: account.currentDailyBudget,
-        newDailyBudget: proposal.newDailyBudget,
-        attemptedButFailed: true,
-      },
-      source: 'pacing_engine_v2',
-      success: false,
-      error: err.message,
-    });
-    return { skipped: false, applied: false, proposed: proposal, error: err.message };
+    const errorMessage = getErrorMessage(err);
+    let logError;
+    try {
+      await deps.logChange({
+        action: 'update_budget',
+        accountId: account.customerId,
+        dealerName: account.dealerName,
+        details: {
+          oldDailyBudget: account.currentDailyBudget,
+          newDailyBudget: proposal.newDailyBudget,
+          curveTarget: proposal.curveTarget,
+          variance: proposal.variance,
+          clampedBy: proposal.clampedBy,
+          attemptedButFailed: true,
+        },
+        source: 'pacing_engine_v2',
+        success: false,
+        error: errorMessage,
+      });
+    } catch (logErr) {
+      logError = getErrorMessage(logErr);
+    }
+    const result = { outcome: 'failed', skipped: false, applied: false, proposed: proposal, error: errorMessage };
+    if (logError !== undefined) result.logError = logError;
+    return result;
   }
 }
 
