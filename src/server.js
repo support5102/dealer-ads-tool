@@ -161,6 +161,25 @@ if (require.main === module) {
     console.warn('⚠️  WARNING: APP_URL is not set or contains localhost. OAuth will fail in production.');
   }
 
+  // Pacing Engine v2 — daily scheduler (feature-flagged, stub runner until Task 8.2)
+  if (config.pacingEngineV2Enabled) {
+    const scheduler = require('./services/scheduler');
+    const runner = require('./services/pacing-engine-runner');
+
+    // Stub runner: empty listAccounts + throwing applyBudgetChange. Real wiring
+    // lands in Task 8.2 (listAccounts via MCC + applyBudgetChange via Google Ads REST).
+    scheduler.registerJob(
+      'pacing-engine-daily',
+      async () => runner.run({
+        listAccounts: async () => [],
+        applyBudgetChange: async () => { throw new Error('apply not wired — Task 8.2'); },
+      }),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[pacing-engine-v2] scheduler registered (stub runner)');
+  }
+
   createApp(config).listen(PORT, () => {
     console.log(`\n⚡ Dealer Ads Tool running on port ${PORT}`);
     console.log(`   URL: ${config.app.url}\n`);

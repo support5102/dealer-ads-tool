@@ -189,7 +189,7 @@ async function runForAccount(account, deps) {
   const now = deps.now || new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;
-  // TODO(7.1): verify timezone semantics — getUTCDate() on a midnight-ET scheduler run
+  // TODO(8.2): verify timezone semantics — getUTCDate() on a midnight-ET scheduler run
   // returns the *next* day in UTC, which could cause off-by-one day-of-month for US dealers.
   const day = now.getUTCDate();
 

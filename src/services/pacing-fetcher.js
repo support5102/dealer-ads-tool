@@ -39,7 +39,7 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
   ]);
 
   const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
-  // TODO(7.1): align timezone handling with computeSinceLastChange (which uses UTC).
+  // TODO(8.2): align timezone handling with computeSinceLastChange (which uses UTC).
   // Existing calls below use local time; may disagree by ±1 day around midnight ET.
   const now = new Date();
   const pacing = calculatePacing({
