@@ -258,3 +258,107 @@ describe('SAFETY_LIMITS constants', () => {
     expect(SAFETY_LIMITS.CEILING_MULTIPLIER).toBe(3);
   });
 });
+
+// ===========================================================================
+// runForAccount - integrates propose + apply + log
+// ===========================================================================
+
+describe('runForAccount', () => {
+  const { runForAccount } = require('../../src/services/pacing-engine-v2');
+
+  // Minimal fake deps: captures what would be called
+  function makeFakes() {
+    const applied = [];
+    const logged = [];
+    return {
+      applied,
+      logged,
+      fakeAccount: {
+        customerId: '123-456-7890',
+        dealerName: 'Test Dealer',
+        goal: {
+          dealerName: 'Test Dealer',
+          monthlyBudget: 3000,
+          pacingMode: 'auto_apply',
+          pacingCurveId: 'linear',
+        },
+        mtdSpend: 1200, // underpacing on day 15 of 30
+        currentDailyBudget: 100,
+        bidStrategyType: 'MAXIMIZE_CLICKS',
+        lastChangeTimestamp: null,
+      },
+      deps: {
+        now: new Date('2026-04-15T06:00:00Z'), // day 15 of April
+        applyBudgetChange: async (customerId, newBudget) => {
+          applied.push({ customerId, newBudget });
+          return { ok: true };
+        },
+        logChange: async (entry) => {
+          logged.push(entry);
+          return entry;
+        },
+      },
+    };
+  }
+
+  test('auto_apply mode: calls applyBudgetChange + logs', async () => {
+    const { fakeAccount, deps, applied, logged } = makeFakes();
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.skipped).toBe(false);
+    expect(result.applied).toBe(true);
+    expect(applied.length).toBe(1);
+    expect(applied[0].customerId).toBe('123-456-7890');
+    expect(logged.length).toBe(1);
+    expect(logged[0].source).toBe('pacing_engine_v2');
+    expect(logged[0].action).toBe('update_budget');
+  });
+
+  test('one_click mode: logs proposal but does NOT apply', async () => {
+    const { fakeAccount, deps, applied, logged } = makeFakes();
+    fakeAccount.goal.pacingMode = 'one_click';
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.skipped).toBe(false);
+    expect(result.applied).toBe(false);
+    expect(applied.length).toBe(0);
+    expect(logged.length).toBe(1);
+    expect(logged[0].source).toBe('pacing_engine_v2_pending');
+  });
+
+  test('advisory mode: no apply, no log (purely informational)', async () => {
+    const { fakeAccount, deps, applied, logged } = makeFakes();
+    fakeAccount.goal.pacingMode = 'advisory';
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.applied).toBe(false);
+    expect(applied.length).toBe(0);
+    expect(logged.length).toBe(0);
+    expect(result.proposed).toBeDefined();
+  });
+
+  test('skipped proposal: no apply, no log', async () => {
+    const { fakeAccount, deps, applied, logged } = makeFakes();
+    fakeAccount.mtdSpend = 1500; // on-pace, dead zone
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.skipped).toBe(true);
+    expect(applied.length).toBe(0);
+    expect(logged.length).toBe(0);
+  });
+
+  test('apply failure: logs the error, does not throw', async () => {
+    const { fakeAccount, deps, applied, logged } = makeFakes();
+    deps.applyBudgetChange = async () => { throw new Error('API blew up'); };
+
+    const result = await runForAccount(fakeAccount, deps);
+
+    expect(result.applied).toBe(false);
+    expect(result.error).toMatch(/API blew up/);
+    expect(logged.length).toBe(1);
+    expect(logged[0].success).toBe(false);
+  });
+});

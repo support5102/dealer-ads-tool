@@ -163,7 +163,101 @@ function proposeAdjustment(params) {
   };
 }
 
+/**
+ * Runs the pacing engine for one account end-to-end.
+ * Computes a proposal, then applies/logs according to pacingMode.
+ *
+ * @param {Object} account - { customerId, dealerName, goal, mtdSpend,
+ *                             currentDailyBudget, bidStrategyType, lastChangeTimestamp }
+ * @param {Object} deps - { now: Date, applyBudgetChange(cid, $), logChange(entry) }
+ * @returns {Promise<Object>} { skipped, applied, proposed, error? }
+ */
+async function runForAccount(account, deps) {
+  const now = deps.now || new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1;
+  const day = now.getUTCDate();
+
+  const proposal = proposeAdjustment({
+    monthlyBudget: account.goal.monthlyBudget,
+    mtdSpend: account.mtdSpend,
+    currentDailyBudget: account.currentDailyBudget,
+    curveId: account.goal.pacingCurveId || 'linear',
+    year,
+    month,
+    currentDay: day,
+    lastChangeTimestamp: account.lastChangeTimestamp,
+    bidStrategyType: account.bidStrategyType,
+  });
+
+  if (proposal.skipped) {
+    return { skipped: true, applied: false, proposed: proposal, reason: proposal.reason };
+  }
+
+  const mode = account.goal.pacingMode || 'one_click';
+
+  // Advisory: no side effects
+  if (mode === 'advisory') {
+    return { skipped: false, applied: false, proposed: proposal };
+  }
+
+  // one_click: log as pending, do not apply
+  if (mode === 'one_click') {
+    await deps.logChange({
+      action: 'update_budget',
+      accountId: account.customerId,
+      dealerName: account.dealerName,
+      details: {
+        oldDailyBudget: account.currentDailyBudget,
+        newDailyBudget: proposal.newDailyBudget,
+        curveTarget: proposal.curveTarget,
+        variance: proposal.variance,
+        clampedBy: proposal.clampedBy,
+      },
+      source: 'pacing_engine_v2_pending',
+      success: true,
+    });
+    return { skipped: false, applied: false, proposed: proposal };
+  }
+
+  // auto_apply: push to Google Ads, then log
+  try {
+    await deps.applyBudgetChange(account.customerId, proposal.newDailyBudget);
+    await deps.logChange({
+      action: 'update_budget',
+      accountId: account.customerId,
+      dealerName: account.dealerName,
+      details: {
+        oldDailyBudget: account.currentDailyBudget,
+        newDailyBudget: proposal.newDailyBudget,
+        curveTarget: proposal.curveTarget,
+        variance: proposal.variance,
+        clampedBy: proposal.clampedBy,
+      },
+      source: 'pacing_engine_v2',
+      success: true,
+    });
+    return { skipped: false, applied: true, proposed: proposal };
+  } catch (err) {
+    await deps.logChange({
+      action: 'update_budget',
+      accountId: account.customerId,
+      dealerName: account.dealerName,
+      details: {
+        oldDailyBudget: account.currentDailyBudget,
+        newDailyBudget: proposal.newDailyBudget,
+        attemptedButFailed: true,
+      },
+      source: 'pacing_engine_v2',
+      success: false,
+      error: err.message,
+    });
+    return { skipped: false, applied: false, proposed: proposal, error: err.message };
+  }
+}
+
 module.exports = {
   proposeAdjustment,
+  runForAccount,
   SAFETY_LIMITS,
 };
