@@ -13,12 +13,82 @@ const {
   detectDealerMake,
   getCompetingMakes,
   classifyCampaignType,
+  UNIVERSAL_NEGATIVES,
 } = require('./strategy-rules');
 
 // ── Finding builder (matches audit-engine.js format) ──
 
 function finding(checkId, severity, category, title, message, details = {}) {
   return { checkId, severity, category, title, message, details };
+}
+
+// ── Cross-model detection ──
+// When a campaign targets a specific model, search terms for OTHER models
+// from the same make should be flagged as irrelevant.
+
+const MAKE_MODELS = {
+  ford: ['mustang', 'mach-e', 'mach e', 'bronco', 'bronco sport', 'f-150', 'f150', 'f-250', 'f250', 'f-350', 'ranger', 'maverick', 'escape', 'edge', 'explorer', 'expedition', 'raptor', 'lightning', 'transit', 'e-transit', 'super duty', 'ecosport', 'fusion', 'taurus'],
+  chevrolet: ['silverado', 'colorado', 'tahoe', 'suburban', 'traverse', 'equinox', 'blazer', 'trax', 'trailblazer', 'malibu', 'camaro', 'corvette', 'bolt', 'spark'],
+  dodge: ['ram', 'charger', 'challenger', 'durango', 'hornet'],
+  jeep: ['wrangler', 'grand cherokee', 'cherokee', 'compass', 'renegade', 'gladiator', 'wagoneer', 'grand wagoneer'],
+  chrysler: ['pacifica', '300'],
+  gmc: ['sierra', 'canyon', 'yukon', 'terrain', 'acadia', 'hummer'],
+  toyota: ['camry', 'corolla', 'rav4', 'highlander', 'tacoma', 'tundra', '4runner', 'sequoia', 'venza', 'prius', 'supra', 'gr86', 'crown', 'grand highlander', 'land cruiser'],
+  honda: ['civic', 'accord', 'cr-v', 'crv', 'hr-v', 'hrv', 'pilot', 'passport', 'ridgeline', 'odyssey', 'prologue'],
+  nissan: ['altima', 'sentra', 'maxima', 'rogue', 'pathfinder', 'murano', 'frontier', 'titan', 'kicks', 'versa', 'leaf', 'ariya', 'z'],
+  hyundai: ['tucson', 'santa fe', 'palisade', 'kona', 'elantra', 'sonata', 'ioniq', 'venue'],
+  kia: ['sportage', 'telluride', 'sorento', 'forte', 'k5', 'seltos', 'soul', 'carnival', 'ev6', 'ev9', 'niro'],
+  subaru: ['outback', 'forester', 'crosstrek', 'ascent', 'impreza', 'wrx', 'brz', 'legacy', 'solterra'],
+  buick: ['encore', 'envision', 'enclave', 'envista'],
+  cadillac: ['escalade', 'ct4', 'ct5', 'xt4', 'xt5', 'xt6', 'lyriq', 'celestiq'],
+  lincoln: ['navigator', 'aviator', 'corsair', 'nautilus'],
+};
+
+/**
+ * Extract the model name from a campaign name.
+ * Campaign format: "Dealer - Make - New/Used ModelName" or "SD-08 - ModelName"
+ */
+function extractCampaignModel(campaignName) {
+  if (!campaignName) return null;
+  const parts = campaignName.split(' - ').map(p => p.trim());
+  // Look for model in the last part (e.g., "New Mustang" → "mustang", "New F-150" → "f-150")
+  if (parts.length >= 3) {
+    const last = parts[parts.length - 1].toLowerCase();
+    // Strip "new", "used", "lease", "for sale" prefixes/suffixes
+    const cleaned = last.replace(/\b(new|used|lease|for sale|sd-?\d+)\b/gi, '').trim();
+    if (cleaned.length >= 2) return cleaned;
+  }
+  return null;
+}
+
+/**
+ * Check if a search term contains a different model from the same make.
+ * Returns the matched other model name, or null.
+ */
+function findCrossModelMatch(searchTermLower, campaignModel) {
+  // Find which make this model belongs to
+  const campModelClean = campaignModel.toLowerCase().trim();
+  let make = null;
+  for (const [m, models] of Object.entries(MAKE_MODELS)) {
+    if (models.some(model => campModelClean.includes(model) || model.includes(campModelClean))) {
+      make = m;
+      break;
+    }
+  }
+  if (!make) return null;
+
+  // Check if the search term mentions a DIFFERENT model from the same make
+  const sameMarkModels = MAKE_MODELS[make];
+  for (const otherModel of sameMarkModels) {
+    // Skip if it's the same model as the campaign
+    if (campModelClean.includes(otherModel) || otherModel.includes(campModelClean)) continue;
+    // Check if the search term contains this other model
+    const regex = new RegExp(`\\b${otherModel.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(searchTermLower)) {
+      return otherModel;
+    }
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -245,10 +315,190 @@ function analyzeTrafficSculpting(keywords, campaignNegatives, campaignNames) {
   return findings;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Search term analysis
+// ─────────────────────────────────────────────────────────────
+
+// Patterns that indicate irrelevant search terms on dealer campaigns
+const IRRELEVANT_PATTERNS = [
+  // Price-hunting (not selling cheap/used beaters)
+  { pattern: /under \$?\d/i, reason: 'price-hunting' },
+  { pattern: /less than \$?\d/i, reason: 'price-hunting' },
+  { pattern: /cheap(est)?/i, reason: 'price-hunting' },
+  { pattern: /\$\d{2,4}\s*(down|\/mo)/i, reason: 'price-hunting' },
+  { pattern: /no (credit|money down)/i, reason: 'price-hunting' },
+  { pattern: /bad credit/i, reason: 'price-hunting' },
+  { pattern: /buy here pay here/i, reason: 'price-hunting' },
+  // Service/parts intent (not sales)
+  { pattern: /\b(oil change|tire rotation|brake (pad|job)|repair|mechanic|service center)\b/i, reason: 'service intent' },
+  { pattern: /\b(parts|wiring diagram|fuse box|owners? manual)\b/i, reason: 'parts/manual intent' },
+  // Off-topic
+  { pattern: /\b(rental|rent a|insurance|recall|lawsuit|lemon law)\b/i, reason: 'off-topic' },
+  { pattern: /\b(toy|hot wheels|matchbox|model car|die cast|rc car|remote control)\b/i, reason: 'toy/model intent' },
+  { pattern: /\b(coloring page|wallpaper|screensaver|game|simulator)\b/i, reason: 'off-topic' },
+  { pattern: /\b(junkyard|salvage|rebuilt title|accident|crash test)\b/i, reason: 'salvage/accident' },
+  { pattern: /\b(how to|diy|tutorial|youtube)\b/i, reason: 'DIY/research' },
+  // Job-seekers
+  { pattern: /\b(jobs?|hiring|career|salary|employment|work at)\b/i, reason: 'job search' },
+];
+
+/**
+ * Analyzes search terms for irrelevant traffic that should be negatived out.
+ *
+ * Checks search terms against irrelevance patterns (price-hunting, service intent,
+ * off-topic, etc.) and flags terms getting clicks that waste budget.
+ * Also flags "used" terms appearing on "New" campaigns.
+ *
+ * @param {Object[]} searchTerms - Array from getSearchTermReport
+ * @returns {Object[]} Array of findings
+ */
+function analyzeIrrelevantSearchTerms(searchTerms) {
+  const findings = [];
+  const irrelevant = [];
+
+  for (const st of (searchTerms || [])) {
+    if (st.clicks < 1) continue; // only flag terms costing money
+
+    const termLower = st.searchTerm.toLowerCase();
+    let flagReason = null;
+
+    // Check against irrelevant patterns
+    const campLower = (st.campaignName || '').toLowerCase();
+    const isServiceCampaign = /quick lane|service|parts|fixed ops/i.test(campLower);
+    for (const { pattern, reason } of IRRELEVANT_PATTERNS) {
+      // Skip service-intent flags on service campaigns (Quick Lane, Service, etc.)
+      if (isServiceCampaign && (reason === 'service intent' || reason === 'parts/manual intent')) continue;
+      if (pattern.test(st.searchTerm)) {
+        flagReason = reason;
+        break;
+      }
+    }
+
+    // Check against universal negatives from strategy-rules (word boundary match)
+    // Skip service-related negatives on service campaigns
+    const SERVICE_NEGATIVES = ['oil change', 'tire rotation', 'parts', 'repair manual', 'wiring diagram', 'fuse box'];
+    if (!flagReason) {
+      for (const neg of UNIVERSAL_NEGATIVES) {
+        if (isServiceCampaign && SERVICE_NEGATIVES.includes(neg.toLowerCase())) continue;
+        const negLower = neg.toLowerCase();
+        const regex = new RegExp(`\\b${negLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (regex.test(st.searchTerm)) {
+          flagReason = `matches universal negative "${neg}"`;
+          break;
+        }
+      }
+    }
+
+    // Check "used" terms on "New" campaigns
+    if (!flagReason) {
+      const parts = (st.campaignName || '').split(' - ').map(p => p.trim().toLowerCase());
+      const isNewCampaign = parts.length >= 2 && parts[1] === 'new';
+      if (isNewCampaign && /\bused\b/i.test(st.searchTerm)) {
+        flagReason = 'used intent on new vehicle campaign';
+      }
+    }
+
+    // Check cross-model search terms — e.g., "mach e" showing on a Mustang campaign
+    if (!flagReason) {
+      const campModel = extractCampaignModel(st.campaignName);
+      if (campModel) {
+        const otherModel = findCrossModelMatch(termLower, campModel);
+        if (otherModel) {
+          flagReason = `wrong model: "${otherModel}" on ${campModel} campaign`;
+        }
+      }
+    }
+
+    if (flagReason) {
+      irrelevant.push({
+        searchTerm: st.searchTerm,
+        campaignName: st.campaignName,
+        adGroupName: st.adGroupName,
+        clicks: st.clicks,
+        cost: Math.round(st.cost * 100) / 100,
+        conversions: st.conversions,
+        reason: flagReason,
+      });
+    }
+  }
+
+  if (irrelevant.length > 0) {
+    // Sort by cost descending (biggest waste first)
+    irrelevant.sort((a, b) => b.cost - a.cost);
+    const totalWaste = irrelevant.reduce((sum, t) => sum + t.cost, 0);
+
+    findings.push(finding(
+      'IRRELEVANT_SEARCH_TERMS',
+      'warning',
+      'search_terms',
+      `${irrelevant.length} irrelevant search term(s) wasting $${totalWaste.toFixed(2)}`,
+      `Search terms matching irrelevant patterns are getting clicks. Add as negative keywords to stop waste.`,
+      { terms: irrelevant.slice(0, 20), totalWaste, totalCount: irrelevant.length }
+    ));
+  }
+
+  return findings;
+}
+
+/**
+ * Detects when campaign-level negatives are blocking search terms that
+ * have historically converted. The search_term_view shows terms that
+ * DID trigger ads — if a negative now exists that would block a converting
+ * term, it's likely a mistake.
+ *
+ * @param {Object[]} searchTerms - Array from getSearchTermReport
+ * @param {Object[]} campaignNegatives - Array from getCampaignNegatives
+ * @returns {Object[]} Array of findings
+ */
+function analyzeBlockedConvertingTerms(searchTerms, campaignNegatives) {
+  const findings = [];
+  const blocked = [];
+
+  // Only check search terms that actually converted
+  const convertingTerms = (searchTerms || []).filter(st => st.conversions > 0);
+  const negatives = campaignNegatives || [];
+
+  for (const st of convertingTerms) {
+    for (const neg of negatives) {
+      // Check if the negative in the SAME campaign would block this converting term
+      if (neg.campaignName !== st.campaignName) continue;
+
+      if (doesNegativeBlock(neg.keyword, neg.matchType, st.searchTerm)) {
+        blocked.push({
+          searchTerm: st.searchTerm,
+          campaignName: st.campaignName,
+          conversions: st.conversions,
+          conversionValue: Math.round(st.conversionValue * 100) / 100,
+          clicks: st.clicks,
+          blockingNegative: neg.keyword,
+          blockingMatchType: neg.matchType,
+        });
+        break; // one blocking negative per term is enough
+      }
+    }
+  }
+
+  if (blocked.length > 0) {
+    const totalConversions = blocked.reduce((sum, t) => sum + t.conversions, 0);
+    findings.push(finding(
+      'BLOCKED_CONVERTING_TERMS',
+      'critical',
+      'search_terms',
+      `${blocked.length} converting search term(s) blocked by negatives`,
+      `Negative keywords are blocking search terms that generated ${totalConversions} conversion(s). Review and remove these negatives.`,
+      { terms: blocked }
+    ));
+  }
+
+  return findings;
+}
+
 module.exports = {
   analyzeNegativeConflicts,
   analyzeCannibalization,
   analyzeTrafficSculpting,
+  analyzeIrrelevantSearchTerms,
+  analyzeBlockedConvertingTerms,
   // Exported for testing
   doesNegativeBlock,
 };

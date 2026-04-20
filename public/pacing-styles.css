@@ -6,11 +6,11 @@
   font-size: 12px;
   font-family: 'DM Mono', monospace;
   padding: 6px 14px;
-  border: 1px solid var(--border);
+  border: 2px solid #7c3aed;
   border-radius: 6px;
   transition: all .15s;
 }
-.nav-link:hover { color: var(--text2); border-color: #2d4a6e; }
+.nav-link:hover { color: var(--text2); border-color: #a78bfa; }
 
 /* Layout */
 .pacing-main {
@@ -141,6 +141,39 @@
   color: var(--text4);
 }
 
+/* Apply controls */
+.apply-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border2);
+  background: rgba(255,255,255,0.02);
+}
+.select-all-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.select-all-wrap input { cursor: pointer; }
+.apply-btn {
+  background: #166534;
+  color: #4ade80;
+  border: 1px solid #22c55e;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'DM Mono', monospace;
+  cursor: pointer;
+  transition: all .15s;
+}
+.apply-btn:hover:not(:disabled) { background: #15803d; }
+.apply-btn:disabled { opacity: 0.4; cursor: default; }
+#applyStatus { font-size: 12px; font-family: 'DM Mono', monospace; }
+
 /* Recommendation rows */
 .rec-item {
   display: flex;
@@ -151,6 +184,23 @@
   font-size: 12.5px;
 }
 .rec-item:last-child { border-bottom: none; }
+.rec-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.rec-checkbox { cursor: pointer; width: 16px; height: 16px; }
+.rec-content { flex: 1; min-width: 0; }
+.apply-result {
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.apply-result.success { color: #4ade80; background: rgba(74,222,128,0.08); }
+.apply-result.error { color: #f87171; background: rgba(248,113,113,0.08); }
 .rec-target {
   color: var(--text);
   font-weight: 500;
@@ -204,6 +254,56 @@
   color: var(--text3);
   font-size: 11px;
   margin-top: 4px;
+}
+
+/* Geo expansion */
+.geo-expansion {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 6px;
+}
+.geo-radius {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.geo-label {
+  color: var(--text3);
+  font-size: 11px;
+}
+.geo-current {
+  color: var(--text2);
+  font-weight: 600;
+}
+.geo-arrow {
+  color: var(--text3);
+}
+.geo-recommended {
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 14px;
+}
+.geo-center {
+  color: var(--text3);
+  font-size: 11px;
+}
+.geo-nearby {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.geo-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(251, 191, 36, 0.12);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #fbbf24;
 }
 
 /* Impression share */

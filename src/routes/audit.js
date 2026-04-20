@@ -16,6 +16,12 @@ const { runAudit } = require('../services/audit-engine');
 const auditStore = require('../services/audit-store');
 const googleAds = require('../services/google-ads');
 const auditScheduler = require('../services/audit-scheduler');
+const { diagnose } = require('../services/audit-fixer');
+const { applyChange } = require('../services/change-executor');
+const changeHistory = require('../services/change-history');
+const dealerContextStore = require('../services/dealer-context-store');
+const { syncDealerContext, syncAllDealers } = require('../services/freshdesk-context-sync');
+const { createClient: createFreshdeskClient } = require('../services/freshdesk');
 
 /**
  * Creates audit routes.
@@ -182,6 +188,358 @@ function createAuditRouter(config) {
       res.json(result);
     } catch (err) {
       console.error('Deep scan error:', err.message);
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/audit/diagnose?customerId=X
+   * Diagnoses audit findings and returns fix recommendations without applying them.
+   */
+  router.post('/api/audit/diagnose', requireAuth, async (req, res, next) => {
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: 'Missing customerId.' });
+    const cleanId = customerId.replace(/-/g, '');
+
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+      const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
+
+      // Fetch diagnostic data in parallel
+      const [keywords, keywordDiag, adCopy, campaignDiagnostics] = await Promise.all([
+        googleAds.getKeywordPerformance(restCtx).catch(() => []),
+        googleAds.getKeywordDiagnostics(restCtx).catch(() => []),
+        googleAds.getAdCopy(restCtx).catch(() => []),
+        googleAds.getCampaignDiagnostics(restCtx).catch(() => []),
+      ]);
+
+      // Merge quality/bid data into keyword performance data
+      for (const kw of keywords) {
+        const diag = keywordDiag.find(d => d.keyword === kw.keyword && d.campaignName === kw.campaignName);
+        if (diag) {
+          kw.qualityScore = diag.qualityScore;
+          kw.firstPageBid = diag.firstPageBid;
+          kw.approvalStatus = diag.approvalStatus;
+        }
+      }
+
+      // Get the latest audit result
+      const auditResult = auditStore.getLatest(cleanId);
+      if (!auditResult || !auditResult.findings) {
+        return res.status(400).json({ error: 'No audit results found. Run an audit first.' });
+      }
+
+      // Diagnose each finding (catch per-finding errors so one bad finding doesn't break all)
+      const diagnostics = { keywords, adCopy, campaignDiagnostics };
+      const results = await Promise.all(auditResult.findings.map(async (finding) => {
+        try {
+          return {
+            checkId: finding.checkId,
+            title: finding.title,
+            ...(await diagnose(finding, diagnostics, config.claude)),
+          };
+        } catch (err) {
+          console.error(`Diagnose error for ${finding.checkId}:`, err.message);
+          return {
+            checkId: finding.checkId,
+            title: finding.title,
+            fixable: false,
+            fixes: [],
+            manualNotes: [`Diagnosis failed: ${err.message}`],
+          };
+        }
+      }));
+
+      res.json({ diagnoses: results });
+    } catch (err) {
+      console.error('Diagnose error:', err.message, err.stack);
+      res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /api/audit/fix?customerId=X
+   * Applies specific fixes from a diagnosis. Body: { fixes: [{ changeType, campaignName, details }] }
+   */
+  router.post('/api/audit/fix', requireAuth, async (req, res, next) => {
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: 'Missing customerId.' });
+    const cleanId = customerId.replace(/-/g, '');
+    const { fixes } = req.body || {};
+    if (!fixes || !Array.isArray(fixes) || fixes.length === 0) {
+      return res.status(400).json({ error: 'No fixes provided.' });
+    }
+
+    try {
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const client = googleAds.createClient(config.googleAds, req.session.tokens.refresh_token, cleanId, mccId);
+
+      const results = { applied: 0, failed: 0, details: [] };
+
+      // Handle dismiss_recommendations_batch specially — needs fresh recommendation data
+      const dismissBatch = fixes.find(f => f.changeType === 'dismiss_recommendations_batch');
+      const normalFixes = fixes.filter(f => f.changeType !== 'dismiss_recommendations_batch');
+
+      if (dismissBatch) {
+        try {
+          // Use the google-ads-api library client for dismiss (REST endpoint 404s)
+          const accessToken = await googleAds.refreshAccessToken(config.googleAds, req.session.tokens.refresh_token);
+          const restCtx = { accessToken, developerToken: config.googleAds.developerToken, customerId: cleanId, loginCustomerId: mccId };
+          const recommendations = await googleAds.getRecommendations(restCtx);
+          console.log(`[Dismiss] Found ${recommendations.length} recommendations`);
+
+          if (recommendations.length === 0) {
+            results.details.push({ description: 'No recommendations found to dismiss', success: true });
+          } else {
+            let totalDismissed = 0;
+            let totalFailed = 0;
+            const failedTypes = new Set();
+
+            // Use the library's gRPC dismiss method
+            for (const rec of recommendations) {
+              try {
+                await client.recommendations.dismissRecommendation({
+                  customer_id: cleanId,
+                  operations: [{ resource_name: rec.resourceName }],
+                  partial_failure: true,
+                });
+                totalDismissed++;
+              } catch (err) {
+                const errMsg = err?.message || err?.details || JSON.stringify(err) || 'unknown error';
+                console.warn(`[Dismiss] Failed ${rec.type} (${rec.resourceName}): ${errMsg}`);
+                totalFailed++;
+                failedTypes.add(rec.type || 'unknown');
+              }
+            }
+
+            results.applied += totalDismissed;
+            results.failed += totalFailed;
+            if (totalDismissed > 0) {
+              results.details.push({ description: `Dismissed ${totalDismissed} of ${recommendations.length} recommendations`, success: true });
+            }
+            if (totalFailed > 0) {
+              const typeNote = failedTypes.size > 0 ? ` (types: ${[...failedTypes].join(', ')})` : '';
+              results.details.push({ description: `${totalFailed} could not be dismissed${typeNote}`, success: false });
+            }
+          }
+        } catch (err) {
+          results.failed++;
+          results.details.push({ description: 'Failed to dismiss recommendations', error: err.message, success: false });
+        }
+      }
+
+      // Apply normal fixes
+      const email = req.session.userEmail || 'unknown';
+      for (const fix of normalFixes) {
+        try {
+          const message = await applyChange(client, {
+            type: fix.changeType,
+            campaignName: fix.campaignName,
+            adGroupName: fix.adGroupName,
+            details: fix.details,
+          });
+          results.applied++;
+          results.details.push({ description: fix.description || message, success: true });
+          changeHistory.addEntry({
+            action: fix.changeType,
+            userEmail: email,
+            accountId: cleanId,
+            details: { campaignName: fix.campaignName, target: fix.description, ...fix.details },
+            source: 'audit_fixer',
+            success: true,
+          });
+        } catch (err) {
+          results.failed++;
+          results.details.push({ description: fix.description || fix.changeType, error: err.message, success: false });
+          changeHistory.addEntry({
+            action: fix.changeType,
+            userEmail: email,
+            accountId: cleanId,
+            details: { campaignName: fix.campaignName, target: fix.description },
+            source: 'audit_fixer',
+            success: false,
+            error: err.message,
+          });
+        }
+      }
+
+      res.json({
+        message: `Applied ${results.applied} of ${results.applied + results.failed} fixes.`,
+        results,
+      });
+    } catch (err) {
+      console.error('Fix error:', err.message);
+      next(err);
+    }
+  });
+
+  /**
+   * GET /api/change-history?limit=100&accountId=X
+   * Returns change history log of all API changes made by the tool.
+   */
+  router.get('/api/change-history', requireAuth, async (req, res) => {
+    const limit = parseInt(req.query.limit) || 100;
+    const accountId = req.query.accountId || null;
+    const history = await changeHistory.getHistory(limit, accountId);
+    const total = await changeHistory.size();
+    res.json({ entries: history, total });
+  });
+
+  /**
+   * GET /api/dealer-context — list all cached dealer contexts
+   */
+  router.get('/api/dealer-context', requireAuth, (req, res) => {
+    res.json({ contexts: dealerContextStore.getAll() });
+  });
+
+  /**
+   * GET /api/dealer-context/:accountId — get context for a specific dealer
+   */
+  router.get('/api/dealer-context/:accountId', requireAuth, (req, res) => {
+    const ctx = dealerContextStore.getContext(req.params.accountId);
+    if (!ctx) return res.status(404).json({ error: 'No context found for this account.' });
+    res.json({ context: ctx });
+  });
+
+  /**
+   * POST /api/dealer-context/sync — sync context from Freshdesk for one dealer
+   * Body: { accountId, dealerName, freshdeskTag }
+   */
+  router.post('/api/dealer-context/sync', requireAuth, async (req, res) => {
+    const { accountId, dealerName, freshdeskTag } = req.body || {};
+    if (!accountId || !freshdeskTag) {
+      return res.status(400).json({ error: 'Missing accountId or freshdeskTag.' });
+    }
+    if (!config.freshdesk?.apiKey || !config.freshdesk?.domain) {
+      return res.status(400).json({ error: 'Freshdesk not configured.' });
+    }
+    if (!config.claude?.apiKey) {
+      return res.status(400).json({ error: 'Claude API not configured.' });
+    }
+
+    try {
+      const fdClient = createFreshdeskClient(config.freshdesk);
+      const result = await syncDealerContext(fdClient, config.claude, { accountId, dealerName, freshdeskTag });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/dealer-context/sync-all — sync context from Freshdesk for all dealers with tags
+   * Body: { dealers: [{ accountId, dealerName, freshdeskTag }] }
+   */
+  router.post('/api/dealer-context/sync-all', requireAuth, async (req, res) => {
+    const { dealers } = req.body || {};
+    if (!dealers || !Array.isArray(dealers)) {
+      return res.status(400).json({ error: 'Missing dealers array.' });
+    }
+    if (!config.freshdesk?.apiKey || !config.freshdesk?.domain) {
+      return res.status(400).json({ error: 'Freshdesk not configured.' });
+    }
+    if (!config.claude?.apiKey) {
+      return res.status(400).json({ error: 'Claude API not configured.' });
+    }
+
+    try {
+      const fdClient = createFreshdeskClient(config.freshdesk);
+      const result = await syncAllDealers(fdClient, config.claude, dealers);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Ad copy endpoints ──
+
+  /**
+   * GET /api/ads?customerId=X — Fetch all RSA ads for an account
+   * Optional: campaignName, adGroupName to filter
+   */
+  router.get('/api/ads', requireAuth, async (req, res, next) => {
+    const customerId = (req.query.customerId || '').replace(/-/g, '');
+    if (!customerId) return res.status(400).json({ error: 'customerId is required' });
+
+    try {
+      const restCtx = {
+        accessToken: req.session.tokens.access_token,
+        developerToken: config.googleAds.developerToken,
+        customerId,
+        loginCustomerId: req.session.mccId,
+      };
+      const ads = await googleAds.getAdCopy(restCtx);
+
+      // Optional filters
+      const campFilter = req.query.campaignName;
+      const agFilter = req.query.adGroupName;
+      let filtered = ads;
+      if (campFilter) filtered = filtered.filter(a => a.campaignName === campFilter);
+      if (agFilter) filtered = filtered.filter(a => a.adGroupName === agFilter);
+
+      res.json({ ads: filtered, total: filtered.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/ads/update — Update (replace) an RSA ad
+   * Body: { customerId, campaignName, adGroupName, adId, headlines, descriptions, finalUrls }
+   */
+  router.post('/api/ads/update', requireAuth, async (req, res, next) => {
+    const { customerId, campaignName, adGroupName, adId, headlines, descriptions, finalUrls } = req.body;
+    if (!customerId || !campaignName || !adGroupName || !adId) {
+      return res.status(400).json({ error: 'customerId, campaignName, adGroupName, and adId are required' });
+    }
+    if (!headlines || !Array.isArray(headlines) || headlines.length < 3) {
+      return res.status(400).json({ error: 'At least 3 headlines are required' });
+    }
+    if (!descriptions || !Array.isArray(descriptions) || descriptions.length < 2) {
+      return res.status(400).json({ error: 'At least 2 descriptions are required' });
+    }
+
+    // Validate headline/description lengths
+    for (const h of headlines) {
+      if (!h.text || h.text.length > 30) return res.status(400).json({ error: `Headline "${h.text}" exceeds 30 characters` });
+    }
+    for (const d of descriptions) {
+      if (!d.text || d.text.length > 90) return res.status(400).json({ error: `Description "${d.text}" exceeds 90 characters` });
+    }
+
+    try {
+      const cleanId = customerId.replace(/-/g, '');
+      const mccId = req.session.mccId || config.googleAds.mccId;
+      const customer = googleAds.createClient(config.googleAds, req.session.tokens.refresh_token, cleanId, mccId);
+
+      const result = await applyChange(customer, {
+        type: 'update_rsa',
+        campaignName,
+        adGroupName,
+        details: { adId, headlines, descriptions, finalUrls: finalUrls || [] },
+      });
+
+      changeHistory.addEntry({
+        action: 'update_rsa',
+        accountId: customerId,
+        dealerName: campaignName,
+        details: `Updated RSA ${adId} in ${adGroupName}: ${headlines.length} headlines, ${descriptions.length} descriptions`,
+        source: 'ad_editor',
+        success: true,
+      });
+
+      res.json({ success: true, message: result });
+    } catch (err) {
+      changeHistory.addEntry({
+        action: 'update_rsa',
+        accountId: customerId,
+        dealerName: campaignName,
+        details: `Failed to update RSA ${adId}: ${err.message}`,
+        source: 'ad_editor',
+        success: false,
+        error: err.message,
+      });
       next(err);
     }
   });

@@ -18,6 +18,21 @@
  */
 
 const googleAds = require('./google-ads');
+const {
+  checkStaleYearReferences,
+  checkMissingRSAs,
+  checkHeadlineQuality,
+  checkPinningOveruse,
+} = require('./ad-copy-analyzer');
+const dealerContextStore = require('./dealer-context-store');
+const { classifyCampaign } = require('./campaign-classifier');
+const {
+  analyzeNegativeConflicts,
+  analyzeCannibalization,
+  analyzeTrafficSculpting,
+  analyzeIrrelevantSearchTerms,
+  analyzeBlockedConvertingTerms,
+} = require('./negative-keyword-analyzer');
 
 // ── Severity levels ──
 const SEVERITY = {
@@ -387,6 +402,69 @@ function checkLowImpressionShare(campaigns) {
   return findings;
 }
 
+/**
+ * Check: Dealer context constraint violations.
+ * Flags campaigns whose budgets violate dealer-specified floors or ceilings.
+ */
+function checkDealerContextViolations(campaigns, accountId) {
+  const findings = [];
+  const ctx = dealerContextStore.getContext(accountId);
+  if (!ctx || !ctx.budgetConstraints || ctx.budgetConstraints.length === 0) return findings;
+
+  const violations = [];
+
+  for (const c of campaigns) {
+    if (c.status !== 'ENABLED') continue;
+    const campaignType = classifyCampaign(c.campaignName);
+
+    for (const constraint of ctx.budgetConstraints) {
+      const matches = (constraint.scope === 'account') ||
+        (constraint.scope === 'campaign_type' && campaignType === constraint.target) ||
+        (constraint.scope === 'campaign_name' && c.campaignName.toLowerCase().includes(constraint.target.toLowerCase()));
+      if (!matches) continue;
+
+      // Note: campaign performance data has cost (7-day total), not daily budget.
+      // We can approximate daily budget from cost/7 but this is imprecise.
+      // For a more accurate check, we'd need getDedicatedBudgets data.
+      // For now, flag based on daily spend rate vs constraint.
+      const dailySpend = c.cost != null ? c.cost / 7 : null;
+      if (dailySpend == null) continue;
+
+      const amount = constraint.unit === 'daily' ? constraint.amount : constraint.amount / 30;
+
+      if (constraint.constraint === 'floor' && dailySpend < amount * 0.8) {
+        violations.push({
+          campaignName: c.campaignName,
+          constraint: `floor $${amount.toFixed(2)}/day`,
+          currentSpend: `$${dailySpend.toFixed(2)}/day`,
+          note: constraint.note,
+        });
+      }
+      if (constraint.constraint === 'ceiling' && dailySpend > amount * 1.2) {
+        violations.push({
+          campaignName: c.campaignName,
+          constraint: `ceiling $${amount.toFixed(2)}/day`,
+          currentSpend: `$${dailySpend.toFixed(2)}/day`,
+          note: constraint.note,
+        });
+      }
+    }
+  }
+
+  if (violations.length > 0) {
+    findings.push(finding(
+      'dealer_context_violations',
+      SEVERITY.WARNING,
+      'dealer_context',
+      `${violations.length} campaign(s) violating dealer-specified budget constraints`,
+      'These campaigns are outside the budget range specified in dealer notes.',
+      { violations }
+    ));
+  }
+
+  return findings;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Main audit runner
 // ─────────────────────────────────────────────────────────────
@@ -403,14 +481,18 @@ async function runAudit(restCtx, options = {}) {
   const VALID_CHECKS = [
     'bidding_strategy', 'broad_match', 'zero_impressions', 'disapproved_ads',
     'high_cpc', 'low_ctr', 'recommendations', 'ad_schedules', 'zero_spend',
-    'naming_conventions', 'low_impression_share',
+    'low_impression_share',
+    'stale_years', 'missing_rsas', 'headline_quality', 'pinning',
+    'neg_conflicts', 'neg_cannibalization', 'traffic_sculpting',
+    'irrelevant_search_terms', 'blocked_converting_terms',
+    'dealer_context',
   ];
   const selectedChecks = options.checks
     ? options.checks.filter(c => VALID_CHECKS.includes(c))
     : null; // null = all
 
   // Fetch all data in parallel (non-fatal for optional queries)
-  const [keywords, campaigns, ads, recommendations, adSchedules] = await Promise.all([
+  const [keywords, campaigns, ads, recommendations, adSchedules, adGroupAdCounts, campaignNegatives, searchTerms] = await Promise.all([
     googleAds.getKeywordPerformance(restCtx).catch(err => {
       console.error('Audit keyword query failed:', err.message);
       return [finding('query_error', SEVERITY.WARNING, 'system', 'Keyword query failed', 'Keyword data could not be loaded. Check account permissions.')];
@@ -419,11 +501,12 @@ async function runAudit(restCtx, options = {}) {
       console.error('Audit campaign query failed:', err.message);
       return [finding('query_error_campaigns', SEVERITY.WARNING, 'system', 'Campaign query failed', 'Campaign data could not be loaded. Check account permissions.')];
     }),
-    googleAds.getAdCopy(restCtx).catch(err => {
-      return [];
-    }),
+    googleAds.getAdCopy(restCtx).catch(() => []),
     googleAds.getRecommendations(restCtx).catch(() => []),
     googleAds.getAdSchedules(restCtx).catch(() => []),
+    googleAds.getAdGroupAdCounts(restCtx).catch(() => []),
+    googleAds.getCampaignNegatives(restCtx).catch(() => []),
+    googleAds.getSearchTermReport(restCtx).catch(() => []),
   ]);
 
   // If queries returned error findings, use empty arrays for those checks
@@ -451,8 +534,27 @@ async function runAudit(restCtx, options = {}) {
     recommendations:      () => checkPendingRecommendations(recommendations),
     ad_schedules:         () => checkMissingAdSchedules(campaignData, adSchedules),
     zero_spend:           () => checkZeroSpendCampaigns(campaignData),
-    naming_conventions:   () => checkNamingConventions(campaignData),
     low_impression_share: () => checkLowImpressionShare(campaignData),
+    // Ad copy quality checks
+    stale_years:          () => checkStaleYearReferences(ads),
+    missing_rsas:         () => {
+      const adGroups = (adGroupAdCounts || []).map(ag => ({
+        name: ag.adGroupName, campaignName: ag.campaignName, status: 'ENABLED',
+      }));
+      return checkMissingRSAs(ads, adGroups);
+    },
+    headline_quality:     () => checkHeadlineQuality(ads),
+    pinning:              () => checkPinningOveruse(ads),
+    // Negative keyword & search term checks
+    neg_conflicts:        () => analyzeNegativeConflicts(keywordData, campaignNegatives),
+    neg_cannibalization:  () => analyzeCannibalization(keywordData),
+    traffic_sculpting:    () => {
+      const campaignNames = [...new Set(keywordData.map(k => k.campaignName).filter(Boolean))];
+      return analyzeTrafficSculpting(keywordData, campaignNegatives, campaignNames);
+    },
+    irrelevant_search_terms:  () => analyzeIrrelevantSearchTerms(searchTerms),
+    blocked_converting_terms: () => analyzeBlockedConvertingTerms(searchTerms, campaignNegatives),
+    dealer_context:           () => checkDealerContextViolations(campaignData, restCtx.customerId),
   };
 
   let allFindings = [...queryErrors];

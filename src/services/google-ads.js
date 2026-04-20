@@ -29,11 +29,11 @@ const { sanitizeGaqlString, sanitizeGaqlNumber } = require('../utils/sanitize');
  */
 function createClient(config, refreshToken, customerId, loginCustomerId) {
   const customerConfig = {
-    customer_id:   customerId,
+    customer_id:   String(customerId).replace(/-/g, ''),
     refresh_token: refreshToken,
   };
   if (loginCustomerId) {
-    customerConfig.login_customer_id = loginCustomerId;
+    customerConfig.login_customer_id = String(loginCustomerId).replace(/-/g, '');
   }
 
   return new GoogleAdsApi({
@@ -312,6 +312,65 @@ async function getMonthSpend(restCtx) {
 }
 
 /**
+ * Fetches total enabled-campaign daily budget and the account's primary
+ * bid strategy type. Used by the pacing engine to determine current state
+ * before proposing adjustments.
+ *
+ * Strategy is "most common bid_strategy_type across enabled campaigns" — if
+ * the account has mixed strategies (e.g. one tROAS campaign + several Maximize
+ * Clicks), the majority wins.
+ *
+ * @param {Object} restCtx - { accessToken, developerToken, customerId, loginCustomerId, _queryFn? }
+ * @returns {Promise<{totalDailyBudget: number, primaryBidStrategy: string|null}>}
+ */
+async function getAccountLevelDailyBudget(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.bidding_strategy_type,
+            campaign_budget.resource_name, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign.status = 'ENABLED'`,
+    restCtx.loginCustomerId
+  );
+
+  let totalMicros = 0;
+  const strategyCounts = new Map();
+  const seenBudgets = new Set();
+
+  for (const row of rows) {
+    const resName = row.campaignBudget?.resourceName;
+    // Dedupe shared budgets (two campaigns pointing at the same budget
+    // resource count as one): use the resource name as dedup key when present.
+    if (resName && seenBudgets.has(resName)) {
+      // still count the strategy, but don't double-count the budget
+    } else {
+      totalMicros += row.campaignBudget?.amountMicros ?? 0;
+      if (resName) seenBudgets.add(resName);
+    }
+
+    const strat = row.campaign?.biddingStrategyType;
+    if (strat) {
+      strategyCounts.set(strat, (strategyCounts.get(strat) || 0) + 1);
+    }
+  }
+
+  let primaryBidStrategy = null;
+  let maxCount = 0;
+  for (const [strat, count] of strategyCounts) {
+    if (count > maxCount) {
+      primaryBidStrategy = strat;
+      maxCount = count;
+    }
+  }
+
+  return {
+    totalDailyBudget: totalMicros / 1_000_000,
+    primaryBidStrategy,
+  };
+}
+
+/**
  * Fetches all explicitly shared budgets with their linked campaigns via REST.
  * Returns one entry per shared budget, with an array of campaign names.
  *
@@ -357,13 +416,24 @@ async function getSharedBudgets(restCtx) {
  * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
  * @returns {Promise<Object[]>} Array of { campaignId, campaignName, impressionShare, budgetLostShare }
  */
-async function getImpressionShare(restCtx) {
+async function getImpressionShare(restCtx, sinceDate) {
   const doQuery = restCtx._queryFn || queryViaRest;
+  // Use the post-change period if a budget change date is provided, otherwise
+  // default to LAST_30_DAYS for a meaningful sample size (not THIS_MONTH which
+  // can be just 1-2 days at month start).
+  const today = new Date().toISOString().slice(0, 10);
+  let dateFilter = 'segments.date DURING LAST_30_DAYS';
+  if (sinceDate) {
+    // Cap sinceDate at 30 days ago — older data is stale
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const effectiveDate = sinceDate > thirtyDaysAgo ? sinceDate : thirtyDaysAgo;
+    dateFilter = `segments.date BETWEEN '${effectiveDate}' AND '${today}'`;
+  }
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
     `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share
      FROM campaign
-     WHERE segments.date DURING THIS_MONTH AND campaign.status = 'ENABLED'`,
+     WHERE ${dateFilter} AND campaign.status = 'ENABLED'`,
     restCtx.loginCustomerId
   );
 
@@ -376,36 +446,111 @@ async function getImpressionShare(restCtx) {
 }
 
 /**
- * Fetches vehicle inventory from shopping product feed via REST.
+ * Fetches vehicle inventory count from VLA feed data.
+ *
+ * Strategy:
+ * 1. Primary: shopping_performance_view — counts unique products that actually
+ *    served in VLA/Shopping campaigns in the last 14 days. Works regardless of
+ *    Merchant Center linking level (MCC vs sub-account).
+ * 2. Fallback: shopping_product with status ELIGIBLE — direct feed query.
  *
  * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
- * @returns {Promise<Object>} { items: [{ itemId, condition, brand, model }], truncated: boolean }
+ * @returns {Promise<Object>} { newCount, usedCount, totalCount, source }
  */
 async function getInventory(restCtx) {
+  const { extractModelFromProduct } = require('./campaign-classifier');
   const doQuery = restCtx._queryFn || queryViaRest;
+
+  // Primary: shopping_performance_view — counts unique products that served in VLA/Shopping
+  // campaigns in the last 14 days. Works for all account types including PMax.
+  // Note: shopping_product often returns 0 rows for PMax campaigns, so we use performance_view first.
   try {
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-      `SELECT shopping_product.item_id, shopping_product.condition, shopping_product.brand
+      `SELECT segments.product_item_id, segments.product_condition,
+              segments.product_title, segments.product_brand
+       FROM shopping_performance_view
+       WHERE segments.date DURING YESTERDAY
+       LIMIT 10000`,
+      restCtx.loginCustomerId
+    );
+
+    if (rows.length > 0) {
+      // Deduplicate by item_id — same vehicle can serve multiple times
+      const seen = new Map();
+      for (const row of rows) {
+        const id = row.segments?.productItemId;
+        if (id && !seen.has(id)) {
+          seen.set(id, {
+            condition: (row.segments?.productCondition || '').toUpperCase(),
+            title: row.segments?.productTitle || '',
+            brand: row.segments?.productBrand || '',
+          });
+        }
+      }
+      let newCount = 0;
+      let usedCount = 0;
+      const newInventoryByModel = {};
+      for (const [id, data] of seen.entries()) {
+        if (data.condition === 'USED' || data.condition === 'REFURBISHED') {
+          usedCount++;
+        } else {
+          // Count as NEW: explicit 'NEW' or empty/missing condition.
+          // PMax campaigns often don't populate condition in performance_view,
+          // but the vehicles are from the feed and default to new inventory.
+          newCount++;
+          const model = extractModelFromProduct(id, data.title, data.brand);
+          if (model) {
+            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+          }
+        }
+      }
+      return { newCount, usedCount, totalCount: seen.size, source: 'shopping_performance', newInventoryByModel };
+    }
+  } catch (err) {
+    console.warn('getInventory shopping_performance_view failed (trying fallback):', err.message);
+  }
+
+  // Fallback: shopping_product with ELIGIBLE status — direct feed query.
+  // More accurate (current eligible only) but doesn't work for all account types.
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id, shopping_product.condition,
+              shopping_product.brand, shopping_product.title
        FROM shopping_product
        WHERE shopping_product.status = 'ELIGIBLE'
        LIMIT 5000`,
       restCtx.loginCustomerId
     );
 
-    return {
-      items: rows.map(row => ({
-        itemId: row.shoppingProduct?.itemId || null,
-        condition: row.shoppingProduct?.condition || null,
-        brand: row.shoppingProduct?.brand || null,
-      })),
-      truncated: rows.length >= 5000,
-    };
+    if (rows.length > 0) {
+      let newCount = 0;
+      let usedCount = 0;
+      const newInventoryByModel = {};
+      for (const row of rows) {
+        const condition = (row.shoppingProduct?.condition || '').toUpperCase();
+        if (condition === 'USED' || condition === 'REFURBISHED') {
+          usedCount++;
+        } else {
+          newCount++;
+          const model = extractModelFromProduct(
+            row.shoppingProduct?.itemId,
+            row.shoppingProduct?.title,
+            row.shoppingProduct?.brand
+          );
+          if (model) {
+            newInventoryByModel[model] = (newInventoryByModel[model] || 0) + 1;
+          }
+        }
+      }
+      return { newCount, usedCount, totalCount: rows.length, source: 'shopping_product', newInventoryByModel };
+    }
   } catch (err) {
-    // Non-fatal: shopping_product may not exist for this account type
-    console.warn('getInventory failed (non-fatal):', err.message);
-    return { items: [], truncated: false };
+    console.warn('getInventory fallback also failed (non-fatal):', err.message);
   }
+
+  return { newCount: 0, usedCount: 0, totalCount: 0, source: 'none', newInventoryByModel: {} };
 }
 
 /**
@@ -552,6 +697,125 @@ async function getCampaignPerformance(restCtx) {
 }
 
 /**
+ * Fetches keyword quality scores and bid estimates via REST.
+ * Separate from getKeywordPerformance because these fields require
+ * ad_group_criterion resource (not keyword_view with metrics).
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { keyword, matchType, campaignName, qualityScore, firstPageBid, approvalStatus }
+ */
+async function getKeywordDiagnostics(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+              ad_group_criterion.quality_info.quality_score,
+              ad_group_criterion.position_estimates.first_page_cpc_micros,
+              ad_group_criterion.approval_status,
+              campaign.name
+       FROM ad_group_criterion
+       WHERE campaign.status = 'ENABLED'
+         AND ad_group.status = 'ENABLED'
+         AND ad_group_criterion.type = 'KEYWORD'
+         AND ad_group_criterion.status = 'ENABLED'
+         AND ad_group_criterion.negative = FALSE
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const kw = row.adGroupCriterion || row.ad_group_criterion || {};
+      const keyword = kw.keyword || {};
+      const qi = kw.qualityInfo ?? kw.quality_info ?? {};
+      const pe = kw.positionEstimates ?? kw.position_estimates ?? {};
+      return {
+        keyword: keyword.text || '',
+        matchType: String(keyword.matchType ?? keyword.match_type ?? ''),
+        campaignName: row.campaign?.name ?? '',
+        qualityScore: qi.qualityScore ?? qi.quality_score ?? null,
+        firstPageBid: (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros ?? null) != null
+          ? (pe.firstPageCpcMicros ?? pe.first_page_cpc_micros) / 1_000_000 : null,
+        approvalStatus: kw.approvalStatus ?? kw.approval_status ?? null,
+      };
+    });
+  } catch (err) {
+    console.warn('getKeywordDiagnostics failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetches campaign diagnostics for zero-spend/issue diagnosis via REST.
+ * Returns ad group count, keyword count, and budget per campaign.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, adGroupCount, keywordCount, budget }
+ */
+async function getCampaignDiagnostics(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+
+  // Query 1: Ad group counts per campaign
+  const agRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, ad_group.id, ad_group.status
+     FROM ad_group
+     WHERE campaign.status = 'ENABLED'
+     LIMIT 5000`,
+    restCtx.loginCustomerId
+  );
+
+  // Query 2: Keyword counts per campaign
+  const kwRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, ad_group_criterion.status, ad_group_criterion.approval_status
+     FROM ad_group_criterion
+     WHERE campaign.status = 'ENABLED'
+       AND ad_group_criterion.type = 'KEYWORD'
+       AND ad_group_criterion.negative = FALSE
+     LIMIT 10000`,
+    restCtx.loginCustomerId
+  );
+
+  // Query 3: Budget per campaign
+  const budgetRows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign_budget.amount_micros
+     FROM campaign
+     WHERE campaign.status = 'ENABLED'
+     LIMIT 2000`,
+    restCtx.loginCustomerId
+  );
+
+  // Aggregate
+  const campaigns = new Map();
+  for (const row of agRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) campaigns.set(id, { campaignId: id, campaignName: row.campaign?.name ?? '', enabledAdGroups: 0, totalAdGroups: 0, enabledKeywords: 0, disapprovedKeywords: 0, budget: 0 });
+    const entry = campaigns.get(id);
+    entry.totalAdGroups++;
+    if (normalizeStatus(row.adGroup?.status ?? row.ad_group?.status) === 'ENABLED') entry.enabledAdGroups++;
+  }
+  for (const row of kwRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) continue;
+    const entry = campaigns.get(id);
+    const kwStatus = normalizeStatus(row.adGroupCriterion?.status ?? row.ad_group_criterion?.status);
+    const approvalStatus = row.adGroupCriterion?.approvalStatus ?? row.ad_group_criterion?.approval_status ?? '';
+    if (kwStatus === 'ENABLED') entry.enabledKeywords++;
+    if (approvalStatus === 'DISAPPROVED') entry.disapprovedKeywords++;
+  }
+  for (const row of budgetRows) {
+    const id = String(row.campaign?.id ?? '');
+    if (!campaigns.has(id)) continue;
+    const budget = row.campaignBudget ?? row.campaign_budget ?? {};
+    campaigns.get(id).budget = (budget.amountMicros ?? budget.amount_micros ?? 0) / 1_000_000;
+  }
+
+  return Array.from(campaigns.values());
+}
+
+/**
  * Fetches RSA ad copy data (headlines, descriptions, final URLs, policy status) via REST.
  * Used by ad copy analyzer for quality checks and factory offer detection.
  *
@@ -568,7 +832,7 @@ async function getAdCopy(restCtx) {
             ad_group_ad.policy_summary.approval_status,
             ad_group_ad.policy_summary.policy_topic_entries,
             ad_group_ad.status,
-            ad_group.name, campaign.name
+            ad_group.id, ad_group.name, campaign.name
      FROM ad_group_ad
      WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
        AND campaign.status != 'REMOVED'
@@ -599,6 +863,7 @@ async function getAdCopy(restCtx) {
         type: e.type || '',
       })),
       status: normalizeStatus(ad.status),
+      adGroupId: String(row.adGroup?.id ?? row.ad_group?.id ?? ''),
       adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
       campaignName: row.campaign?.name ?? '',
     };
@@ -726,6 +991,54 @@ async function getCampaignNegatives(restCtx) {
 }
 
 /**
+ * Fetches search term report for the last 30 days via REST.
+ * Returns actual user search queries that triggered ads with performance metrics.
+ * Used by audit engine to detect irrelevant traffic and negative keyword opportunities.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of search term objects
+ */
+async function getSearchTermReport(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT search_term_view.search_term, search_term_view.status,
+              campaign.name, campaign.id, ad_group.name,
+              metrics.clicks, metrics.impressions, metrics.cost_micros,
+              metrics.conversions, metrics.conversions_value
+       FROM search_term_view
+       WHERE segments.date DURING LAST_30_DAYS
+         AND campaign.status = 'ENABLED'
+         AND metrics.impressions > 0
+       ORDER BY metrics.cost_micros DESC
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const stv = row.searchTermView || row.search_term_view || {};
+      const m = row.metrics || {};
+      return {
+        searchTerm: stv.searchTerm ?? stv.search_term ?? '',
+        status: stv.status ?? '',
+        campaignName: row.campaign?.name ?? '',
+        campaignId: String(row.campaign?.id ?? ''),
+        adGroupName: row.adGroup?.name ?? row.ad_group?.name ?? '',
+        clicks: m.clicks ?? 0,
+        impressions: m.impressions ?? 0,
+        cost: (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000,
+        conversions: m.conversions ?? 0,
+        conversionValue: m.conversionsValue ?? m.conversions_value ?? 0,
+      };
+    });
+  } catch (err) {
+    console.warn('getSearchTermReport failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
  * Counts active RSA ads per ad group via REST GAQL.
  * Used by deep scanner to detect ad groups missing RSAs.
  *
@@ -779,6 +1092,208 @@ async function getAdGroupAdCounts(restCtx) {
   }
 }
 
+/**
+ * Fetches the most recent budget change event this month.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<{changeDate: string|null}>} Date string (YYYY-MM-DD) or null
+ */
+async function getLastBudgetChange(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT change_event.change_date_time
+       FROM change_event
+       WHERE change_event.change_date_time DURING LAST_30_DAYS
+         AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
+       ORDER BY change_event.change_date_time DESC
+       LIMIT 5`,
+      restCtx.loginCustomerId
+    );
+    if (rows.length === 0) return { changeDate: null };
+
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+    // Find the most recent change that is at least 24 hours old.
+    // Changes < 24h old don't have enough spend data to compute a meaningful daily avg.
+    for (const row of rows) {
+      const dt = row.changeEvent?.changeDateTime;
+      if (!dt) continue;
+      const changeTime = new Date(dt.replace(' ', 'T') + 'Z').getTime();
+      if (now - changeTime >= TWENTY_FOUR_HOURS) {
+        return { changeDate: dt.split(' ')[0] };
+      }
+    }
+
+    // All changes are < 24h old — don't use any
+    return { changeDate: null };
+  } catch (err) {
+    console.warn('getLastBudgetChange failed (non-fatal):', err.message);
+    return { changeDate: null };
+  }
+}
+
+/**
+ * Fetches per-day, per-campaign spend breakdown for the current month.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { date, campaignId, campaignName, spend }
+ */
+async function getDailySpendBreakdown(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros
+     FROM campaign
+     WHERE segments.date DURING THIS_MONTH AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
+
+  return rows.map(row => ({
+    date: row.segments.date,
+    campaignId: String(row.campaign.id),
+    campaignName: row.campaign.name,
+    spend: (row.metrics?.costMicros ?? 0) / 1_000_000,
+  }));
+}
+
+/**
+ * Fetches per-day total spend for the last 14 calendar days (crosses month boundaries).
+ * Used by the all-accounts pacing overview for 7-day trend calculation.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<Object[]>} Array of { date, spend } sorted by date ascending
+ */
+async function getDailySpendLast14Days(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const fourteenDaysAgo = new Date(today);
+  fourteenDaysAgo.setDate(today.getDate() - 14);
+
+  const fmt = d => d.toISOString().slice(0, 10);
+
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, metrics.cost_micros
+     FROM campaign
+     WHERE segments.date BETWEEN '${fmt(fourteenDaysAgo)}' AND '${fmt(yesterday)}'
+       AND campaign.status != 'REMOVED'`,
+    restCtx.loginCustomerId
+  );
+
+  // Aggregate spend per day (rows are per-campaign)
+  const byDate = {};
+  for (const row of rows) {
+    const date = row.segments.date;
+    const spend = (row.metrics?.costMicros ?? 0) / 1_000_000;
+    byDate[date] = (byDate[date] || 0) + spend;
+  }
+
+  return Object.entries(byDate)
+    .map(([date, spend]) => ({ date, spend }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Fetches proximity targeting (radius) for specific campaigns.
+ * Only called for IS-capped campaigns to provide geo expansion recommendations.
+ *
+ * @param {Object} restCtx - REST context
+ * @param {string[]} campaignIds - Campaign IDs to query
+ * @returns {Promise<Object[]>} Array of { campaignId, campaignName, city, state, radiusMiles, lat, lng }
+ */
+async function getCampaignProximityTargets(restCtx, campaignIds) {
+  if (!campaignIds || campaignIds.length === 0) return [];
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const idList = campaignIds.map(id => `'${id}'`).join(', ');
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign.id, campaign.name,
+              campaign_criterion.proximity.address.city_name,
+              campaign_criterion.proximity.address.province_code,
+              campaign_criterion.proximity.radius,
+              campaign_criterion.proximity.radius_units,
+              campaign_criterion.proximity.geo_point.latitude_in_micro_degrees,
+              campaign_criterion.proximity.geo_point.longitude_in_micro_degrees
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'PROXIMITY'
+         AND campaign.id IN (${idList})
+         AND campaign_criterion.negative = FALSE`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => {
+      const prox = row.campaignCriterion?.proximity || {};
+      const addr = prox.address || {};
+      const geo = prox.geoPoint || {};
+      const radiusVal = parseFloat(prox.radius) || 0;
+      const units = prox.radiusUnits || 'MILES';
+      // Convert km to miles if needed
+      const radiusMiles = units === 'KILOMETERS' ? Math.round(radiusVal * 0.621371) : Math.round(radiusVal);
+      return {
+        campaignId: String(row.campaign.id),
+        campaignName: row.campaign.name,
+        city: addr.cityName || null,
+        state: addr.provinceCode || null,
+        radiusMiles,
+        lat: geo.latitudeInMicroDegrees ? geo.latitudeInMicroDegrees / 1_000_000 : null,
+        lng: geo.longitudeInMicroDegrees ? geo.longitudeInMicroDegrees / 1_000_000 : null,
+      };
+    });
+  } catch (err) {
+    console.warn('getCampaignProximityTargets failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetches geographic performance data for specific campaigns.
+ * Shows which nearby locations have search volume / demand.
+ *
+ * @param {Object} restCtx - REST context
+ * @param {string[]} campaignIds - Campaign IDs to query
+ * @returns {Promise<Object[]>} Array of { campaignId, geoName, locationType, impressions, clicks, cost }
+ */
+async function getGeographicPerformance(restCtx, campaignIds) {
+  if (!campaignIds || campaignIds.length === 0) return [];
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const idList = campaignIds.map(id => `'${id}'`).join(', ');
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign.id,
+              geographic_view.country_criterion_id,
+              geographic_view.location_type,
+              metrics.impressions, metrics.clicks, metrics.cost_micros
+       FROM geographic_view
+       WHERE campaign.id IN (${idList})
+         AND segments.date DURING THIS_MONTH
+         AND metrics.impressions > 0
+       ORDER BY metrics.impressions DESC
+       LIMIT 50`,
+      restCtx.loginCustomerId
+    );
+
+    return rows.map(row => ({
+      campaignId: String(row.campaign.id),
+      geoTargetId: row.geographicView?.countryCriterionId || null,
+      locationType: row.geographicView?.locationType || null,
+      impressions: parseInt(row.metrics?.impressions) || 0,
+      clicks: parseInt(row.metrics?.clicks) || 0,
+      cost: (row.metrics?.costMicros ?? 0) / 1_000_000,
+    }));
+  } catch (err) {
+    console.warn('getGeographicPerformance failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -788,6 +1303,7 @@ module.exports = {
   buildStructureTree,
   queryWithTimeout,
   getMonthSpend,
+  getAccountLevelDailyBudget,
   getSharedBudgets,
   getDedicatedBudgets,
   getImpressionShare,
@@ -801,4 +1317,15 @@ module.exports = {
   // Phase 12: Deep Scanner queries
   getCampaignNegatives,
   getAdGroupAdCounts,
+  // Pacing: post-change tracking
+  getLastBudgetChange,
+  getDailySpendBreakdown,
+  getDailySpendLast14Days,
+  // Pacing: geo expansion
+  getCampaignProximityTargets,
+  getGeographicPerformance,
+  // Audit: diagnostics
+  getKeywordDiagnostics,
+  getCampaignDiagnostics,
+  getSearchTermReport,
 };

@@ -123,6 +123,7 @@ function createAccountsRouter(config) {
       unique.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
       console.log(`[accounts] Discovered ${unique.length} accounts (from ${accounts.length} total incl. dupes)`);
+      req.session.accounts = unique;
       res.json({ accounts: unique });
 
     } catch (err) {

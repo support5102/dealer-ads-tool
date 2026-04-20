@@ -66,6 +66,13 @@ function validateEnv(env = process.env) {
       apiKey: env.ANTHROPIC_API_KEY,
       model:  env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
     },
+    freshdesk: {
+      apiKey: env.FRESHDESK_API_KEY || '',
+      domain: env.FRESHDESK_DOMAIN || 'savvydealer',
+    },
+    // Pacing Engine v2 - controls whether the daily scheduler job runs and
+    // whether /api/pacing/all returns v2 columns. false = v1 behavior unchanged.
+    pacingEngineV2Enabled: env.PACING_ENGINE_V2_ENABLED === 'true',
   };
 
   return deepFreeze(config);

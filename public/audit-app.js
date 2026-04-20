@@ -160,6 +160,7 @@ function renderResults(result) {
     html += `<h3 class="findings-group-title severity-${severity}">${icon} ${label} (${findings.length})</h3>`;
 
     for (const f of findings) {
+      const details = renderDetails(f.details, f.checkId);
       html += `
         <div class="finding-card severity-${f.severity}">
           <div class="finding-header">
@@ -167,7 +168,7 @@ function renderResults(result) {
             <span class="finding-title">${escapeHtml(f.title)}</span>
           </div>
           <div class="finding-message">${escapeHtml(f.message)}</div>
-          ${renderDetails(f.details)}
+          ${details ? `<details class="finding-collapse"><summary style="cursor:pointer;color:var(--blue);font-size:12px;margin-top:8px;">Show details</summary>${details}</details>` : ''}
         </div>
       `;
     }
@@ -175,32 +176,104 @@ function renderResults(result) {
     html += `</div>`;
   }
 
+  html += `<div class="audit-actions" style="margin: 20px 0;">
+    <button class="btn-primary" id="diagnoseBtn" onclick="diagnoseFindings()">Diagnose & Suggest Fixes</button>
+  </div>`;
+
+  html += `<div id="diagnosisResults"></div>`;
+
   html += `<div class="audit-meta">Audit ran at ${new Date(result.ranAt).toLocaleString()} &middot; ${result.checksRun.length} checks</div>`;
 
   findingsSection.innerHTML = html;
 }
 
-function renderDetails(details) {
+function renderDetails(details, checkId) {
   if (!details || Object.keys(details).length === 0) return '';
 
-  // Render sample keywords/campaigns/ads as a compact list
+  // Type-specific rendering for ad copy findings
+  switch (checkId) {
+    case 'ad_copy_short_headlines':
+    case 'ad_copy_allcaps_headlines': {
+      const items = details.headlines || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Headline</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td><code style="color:var(--orange)">${escapeHtml(item.headline)}</code></td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'ad_copy_stale_years': {
+      const items = details.staleAds || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Stale Years</th><th>Sample Text</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td>${escapeHtml(item.staleYears.join(', '))}</td><td><code style="color:var(--orange)">${escapeHtml(item.text)}</code></td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'ad_copy_pinning_overuse': {
+      const items = details.ads || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details">';
+      for (const item of items) {
+        h += `<div style="margin-bottom:8px;font-size:12px;"><strong>${escapeHtml(item.campaignName)}</strong> &rarr; ${escapeHtml(item.adGroupName)} (${item.pinnedCount} pinned)<ul style="margin:4px 0 0 16px;">`;
+        for (const ph of item.pinnedHeadlines) {
+          h += `<li><code style="color:var(--orange)">${escapeHtml(ph.text)}</code> &mdash; ${escapeHtml(ph.position)}</li>`;
+        }
+        h += '</ul></div>';
+      }
+      return h + '</div>';
+    }
+    case 'ad_copy_wrong_dealer_name': {
+      const items = details.ads || [];
+      if (items.length === 0) return '';
+      let h = '<div class="finding-details"><table class="details-table">';
+      h += '<tr><th>Campaign</th><th>Ad Group</th><th>Expected Dealer Name</th></tr>';
+      for (const item of items) {
+        h += `<tr><td>${escapeHtml(item.campaignName)}</td><td>${escapeHtml(item.adGroupName)}</td><td>${escapeHtml(item.dealerPortion)}</td></tr>`;
+      }
+      return h + '</table></div>';
+    }
+    case 'MISSING_COMPETING_NEGS': {
+      const camp = details.campaignName || '';
+      const makes = details.missingMakes || [];
+      if (!camp) return '';
+      let h = '<div class="finding-details" style="font-size:12px;">';
+      h += `<strong>${escapeHtml(camp)}</strong> (${escapeHtml(details.dealerMake || '')}) — missing ${makes.length} negatives:<ul style="margin:4px 0 0 16px;">`;
+      for (const m of makes) h += `<li><code>${escapeHtml(m)}</code></li>`;
+      return h + '</ul></div>';
+    }
+    case 'broad_match_keywords': {
+      const byCampaign = details.byCampaign || {};
+      const entries = Object.entries(byCampaign);
+      if (entries.length === 0) return '';
+      let h = '<div class="finding-details">';
+      for (const [campaign, keywords] of entries) {
+        h += `<div style="margin-bottom:8px;font-size:12px;"><strong>${escapeHtml(campaign)}</strong><ul style="margin:4px 0 0 16px;">`;
+        for (const kw of keywords.slice(0, 10)) h += `<li><code>${escapeHtml(kw)}</code></li>`;
+        if (keywords.length > 10) h += `<li>...and ${keywords.length - 10} more</li>`;
+        h += '</ul></div>';
+      }
+      return h + '</div>';
+    }
+    default: break;
+  }
+
+  // Generic fallback
   const items = details.sample || details.keywords || details.ads || details.campaigns || details.violations || [];
   if (items.length === 0) return '';
 
   let html = '<div class="finding-details"><table class="details-table">';
-
-  // Auto-detect columns from first item
   const keys = Object.keys(items[0]).filter(k => typeof items[0][k] !== 'object');
   html += '<tr>' + keys.map(k => `<th>${escapeHtml(k)}</th>`).join('') + '</tr>';
-
   for (const item of items.slice(0, 5)) {
     html += '<tr>' + keys.map(k => `<td>${escapeHtml(String(item[k] ?? ''))}</td>`).join('') + '</tr>';
   }
-
   html += '</table>';
   if (items.length > 5) html += `<div class="details-more">...and ${items.length - 5} more</div>`;
   html += '</div>';
-
   return html;
 }
 
@@ -293,6 +366,238 @@ function stopStatusPolling() {
   if (statusPollTimer) {
     clearInterval(statusPollTimer);
     statusPollTimer = null;
+  }
+}
+
+// ── Diagnosis & Fix ──
+
+let currentDiagnoses = null;
+
+async function diagnoseFindings() {
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return alert('Select an account first.');
+
+  const btn = document.getElementById('diagnoseBtn');
+  const resultsDiv = document.getElementById('diagnosisResults');
+  btn.disabled = true;
+  btn.textContent = 'Diagnosing...';
+  resultsDiv.innerHTML = '<div class="audit-loading"><div class="spinner"></div><p>Analyzing findings and generating fix recommendations...</p></div>';
+
+  try {
+    const res = await fetch(`/api/audit/diagnose?customerId=${customerId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Diagnosis failed');
+
+    renderDiagnoses(data.diagnoses);
+    // currentDiagnoses is set inside renderDiagnoses after merging
+  } catch (err) {
+    resultsDiv.innerHTML = `<div class="error-msg">Diagnosis error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Diagnose & Suggest Fixes';
+  }
+}
+
+function renderDiagnoses(diagnoses) {
+  const resultsDiv = document.getElementById('diagnosisResults');
+
+  // Merge diagnoses with the same checkId (e.g., multiple "Missing competing-make negatives")
+  const mergedMap = new Map();
+  for (const d of diagnoses) {
+    if (mergedMap.has(d.checkId)) {
+      const existing = mergedMap.get(d.checkId);
+      existing.fixes.push(...(d.fixes || []));
+      existing.manualNotes.push(...(d.manualNotes || []));
+    } else {
+      mergedMap.set(d.checkId, { ...d, fixes: [...(d.fixes || [])], manualNotes: [...(d.manualNotes || [])] });
+    }
+  }
+  const merged = [...mergedMap.values()];
+  currentDiagnoses = merged; // store merged for fix handlers
+
+  const fixable = merged.filter(d => d.fixable && d.fixes.length > 0);
+  const manual = merged.filter(d => d.manualNotes && d.manualNotes.length > 0);
+
+  let html = '';
+
+  if (fixable.length > 0) {
+    const totalFixes = fixable.reduce((sum, d) => sum + d.fixes.length, 0);
+    html += `<div class="diagnosis-section">`;
+    html += `<h3 class="diagnosis-title">Auto-Fixable (${totalFixes} fixes available)</h3>`;
+    html += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">`;
+    html += `<button class="btn-primary" onclick="toggleSelectAll()" id="selectAllBtn">Select All</button>`;
+    html += `<button class="btn-primary" onclick="applySelectedFixes()" id="applySelectedBtn" disabled style="background:var(--green);">Apply Selected (0)</button>`;
+    html += `<button class="btn-primary" onclick="applyAllFixes()" id="applyAllBtn" style="background:var(--blue);">Apply All Fixes</button>`;
+    html += `</div>`;
+
+    for (const d of fixable) {
+      html += `<div class="diagnosis-card fixable">`;
+      html += `<div class="diagnosis-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>${escapeHtml(d.title)}</span>
+        ${d.fixes.length > 1 ? `<button class="btn-fix" style="background:var(--blue);color:#fff;border:none;padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;" data-fixall-check="${escapeHtml(d.checkId)}">Fix All (${d.fixes.length})</button>` : ''}
+      </div>`;
+      const PAGE_SIZE = 10;
+      const listId = `fixlist-${escapeHtml(d.checkId)}`;
+      html += `<ul class="fix-list" id="${listId}">`;
+      for (let i = 0; i < d.fixes.length; i++) {
+        const fix = d.fixes[i];
+        html += `<li class="fix-item" data-fix-row style="display:${i < PAGE_SIZE ? 'flex' : 'none'};align-items:center;gap:8px;">
+          <input type="checkbox" class="fix-checkbox" data-check-id="${escapeHtml(d.checkId)}" data-fix-index="${i}" onchange="updateSelectedCount()" style="min-width:16px;">
+          <span class="fix-desc" style="flex:1;">${escapeHtml(fix.description)}</span>
+          <button class="btn-fix" onclick="applySingleFix('${escapeHtml(d.checkId)}', ${i})">Fix</button>
+        </li>`;
+      }
+      if (d.fixes.length > PAGE_SIZE) {
+        html += `<li class="fix-item" id="more-${escapeHtml(d.checkId)}" style="text-align:center;padding:8px;">
+          <button onclick="showAllFixes('${escapeHtml(d.checkId)}')" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--blue);padding:4px 16px;cursor:pointer;font-size:12px;">Show all ${d.fixes.length} fixes (${d.fixes.length - PAGE_SIZE} more)</button>
+        </li>`;
+      }
+      html += `</ul></div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (manual.length > 0) {
+    html += `<div class="diagnosis-section">`;
+    html += `<h3 class="diagnosis-title">Manual Review Required</h3>`;
+    for (const d of manual) {
+      if (!d.fixable || d.fixes.length === 0) {
+        html += `<div class="diagnosis-card manual">`;
+        html += `<div class="diagnosis-header">${escapeHtml(d.title)}</div>`;
+        html += `<ul class="manual-notes">`;
+        for (const note of d.manualNotes) {
+          html += `<li>${escapeHtml(note)}</li>`;
+        }
+        html += `</ul></div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  if (fixable.length === 0 && manual.length === 0) {
+    html = '<div class="empty-msg">No actionable recommendations found.</div>';
+  }
+
+  resultsDiv.innerHTML = html;
+
+  // Attach Fix All per-category handlers
+  resultsDiv.querySelectorAll('[data-fixall-check]').forEach(btn => {
+    btn.addEventListener('click', () => applyFixesForCheck(btn.dataset.fixallCheck));
+  });
+}
+
+async function applyFixesForCheck(checkId) {
+  if (!currentDiagnoses) return;
+  const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+  if (!d || !d.fixes || d.fixes.length === 0) return;
+  if (!confirm(`Apply all ${d.fixes.length} fixes for "${d.title}"? This will modify campaigns in Google Ads.`)) return;
+  await executeFixes(d.fixes);
+}
+
+function showAllFixes(checkId) {
+  const list = document.getElementById(`fixlist-${checkId}`);
+  if (!list) return;
+  list.querySelectorAll('[data-fix-row]').forEach(li => { li.style.display = 'flex'; });
+  const moreBtn = document.getElementById(`more-${checkId}`);
+  if (moreBtn) moreBtn.remove();
+}
+
+function updateSelectedCount() {
+  const checked = document.querySelectorAll('.fix-checkbox:checked');
+  const btn = document.getElementById('applySelectedBtn');
+  if (btn) {
+    btn.textContent = `Apply Selected (${checked.length})`;
+    btn.disabled = checked.length === 0;
+  }
+}
+
+function toggleSelectAll() {
+  const boxes = document.querySelectorAll('.fix-checkbox');
+  const allChecked = Array.from(boxes).every(cb => cb.checked);
+  boxes.forEach(cb => { cb.checked = !allChecked; });
+  const btn = document.getElementById('selectAllBtn');
+  if (btn) btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+  updateSelectedCount();
+}
+
+async function applySelectedFixes() {
+  if (!currentDiagnoses) return;
+  const checked = document.querySelectorAll('.fix-checkbox:checked');
+  if (checked.length === 0) return alert('No fixes selected.');
+
+  const selectedFixes = [];
+  checked.forEach(cb => {
+    const checkId = cb.dataset.checkId;
+    const fixIndex = parseInt(cb.dataset.fixIndex);
+    const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+    if (d && d.fixes[fixIndex]) selectedFixes.push(d.fixes[fixIndex]);
+  });
+
+  if (selectedFixes.length === 0) return;
+  if (!confirm(`Apply ${selectedFixes.length} selected fixes? This will modify campaigns in Google Ads.`)) return;
+  await executeFixes(selectedFixes);
+}
+
+async function applyAllFixes() {
+  if (!currentDiagnoses) return;
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return;
+
+  const allFixes = [];
+  for (const d of currentDiagnoses) {
+    if (d.fixable && d.fixes) {
+      allFixes.push(...d.fixes);
+    }
+  }
+  if (allFixes.length === 0) return alert('No fixes to apply.');
+  if (!confirm(`Apply ${allFixes.length} fixes? This will modify campaigns in Google Ads.`)) return;
+
+  await executeFixes(allFixes);
+}
+
+async function applySingleFix(checkId, fixIndex) {
+  if (!currentDiagnoses) return;
+  const customerId = document.getElementById('accountSelect').value;
+  if (!customerId) return;
+
+  const d = currentDiagnoses.find(diag => diag.checkId === checkId);
+  if (!d || !d.fixes[fixIndex]) return;
+
+  const fix = d.fixes[fixIndex];
+  if (!confirm(`Apply fix: ${fix.description}?`)) return;
+
+  await executeFixes([fix]);
+}
+
+async function executeFixes(fixes) {
+  const customerId = document.getElementById('accountSelect').value;
+  const resultsDiv = document.getElementById('diagnosisResults');
+  const btn = document.getElementById('applyAllBtn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/audit/fix?customerId=${customerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Fix failed');
+
+    // Show results
+    let html = `<div class="fix-results">`;
+    html += `<h3>${data.message}</h3>`;
+    for (const detail of data.results.details) {
+      const cls = detail.success ? 'fix-success' : 'fix-failure';
+      html += `<div class="${cls}">${detail.success ? '&#x2705;' : '&#x274C;'} ${escapeHtml(detail.description)}${detail.error ? ' — ' + escapeHtml(detail.error) : ''}</div>`;
+    }
+    html += `<button class="btn-primary" onclick="runAudit()" style="margin-top: 12px;">Re-run Audit</button>`;
+    html += `</div>`;
+    resultsDiv.innerHTML = html;
+  } catch (err) {
+    resultsDiv.innerHTML += `<div class="error-msg">Fix error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

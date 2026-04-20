@@ -21,6 +21,25 @@
   --purple:    #a78bfa;
 }
 
+/* Light theme overrides */
+[data-theme="light"] {
+  --bg:        #f8fafc;
+  --bg2:       #f1f5f9;
+  --bg3:       #e2e8f0;
+  --border:    #cbd5e1;
+  --border2:   #e2e8f0;
+  --text:      #1e293b;
+  --text2:     #475569;
+  --text3:     #94a3b8;
+  --text4:     #cbd5e1;
+  --blue:      #2563eb;
+  --blue-dark: #1d4ed8;
+  --green:     #16a34a;
+  --orange:    #ea580c;
+  --red:       #dc2626;
+  --purple:    #7c3aed;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -59,7 +78,7 @@ body {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-size: 16px;
-  color: #f1f5f9;
+  color: var(--text);
   letter-spacing: -.3px;
 }
 .logo-sub {
@@ -129,11 +148,11 @@ body {
   font-size: 12px;
   font-family: 'DM Mono', monospace;
   padding: 6px 14px;
-  border: 1px solid var(--border);
+  border: 2px solid #7c3aed;
   border-radius: 6px;
   transition: all .15s;
 }
-.nav-link:hover { color: var(--text2); border-color: #2d4a6e; }
+.nav-link:hover { color: var(--text2); border-color: #a78bfa; }
 
 /* ── MAIN LAYOUT ── */
 .main {
@@ -284,6 +303,82 @@ body {
   color: var(--text3);
   max-width: 340px;
   line-height: 1.6;
+}
+
+/* Freshdesk panel */
+.freshdesk-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.freshdesk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border2);
+}
+.freshdesk-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text4);
+}
+.freshdesk-refresh-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text3);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 7px;
+  line-height: 1;
+}
+.freshdesk-refresh-btn:hover { color: var(--text2); border-color: #2d4a6e; }
+.freshdesk-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.freshdesk-ticket {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border2);
+  transition: background 0.15s;
+}
+.freshdesk-ticket:last-child { border-bottom: none; }
+.freshdesk-ticket:hover { background: var(--bg3); }
+.freshdesk-ticket.selected { background: #0c1a30; border-left: 2px solid var(--blue); }
+.freshdesk-priority-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.freshdesk-priority-dot.urgent { background: var(--red); }
+.freshdesk-priority-dot.high   { background: var(--orange); }
+.freshdesk-priority-dot.medium { background: var(--blue); }
+.freshdesk-priority-dot.low    { background: var(--green); }
+.freshdesk-ticket-body { flex: 1; min-width: 0; }
+.freshdesk-ticket-subject {
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.freshdesk-ticket-meta {
+  font-size: 10px;
+  color: var(--text4);
+  margin-top: 2px;
+}
+.freshdesk-empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--text4);
+  font-size: 12px;
 }
 
 /* Task area */
