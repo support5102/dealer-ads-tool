@@ -63,11 +63,14 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     currentDay: now.getDate(),
   });
 
+  const { groupFor } = require('./strategy-rules');
+  const group = groupFor(account.name);
+
   const since = computeSinceLastChange({
     dailySpend,
     changeDate: lastChange.changeDate,
     monthlyBudget: goal.monthlyBudget,
-    curveId: goal.pacingCurveId || 'linear',
+    curveId: goal.pacingCurveId || group.curve,
     today: now,
   });
 
@@ -88,8 +91,10 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     changeDate: projection.changeDate,
     daysSinceLastChange: since.daysSinceLastChange,
     pacingSinceLastChange: since.pacingSinceLastChange,
-    pacingCurveId: goal.pacingCurveId || 'linear',
+    pacingCurveId: goal.pacingCurveId || group.curve,
     pacingMode: goal.pacingMode || 'one_click',
+    groupKey: group.key,
+    groupLabel: group.label,
   };
 }
 

@@ -30,12 +30,43 @@ function getStatusColor(account) {
 let currentData = null;
 let sortCol = 'pacePercent';
 let sortAsc = false;
+let selectedGroup = 'all'; // 'all' or a group key like 'alan_jay'
 
 // ── Filtering ──
+
+function getAvailableGroups(accounts) {
+  const byKey = new Map();
+  for (const a of accounts) {
+    if (a.groupKey && !byKey.has(a.groupKey)) {
+      byKey.set(a.groupKey, a.groupLabel || a.groupKey);
+    }
+  }
+  return [['all', 'All Dealers'], ...Array.from(byKey.entries())];
+}
+
+function renderGroupFilter(accounts) {
+  const groups = getAvailableGroups(accounts);
+  const options = groups.map(([key, label]) => {
+    const selected = key === selectedGroup ? ' selected' : '';
+    const count = key === 'all' ? accounts.length : accounts.filter(a => a.groupKey === key).length;
+    return `<option value="${key}"${selected}>${label} (${count})</option>`;
+  }).join('');
+  return `<select id="group-filter" onchange="handleGroupChange(this.value)" style="padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;outline:none;">${options}</select>`;
+}
+
+function handleGroupChange(value) {
+  selectedGroup = value;
+  if (currentData) renderTable(getFilteredAccounts());
+}
 
 function getFilteredAccounts() {
   if (!currentData) return [];
   let accounts = currentData.accounts;
+
+  // Group filter
+  if (selectedGroup !== 'all') {
+    accounts = accounts.filter(a => a.groupKey === selectedGroup);
+  }
 
   // Text search filter
   const searchEl = document.getElementById('filterInput');
@@ -135,7 +166,9 @@ async function loadOverview() {
 
     currentData = data;
     renderSummary(data);
-    renderTable(data.accounts);
+    const groupFilterEl = document.getElementById('group-filter-container');
+    if (groupFilterEl) groupFilterEl.innerHTML = renderGroupFilter(data.accounts);
+    renderTable(getFilteredAccounts());
     renderFailed(data.failed);
   } catch (err) {
     content.innerHTML = `<div class="error-msg">Network error: ${esc(err.message)}</div>`;

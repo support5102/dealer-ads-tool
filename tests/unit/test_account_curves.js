@@ -40,3 +40,42 @@ describe('resolveCurveId', () => {
     }
   });
 });
+
+describe('groupFor + group-based curve fallback', () => {
+  const { groupFor, resolveCurveId, DEALER_GROUPS } = require('../../src/services/strategy-rules');
+
+  test('Alan Jay dealer names match the Alan Jay group', () => {
+    expect(groupFor('Alan Jay Ford').key).toBe('alan_jay');
+    expect(groupFor('Alan Jay Chevrolet').key).toBe('alan_jay');
+    expect(groupFor('alan jay cdjr').key).toBe('alan_jay');
+    expect(groupFor('ALAN JAY BUICK GMC').key).toBe('alan_jay');
+  });
+
+  test('non-Alan-Jay dealer names fall to default group', () => {
+    expect(groupFor('Car2Sell').key).toBe('default');
+    expect(groupFor('Honda of Springfield').key).toBe('default');
+    expect(groupFor('').key).toBe('default');
+    expect(groupFor(null).key).toBe('default');
+  });
+
+  test('resolveCurveId: sheet value still wins over group', () => {
+    expect(resolveCurveId('Alan Jay Ford', 'linear')).toBe('linear');
+    expect(resolveCurveId('Car2Sell', 'alanJay9505')).toBe('alanJay9505');
+  });
+
+  test('resolveCurveId: Alan Jay dealer with blank sheet value gets alanJay9505 via group', () => {
+    expect(resolveCurveId('Alan Jay Ford', '')).toBe('alanJay9505');
+    expect(resolveCurveId('Alan Jay Ford', null)).toBe('alanJay9505');
+    expect(resolveCurveId('Alan Jay Ford', undefined)).toBe('alanJay9505');
+  });
+
+  test('resolveCurveId: default dealer with blank sheet value gets linear via group', () => {
+    expect(resolveCurveId('Honda of Springfield', '')).toBe('linear');
+  });
+
+  test('DEALER_GROUPS always ends with a catch-all default', () => {
+    const last = DEALER_GROUPS[DEALER_GROUPS.length - 1];
+    expect(last.key).toBe('default');
+    expect(last.pattern.test('anything at all')).toBe(true);
+  });
+});
