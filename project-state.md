@@ -52,11 +52,11 @@
 - [x] **7.1** Scheduler registered in `server.js` (stub runner; feature-flagged; timezone TODOs renumbered to 8.2) (commit `1ec1b39`)
 - [x] **8.1** API pass-through verified (no-op — fetcher fields already flow through `/api/pacing/all`)
 - [x] **8.2** Real account enrichment via `pacing-engine-deps.js`; `getAccountLevelDailyBudget` added to `google-ads.js`; `/api/pacing/all?advise=true` triggers advisory-mode run. Apply path deliberately deferred — `applyBudgetChange` throws to keep auto_apply dealers on one_click for first release (commits `96b0cf1`, `a3ec577`)
+- [x] **Bonus: Dealer Groups** — pattern-based auto-bucketing in `strategy-rules.js` (`DEALER_GROUPS` + `groupFor()`); Alan Jay dealers auto-get `alanJay9505` curve without sheet editing; overview page has group filter dropdown (commits `9c97c2f`, `f9493e2`)
 
-**Remaining (1 task):**
-- [ ] Final review + decide V3 pre-existing test-failure triage (23 failures not caused by this branch)
+**Remaining:** Final review decision on 23 pre-existing V3 test failures (pre-existing, unrelated to this branch).
 
-**Test state:** 1100 passed, 23 failed. All 23 failures pre-existing on V3 (verified by checking out `d7699ac` and running the same suites). This branch adds 0 new failures and adds 62 new tests, all green.
+**Test state:** 1106 passed, 23 failed. All 23 failures pre-existing on V3 (verified by checking out `d7699ac` and running the same suites). This branch adds 0 new failures and adds 62 new tests, all green.
 
 **Deployment picture:**
 - Branch `feat/pacing-engine-v2` NOT pushed to origin yet; production still on V3
