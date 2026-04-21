@@ -284,6 +284,7 @@ async function applyChange(client, change, dryRun) {
 | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` | Claude model for task parsing |
 | `PACING_ENGINE_V2_ENABLED` | `false` | Enables daily pacing scheduler + new "since last change" overview columns + Pacing Recommender v2 delegation |
 | `CHANGE_ALERTS_ENABLED` | `false` | Enables R8 change-detection alerts — daily scan of Google Ads `change_event` + Freshdesk ticket creation for budget/campaign/ad-group/location changes. Independent of the pacing flag. |
+| `USE_DB_GOALS` | `false` | When true, reads dealer goals from Postgres instead of Google Sheets. One-time migration via dealers page Import button; flip flag after verifying. |
 
 ### Key Files
 
@@ -316,6 +317,9 @@ async function applyChange(client, change, dryRun) {
 | `public/index.html` | Frontend HTML |
 | `public/styles.css` | Frontend CSS |
 | `public/app.js` | Frontend JavaScript |
+| `src/services/dealer-goals-store.js` | Postgres-backed dealer goals store + budget-change audit log (mandatory note) |
+| `src/routes/dealers.js` | Dealer admin CRUD + budget-edit with audit + one-time sheet-to-DB import |
+| `public/dealers.html` | Dealer admin page (list, add, edit, delete, budget history, import from sheet) |
 
 ### External Services
 

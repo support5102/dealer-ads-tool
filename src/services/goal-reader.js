@@ -93,15 +93,16 @@ function parseRow(row) {
 }
 
 /**
- * Reads dealer goals from a Google Sheet.
+ * Reads dealer goals DIRECTLY from the Google Sheet — always hits the Sheets API,
+ * never the DB. Used by the import route and as the fallback path in readGoals().
  *
  * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
  * @param {string} [range='PPC Control!A2:G'] - Cell range to read (skip header row)
  * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
- * @throws {Error} If the Sheets API call fails
+ * @throws {Error} If spreadsheetId is missing or the Sheets API call fails
  */
-async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
+async function readGoalsFromSheet(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
@@ -137,6 +138,51 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G'
 }
 
 /**
+ * Reads dealer goals from the DB (when USE_DB_GOALS is on) or from the Google Sheet.
+ *
+ * Phase B: flag-aware entry point for all callers except the import route.
+ * The import route always calls readGoalsFromSheet directly to bypass the flag.
+ *
+ * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
+ * @param {string} spreadsheetId - Google Sheets spreadsheet ID
+ * @param {string} [range='PPC Control!A2:G'] - Cell range to read (skip header row)
+ * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
+ * @throws {Error} If the Sheets API call fails
+ */
+async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
+  // Phase B: when USE_DB_GOALS is on, read from Postgres instead of Sheets.
+  // Preserves same return shape so callers don't change. If the config check
+  // itself fails (e.g. missing env in tests that don't set up a full env),
+  // fall through to the Sheets path. If the flag IS on but DB is broken,
+  // THAT error should surface — the DB call is outside this try/catch.
+  let useDbGoals = false;
+  try {
+    const { validateEnv } = require('../utils/config');
+    useDbGoals = validateEnv().useDbGoals;
+  } catch (_) {
+    // Flag unknown → use sheets path
+  }
+  if (useDbGoals) {
+    const store = require('./dealer-goals-store');
+    const goals = await store.loadAll();
+    // Map the store's shape → the DealerGoal shape readGoals callers expect
+    return goals.map(g => ({
+      dealerName: g.dealerName,
+      monthlyBudget: g.monthlyBudget,
+      baselineInventory: null,           // not in DB yet (always null in current sheet impl too)
+      dealerNotes: g.miscNotes || null,
+      freshdeskTag: null,                // not in DB yet (always null in current sheet impl)
+      newBudget: g.newBudget || null,
+      usedBudget: g.usedBudget || null,
+      pacingMode: g.pacingMode || 'one_click',
+      pacingCurveId: g.pacingCurveId || null,
+    }));
+  }
+
+  return readGoalsFromSheet(sheetsClient, spreadsheetId, range);
+}
+
+/**
  * Reads dealer-specific budget splits (VLA vs Keyword) from a separate sheet.
  * Used by Alan Jay stores that have fixed VLA/Keyword budget allocations.
  *
@@ -148,6 +194,30 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G'
  * @returns {Promise<Map<string, {vlaBudget: number, keywordBudget: number}>>} Map of dealer name → budget splits
  */
 async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
+  // Phase B: when USE_DB_GOALS is on, read splits from Postgres instead of Sheets.
+  // Safe-fallback on config-check failure; real DB errors still surface.
+  let useDbGoals = false;
+  try {
+    const { validateEnv } = require('../utils/config');
+    useDbGoals = validateEnv().useDbGoals;
+  } catch (_) {}
+  if (useDbGoals) {
+    const store = require('./dealer-goals-store');
+    const goals = await store.loadAll();
+    const splits = new Map();
+    for (const g of goals) {
+      if (g.vlaBudget != null || g.keywordBudget != null) {
+        splits.set(g.dealerName.toLowerCase(), {
+          ppcBudget: g.monthlyBudget || 0,
+          vlaBudget: g.vlaBudget || 0,
+          keywordBudget: g.keywordBudget || 0,
+        });
+      }
+    }
+    return splits;
+  }
+
+  // ───── existing Sheets API logic below this point, unchanged ─────
   if (!spreadsheetId) return new Map();
 
   const range = sheetName ? `${sheetName}!A2:F` : 'A2:F';
@@ -184,6 +254,7 @@ async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
 
 module.exports = {
   readGoals,
+  readGoalsFromSheet,
   readBudgetSplits,
   parseRow,
   parseNumber,

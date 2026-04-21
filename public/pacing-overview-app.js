@@ -292,7 +292,7 @@ function renderTable(accounts) {
     return `<tr onclick="window.location.href='/pacing.html?account=${esc(a.customerId)}'">
       <td>${esc(a.dealerName)}</td>
       <td>${fmtCurrency(a.mtdSpend)}</td>
-      <td>${fmtCurrency(a.monthlyBudget)}</td>
+      <td>${fmtCurrency(a.monthlyBudget)} <button class="budget-edit-btn" onclick="event.stopPropagation(); openBudgetModal('${esc(a.dealerName).replace(/'/g, "\\'")}', ${a.monthlyBudget})" title="Edit monthly budget">&#9998;</button></td>
       <td class="${paceClass}" title="${esc(buildPacingExplanation(a))}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span>${a.changeDate ? ' <span title="Budget changed ' + esc(a.changeDate) + '" style="font-size:10px;color:var(--text3);">⏳</span>' : ''}</td>
       <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
@@ -327,3 +327,100 @@ function renderFailed(failed) {
 
 // ── Init ──
 checkAuth();
+
+// ── Budget Edit Modal ──
+
+let modalState = { dealerName: null, currentBudget: 0 };
+
+function openBudgetModal(dealerName, currentBudget) {
+  modalState = { dealerName, currentBudget };
+  document.getElementById('modalDealer').textContent = dealerName;
+  document.getElementById('modalCurrentBudget').textContent = '$' + Number(currentBudget).toFixed(2);
+  document.getElementById('modalNewBudget').value = currentBudget;
+  document.getElementById('modalNote').value = '';
+  document.getElementById('modalFeedback').textContent = '';
+  document.getElementById('modalFeedback').className = 'modal-feedback';
+  document.getElementById('budgetEditModal').style.display = 'flex';
+  validateModalForm();
+  // Wire change listeners (first time only)
+  if (!openBudgetModal._wired) {
+    document.getElementById('modalNewBudget').addEventListener('input', validateModalForm);
+    document.getElementById('modalNote').addEventListener('input', validateModalForm);
+    // Esc closes modal
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeBudgetModal();
+    });
+    // Enter submits if save button is enabled
+    document.getElementById('modalNote').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        const btn = document.getElementById('modalSaveBtn');
+        if (!btn.disabled) saveBudget();
+      }
+    });
+    // Overlay click closes modal
+    document.getElementById('budgetEditModal').addEventListener('click', function(e) {
+      if (e.target === this) closeBudgetModal();
+    });
+    openBudgetModal._wired = true;
+  }
+  // Focus the new-budget input
+  setTimeout(() => document.getElementById('modalNewBudget').focus(), 50);
+}
+
+function closeBudgetModal() {
+  document.getElementById('budgetEditModal').style.display = 'none';
+}
+
+function validateModalForm() {
+  const budgetInput = document.getElementById('modalNewBudget');
+  const noteInput = document.getElementById('modalNote');
+  const saveBtn = document.getElementById('modalSaveBtn');
+  const budget = parseFloat(budgetInput.value);
+  const noteOk = noteInput.value.trim().length >= 5;
+  const budgetOk = Number.isFinite(budget) && budget > 0;
+  // Also require change from current (don't save a no-op)
+  const changed = Math.abs(budget - modalState.currentBudget) > 0.005;
+  saveBtn.disabled = !(noteOk && budgetOk && changed);
+}
+
+async function saveBudget() {
+  const saveBtn = document.getElementById('modalSaveBtn');
+  const feedback = document.getElementById('modalFeedback');
+  saveBtn.disabled = true;
+  feedback.textContent = '';
+  try {
+    const res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        monthlyBudget: parseFloat(document.getElementById('modalNewBudget').value),
+        note: document.getElementById('modalNote').value.trim(),
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      feedback.textContent = data.error || `Save failed (HTTP ${res.status})`;
+      feedback.className = 'modal-feedback err';
+      saveBtn.disabled = false;
+      return;
+    }
+    feedback.textContent = 'Saved.';
+    feedback.className = 'modal-feedback ok';
+    // Reload the overview so the new budget shows immediately
+    setTimeout(() => {
+      closeBudgetModal();
+      if (typeof loadOverview === 'function') loadOverview();
+      else window.location.reload();
+    }, 600);
+  } catch (err) {
+    feedback.textContent = err.message || 'Network error';
+    feedback.className = 'modal-feedback err';
+    saveBtn.disabled = false;
+  }
+}
+
+// Expose for inline onclick handlers
+window.openBudgetModal = openBudgetModal;
+window.closeBudgetModal = closeBudgetModal;
+window.saveBudget = saveBudget;

@@ -677,3 +677,152 @@
   padding: 2px 0;
   font-family: 'DM Mono', monospace;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Inline budget-edit button (pencil icon in overview table)
+   ───────────────────────────────────────────────────────────── */
+.budget-edit-btn {
+  background: none;
+  border: none;
+  padding: 0 3px;
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--text3);
+  opacity: 0.5;
+  cursor: pointer;
+  vertical-align: middle;
+  line-height: 1;
+  transition: opacity .15s, color .15s;
+}
+.budget-edit-btn:hover {
+  opacity: 1;
+  color: #93c5fd;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Budget Edit Modal
+   ───────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #0a1628;
+}
+.modal-header h3 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color .15s;
+}
+.modal-close:hover { color: var(--text); }
+
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-dealer {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: #93c5fd;
+}
+
+.modal-current {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.modal-field label {
+  font-size: 11px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.modal-field input,
+.modal-field textarea {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+  padding: 8px 12px;
+  outline: none;
+  resize: vertical;
+  transition: border-color .15s;
+}
+.modal-field input:focus,
+.modal-field textarea:focus {
+  border-color: #3b82f6;
+}
+
+.required {
+  color: var(--text4);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.modal-feedback {
+  font-size: 12px;
+  font-family: 'DM Mono', monospace;
+  min-height: 18px;
+}
+.modal-feedback.err { color: #f87171; }
+.modal-feedback.ok  { color: #4ade80; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+/* Compact the global btn-primary/secondary inside the modal */
+.modal-actions .btn-primary,
+.modal-actions .btn-secondary {
+  padding: 8px 20px;
+  font-size: 13px;
+}

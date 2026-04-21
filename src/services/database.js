@@ -122,8 +122,54 @@ async function initialize() {
       )
     `);
 
+    try {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS dealer_goals (
+          dealer_name TEXT PRIMARY KEY,
+          monthly_budget NUMERIC(10,2) NOT NULL,
+          new_budget NUMERIC(10,2),
+          used_budget NUMERIC(10,2),
+          misc_notes TEXT,
+          pacing_mode TEXT DEFAULT 'one_click',
+          pacing_curve_id TEXT,
+          vla_budget NUMERIC(10,2),
+          keyword_budget NUMERIC(10,2),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_by TEXT
+        )
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_goals):', err.message);
+    }
+
+    try {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS dealer_budget_changes (
+          id SERIAL PRIMARY KEY,
+          dealer_name TEXT NOT NULL,
+          old_monthly_budget NUMERIC(10,2),
+          new_monthly_budget NUMERIC(10,2) NOT NULL,
+          note TEXT NOT NULL CHECK (char_length(note) >= 5),
+          changed_at TIMESTAMPTZ DEFAULT NOW(),
+          changed_by TEXT
+        )
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_budget_changes):', err.message);
+    }
+
+    try {
+      await p.query(`
+        CREATE INDEX IF NOT EXISTS idx_dealer_budget_changes_dealer
+          ON dealer_budget_changes(dealer_name, changed_at DESC)
+      `);
+    } catch (err) {
+      console.error('Database initialization error (idx_dealer_budget_changes_dealer):', err.message);
+    }
+
     initialized = true;
-    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup tables ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup, dealer_goals, dealer_budget_changes tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }
