@@ -108,7 +108,7 @@ function createApp(config) {
   app.use(createBudgetAdjustmentsRouter(config));
   app.use('/api/cc', createCommandCenterRouter(config));
   app.use(createGroupsRouter());
-  app.use(createDealersRouter());
+  app.use(createDealersRouter(config));
 
   // ── Spend Sync — daily 8 AM EST spend pull from Google Ads → Sheets ──
   const { requireAuth } = require('./middleware/auth');

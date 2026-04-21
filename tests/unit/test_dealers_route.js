@@ -20,7 +20,7 @@ const { createDealersRouter } = require('../../src/routes/dealers');
 
 // ── Build a minimal test app ──────────────────────────────────────────────────
 
-function buildApp() {
+function buildApp(opts = {}) {
   const app = express();
   app.use(express.json());
   app.use(session({
@@ -36,7 +36,12 @@ function buildApp() {
     res.json({ ok: true });
   });
 
-  app.use(createDealersRouter());
+  // Build config: default to having a spreadsheetId unless opts.noSpreadsheet
+  const config = opts.noSpreadsheet
+    ? { googleAds: { clientId: 'x', clientSecret: 'x', developerToken: 'x' }, googleSheets: {} }
+    : { googleAds: { clientId: 'x', clientSecret: 'x', developerToken: 'x' }, googleSheets: { spreadsheetId: 'fake-sheet-id' } };
+
+  app.use(createDealersRouter(config));
   return app;
 }
 
@@ -315,5 +320,134 @@ describe('GET /api/dealers/:dealerName/history', () => {
     const agent = await authAgent(app);
     const res = await agent.get('/api/dealers/Nobody/history').expect(200);
     expect(res.body.history).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/dealers/import-from-sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Helpers: mock googleAds + readGoalsFromSheet for import tests ─────────────
+
+const goalReaderModule = require('../../src/services/goal-reader');
+const googleAdsModule  = require('../../src/services/google-ads');
+
+function makeSheetGoals(overrides = []) {
+  const defaults = [
+    {
+      dealerName: 'Alpha Motors',
+      monthlyBudget: 10000,
+      newBudget: 6000,
+      usedBudget: 4000,
+      dealerNotes: 'test note',
+      pacingMode: 'one_click',
+      pacingCurveId: null,
+    },
+    {
+      dealerName: 'Beta Auto',
+      monthlyBudget: 8000,
+      newBudget: null,
+      usedBudget: null,
+      dealerNotes: null,
+      pacingMode: 'advisory',
+      pacingCurveId: 'linear',
+    },
+  ];
+  return overrides.length ? overrides : defaults;
+}
+
+describe('POST /api/dealers/import-from-sheet', () => {
+  let origRefreshAccessToken;
+  let origReadGoalsFromSheet;
+
+  beforeEach(() => {
+    store._resetForTesting();
+    // Stub out the OAuth token refresh — no real network call needed
+    origRefreshAccessToken = googleAdsModule.refreshAccessToken;
+    googleAdsModule.refreshAccessToken = async () => 'test-access-token';
+
+    // Stub out readGoalsFromSheet — return controlled data
+    origReadGoalsFromSheet = goalReaderModule.readGoalsFromSheet;
+  });
+
+  afterEach(() => {
+    googleAdsModule.refreshAccessToken = origRefreshAccessToken;
+    goalReaderModule.readGoalsFromSheet = origReadGoalsFromSheet;
+  });
+
+  test('happy path: 2 goals from sheet, DB empty → both created', async () => {
+    goalReaderModule.readGoalsFromSheet = async () => makeSheetGoals();
+
+    const app = buildApp();
+    const agent = await authAgent(app);
+    const res = await agent.post('/api/dealers/import-from-sheet').expect(200);
+
+    expect(res.body.imported).toBe(2);
+    expect(res.body.created).toEqual(['Alpha Motors', 'Beta Auto']);
+    expect(res.body.updated).toEqual([]);
+    expect(res.body.skipped).toEqual([]);
+  });
+
+  test('idempotent: running twice → first all created, second all skipped', async () => {
+    goalReaderModule.readGoalsFromSheet = async () => makeSheetGoals();
+
+    const app = buildApp();
+    const agent = await authAgent(app);
+
+    const first = await agent.post('/api/dealers/import-from-sheet').expect(200);
+    expect(first.body.created).toHaveLength(2);
+    expect(first.body.skipped).toHaveLength(0);
+
+    const second = await agent.post('/api/dealers/import-from-sheet').expect(200);
+    expect(second.body.imported).toBe(0);
+    expect(second.body.created).toHaveLength(0);
+    expect(second.body.updated).toHaveLength(0);
+    expect(second.body.skipped).toHaveLength(2);
+    expect(second.body.skipped[0].reason).toBe('no changes');
+  });
+
+  test('partial change: one dealer budget changed → updated:1, other skipped', async () => {
+    // Seed DB with the original data
+    goalReaderModule.readGoalsFromSheet = async () => makeSheetGoals();
+    const app = buildApp();
+    const agent = await authAgent(app);
+    await agent.post('/api/dealers/import-from-sheet').expect(200);
+
+    // Now sheet has Alpha Motors with a different budget
+    const updatedSheet = makeSheetGoals().map(g =>
+      g.dealerName === 'Alpha Motors' ? { ...g, monthlyBudget: 12000 } : g
+    );
+    goalReaderModule.readGoalsFromSheet = async () => updatedSheet;
+
+    const res = await agent.post('/api/dealers/import-from-sheet').expect(200);
+    expect(res.body.updated).toEqual(['Alpha Motors']);
+    expect(res.body.skipped).toHaveLength(1);
+    expect(res.body.skipped[0].name).toBe('Beta Auto');
+    expect(res.body.imported).toBe(1);
+  });
+
+  test('missing spreadsheet ID → 500 with clear error', async () => {
+    goalReaderModule.readGoalsFromSheet = async () => makeSheetGoals();
+
+    const app = buildApp({ noSpreadsheet: true });
+    const agent = await authAgent(app);
+    const res = await agent.post('/api/dealers/import-from-sheet').expect(500);
+    expect(res.body.error).toMatch(/GOOGLE_SHEETS_SPREADSHEET_ID/i);
+  });
+
+  test('sheet fetch throws → 500 response with error message', async () => {
+    goalReaderModule.readGoalsFromSheet = async () => {
+      throw new Error('Sheets API quota exceeded');
+    };
+
+    const app = buildApp();
+    const agent = await authAgent(app);
+    const res = await agent.post('/api/dealers/import-from-sheet').expect(500);
+    expect(res.body.error).toMatch(/Sheets API quota exceeded/);
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    const app = buildApp();
+    await supertest(app).post('/api/dealers/import-from-sheet').expect(401);
   });
 });

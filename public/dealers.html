@@ -294,6 +294,32 @@
       padding: 0;
       text-decoration: underline;
     }
+    /* Import section */
+    .import-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding: 12px 16px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .btn-secondary {
+      padding: 6px 14px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { border-color: var(--blue); color: var(--text); }
+    .import-help {
+      font-size: 12px;
+      color: var(--text3);
+    }
   </style>
 </head>
 <body>
@@ -324,6 +350,13 @@
 
   <div class="dealers-title">Dealers</div>
   <div class="dealers-sub">Manage dealer goals, monthly budgets, pacing config, and budget split allocations.</div>
+
+  <!-- Import from Sheet -->
+  <div class="import-section">
+    <button class="btn-secondary" onclick="importFromSheet()">Import from Google Sheet</button>
+    <span class="import-help">One-time migration from PPC Control sheet into the database.</span>
+  </div>
+  <div id="importFeedback"></div>
 
   <!-- Create dealer -->
   <div class="create-card">

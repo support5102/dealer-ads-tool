@@ -10,13 +10,63 @@
  *   PUT    /api/dealers/:dealerName/budget        → update monthly budget (requires note)
  *   DELETE /api/dealers/:dealerName              → delete dealer
  *   GET    /api/dealers/:dealerName/history      → budget change history
+ *   POST   /api/dealers/import-from-sheet        → one-time sheet-to-DB import
  */
 
 const express = require('express');
+const axios = require('axios');
 const { requireAuth } = require('../middleware/auth');
 const store = require('../services/dealer-goals-store');
+const googleAds = require('../services/google-ads');
 
-function createDealersRouter() {
+/**
+ * Creates a lightweight Google Sheets client from an OAuth access token.
+ * Mirrors the identical helper in routes/pacing.js.
+ *
+ * @param {string} accessToken - OAuth2 access token
+ * @returns {Object} Sheets-compatible client
+ */
+function createSheetsClient(accessToken) {
+  return {
+    spreadsheets: {
+      values: {
+        async get({ spreadsheetId, range }) {
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+          const res = await axios.get(url, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          return { data: res.data };
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Returns true if any of the fields that matter for the import diff have changed.
+ *
+ * @param {object} existing - Goal currently in DB
+ * @param {object} incoming - Goal from the sheet
+ * @returns {boolean}
+ */
+function didAnyFieldChange(existing, incoming) {
+  return (
+    existing.monthlyBudget !== incoming.monthlyBudget ||
+    existing.newBudget     !== incoming.newBudget     ||
+    existing.usedBudget    !== incoming.usedBudget    ||
+    existing.miscNotes     !== incoming.miscNotes     ||
+    existing.pacingMode    !== incoming.pacingMode    ||
+    existing.pacingCurveId !== incoming.pacingCurveId
+  );
+}
+
+/**
+ * Creates the dealers router.
+ *
+ * @param {Object} [config] - App configuration from config.js (needed for import route)
+ * @returns {express.Router}
+ */
+function createDealersRouter(config) {
   const router = express.Router();
 
   // ── GET /api/dealers ─────────────────────────────────────────────────────────
@@ -183,6 +233,92 @@ function createDealersRouter() {
       const history = await store.getBudgetHistory(dealerName);
       res.json({ history });
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── POST /api/dealers/import-from-sheet ───────────────────────────────────────
+  // One-time migration: reads all goals from the Google Sheet and upserts into DB.
+  // Idempotent — safe to run multiple times. Always reads from the Sheet regardless
+  // of the USE_DB_GOALS flag (uses readGoalsFromSheet directly).
+  router.post('/api/dealers/import-from-sheet', requireAuth, async (req, res, next) => {
+    try {
+      // Resolve config: prefer injected (tests / server.js), fall back to inline-require
+      const cfg = config || (() => {
+        const { validateEnv } = require('../utils/config');
+        return validateEnv();
+      })();
+
+      const spreadsheetId = cfg.googleSheets && cfg.googleSheets.spreadsheetId;
+      if (!spreadsheetId) {
+        return res.status(500).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured' });
+      }
+
+      // Get an access token using the authenticated session's refresh token
+      const accessToken = await googleAds.refreshAccessToken(
+        cfg.googleAds,
+        req.session.tokens.refresh_token
+      );
+      const sheetsClient = createSheetsClient(accessToken);
+
+      // Force sheet path — never hits DB regardless of USE_DB_GOALS flag
+      const { readGoalsFromSheet } = require('../services/goal-reader');
+      let sheetGoals;
+      try {
+        sheetGoals = await readGoalsFromSheet(sheetsClient, spreadsheetId);
+      } catch (err) {
+        console.error('[dealers] import-from-sheet sheet fetch failed:', err.message);
+        return res.status(500).json({ error: `Sheet fetch failed: ${err.message}` });
+      }
+
+      // Snapshot current DB state for diff classification
+      const dbGoals = await store.loadAll();
+      const existing = new Map(dbGoals.map(g => [g.dealerName.toLowerCase(), g]));
+
+      const created = [];
+      const updated = [];
+      const skipped = [];
+
+      for (const sg of sheetGoals) {
+        try {
+          const key = sg.dealerName.toLowerCase();
+          const existingGoal = existing.get(key);
+
+          const goal = {
+            dealerName:    sg.dealerName,
+            monthlyBudget: sg.monthlyBudget,
+            newBudget:     sg.newBudget     || null,
+            usedBudget:    sg.usedBudget    || null,
+            miscNotes:     sg.dealerNotes   || null,
+            pacingMode:    sg.pacingMode    || 'one_click',
+            pacingCurveId: sg.pacingCurveId || null,
+            // Budget splits not in sheet's A:G range — leave null
+            vlaBudget:     null,
+            keywordBudget: null,
+          };
+
+          if (!existingGoal) {
+            await store.upsertGoal(goal);
+            created.push(sg.dealerName);
+          } else if (didAnyFieldChange(existingGoal, goal)) {
+            await store.upsertGoal(goal);
+            updated.push(sg.dealerName);
+          } else {
+            skipped.push({ name: sg.dealerName, reason: 'no changes' });
+          }
+        } catch (err) {
+          skipped.push({ name: sg.dealerName, reason: err.message });
+        }
+      }
+
+      res.json({
+        imported: created.length + updated.length,
+        created,
+        updated,
+        skipped,
+      });
+    } catch (err) {
+      console.error('[dealers] import-from-sheet failed:', err.message);
       next(err);
     }
   });

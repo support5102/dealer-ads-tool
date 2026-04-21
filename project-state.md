@@ -31,6 +31,7 @@
 | 19 | Campaign Builder Rebuild | ✅ COMPLETE | Vanilla JS rebuild, Command Center merged Task Manager + Builder (commit `d7699ac`) |
 | 20 | Pacing Engine v2 | ✅ SHIPPED | Damped daily controller — merged to main + deployed 2026-04-20 (revision dealer-ads-tool-00069-sql). PR #2. |
 | 21 | Pacing Recommender v2 | 🟡 CODE COMPLETE | Accurate recommender w/ inventory (Savvy API) + IS targets + diagnostics + R8 change-detection alerts on branch `feat/pacing-recs-v2` — 7 commits (Phases 1-7), 202 new tests, pending merge + deploy |
+| 22 | DB-Backed Dealer Goals | 🟡 CODE COMPLETE | Replaces Google Sheets with Postgres-backed admin UI (feat/db-goals). Mandatory note + audit for every budget change. 5 phases, ~6 commits. Pending migration + cutover. |
 
 ---
 

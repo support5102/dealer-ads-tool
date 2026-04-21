@@ -93,7 +93,55 @@ function parseRow(row) {
 }
 
 /**
- * Reads dealer goals from a Google Sheet.
+ * Reads dealer goals DIRECTLY from the Google Sheet — always hits the Sheets API,
+ * never the DB. Used by the import route and as the fallback path in readGoals().
+ *
+ * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
+ * @param {string} spreadsheetId - Google Sheets spreadsheet ID
+ * @param {string} [range='PPC Control!A2:G'] - Cell range to read (skip header row)
+ * @returns {Promise<DealerGoal[]>} Array of parsed dealer goals (invalid rows skipped)
+ * @throws {Error} If spreadsheetId is missing or the Sheets API call fails
+ */
+async function readGoalsFromSheet(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
+  if (!spreadsheetId) {
+    throw new Error(
+      'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
+    );
+  }
+
+  let response;
+  try {
+    response = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to read goals from sheet ${spreadsheetId} range ${range}: ${err.message}`
+    );
+  }
+
+  const rows = response.data.values;
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    return [];
+  }
+
+  const goals = [];
+  for (const row of rows) {
+    const parsed = parseRow(row);
+    if (parsed) {
+      goals.push(parsed);
+    }
+  }
+
+  return goals;
+}
+
+/**
+ * Reads dealer goals from the DB (when USE_DB_GOALS is on) or from the Google Sheet.
+ *
+ * Phase B: flag-aware entry point for all callers except the import route.
+ * The import route always calls readGoalsFromSheet directly to bypass the flag.
  *
  * @param {Object} sheetsClient - Google Sheets API v4 client (or fake)
  * @param {string} spreadsheetId - Google Sheets spreadsheet ID
@@ -131,39 +179,7 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G'
     }));
   }
 
-  // ───── existing Sheets API logic below this point, unchanged ─────
-  if (!spreadsheetId) {
-    throw new Error(
-      'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
-    );
-  }
-
-  let response;
-  try {
-    response = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId,
-      range,
-    });
-  } catch (err) {
-    throw new Error(
-      `Failed to read goals from sheet ${spreadsheetId} range ${range}: ${err.message}`
-    );
-  }
-
-  const rows = response.data.values;
-  if (!rows || !Array.isArray(rows) || rows.length === 0) {
-    return [];
-  }
-
-  const goals = [];
-  for (const row of rows) {
-    const parsed = parseRow(row);
-    if (parsed) {
-      goals.push(parsed);
-    }
-  }
-
-  return goals;
+  return readGoalsFromSheet(sheetsClient, spreadsheetId, range);
 }
 
 /**
@@ -238,6 +254,7 @@ async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
 
 module.exports = {
   readGoals,
+  readGoalsFromSheet,
   readBudgetSplits,
   parseRow,
   parseNumber,

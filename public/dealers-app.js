@@ -427,6 +427,27 @@ function showGlobalFeedback(msg, type) {
   setTimeout(() => div.remove(), 5000);
 }
 
+// ── Import from Sheet ─────────────────────────────────────────────────────────
+
+async function importFromSheet() {
+  if (!confirm('Import all dealers from the Google Sheet into the DB?\n\nThis is idempotent — safe to run multiple times. Existing dealers are updated, new ones are added.')) return;
+  const fb = document.getElementById('importFeedback');
+  const res = await fetch('/api/dealers/import-from-sheet', { method: 'POST', credentials: 'include' });
+  const data = await res.json();
+  if (!res.ok) {
+    showFeedback(fb, `Import failed: ${data.error || res.status}`, 'err');
+    return;
+  }
+  showFeedback(
+    fb,
+    `Imported ${data.imported} dealer${data.imported !== 1 ? 's' : ''}. Created: ${data.created.length}. Updated: ${data.updated.length}. Skipped: ${data.skipped.length}.`,
+    'ok'
+  );
+  await loadDealers();
+  render();
+}
+window.importFromSheet = importFromSheet;
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', init);
