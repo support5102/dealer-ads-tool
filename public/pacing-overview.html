@@ -204,6 +204,35 @@
   <div id="failedSection"></div>
 </div>
 
+<div id="budgetEditModal" class="modal-overlay" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3>Edit Monthly Budget</h3>
+      <button class="modal-close" onclick="closeBudgetModal()">&#215;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-dealer" id="modalDealer"></div>
+      <div class="modal-field">
+        <label>Current budget</label>
+        <div class="modal-current" id="modalCurrentBudget"></div>
+      </div>
+      <div class="modal-field">
+        <label for="modalNewBudget">New monthly budget ($)</label>
+        <input type="number" id="modalNewBudget" min="0" step="0.01" />
+      </div>
+      <div class="modal-field">
+        <label for="modalNote">Note <span class="required">(required, min 5 chars)</span></label>
+        <textarea id="modalNote" rows="3" placeholder="Why is this changing? E.g., summer promo push, dealer requested increase, contract change..."></textarea>
+      </div>
+      <div id="modalFeedback" class="modal-feedback"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeBudgetModal()">Cancel</button>
+        <button class="btn-primary" id="modalSaveBtn" onclick="saveBudget()" disabled>Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/pacing-overview-app.js"></script>
 </body>
 </html>
