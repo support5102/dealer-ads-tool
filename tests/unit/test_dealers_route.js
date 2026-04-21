@@ -36,10 +36,13 @@ function buildApp(opts = {}) {
     res.json({ ok: true });
   });
 
-  // Build config: default to having a spreadsheetId unless opts.noSpreadsheet
-  const config = opts.noSpreadsheet
-    ? { googleAds: { clientId: 'x', clientSecret: 'x', developerToken: 'x' }, googleSheets: {} }
-    : { googleAds: { clientId: 'x', clientSecret: 'x', developerToken: 'x' }, googleSheets: { spreadsheetId: 'fake-sheet-id' } };
+  // Build config. Sheet ID is read from process.env by the import route
+  // (matches auth.js + budget-adjustments.js pattern), so set/unset the env
+  // var here instead of nesting it in the config.
+  if (opts.noSpreadsheet) delete process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+  else process.env.GOOGLE_SHEETS_SPREADSHEET_ID = 'fake-sheet-id';
+
+  const config = { googleAds: { clientId: 'x', clientSecret: 'x', developerToken: 'x' } };
 
   app.use(createDealersRouter(config));
   return app;
