@@ -174,6 +174,61 @@ describe('seedDefaults()', () => {
   });
 });
 
+// ── fuzzy (normalized) matching ───────────────────────────────────────────────
+
+describe('siteIdFor() fuzzy/normalized matching', () => {
+  test('seed-derived compact name is found by human-readable name with spaces', async () => {
+    // Seed key has no spaces (compact, derived from URL slug)
+    await registry.setMapping('Alanjayfordofsebring', 66, 'www.alanjayfordofsebring.com');
+    await registry.loadAll();
+
+    // Query using the human-readable form (with spaces and mixed case)
+    const result = registry.siteIdFor('Alan Jay Ford of Sebring');
+    expect(result).not.toBeNull();
+    expect(result.siteId).toBe(66);
+  });
+
+  test('exact match takes priority over fuzzy when both would match', async () => {
+    // Exact entry with correct liveUrl
+    await registry.setMapping('Alan Jay Ford of Sebring', 66, 'www.exact.com');
+    // Compact entry that would fuzzy-match the same normalized form
+    await registry.setMapping('Alanjayfordofsebring', 99, 'www.fuzzy.com');
+    await registry.loadAll();
+
+    // Exact key should win
+    const result = registry.siteIdFor('Alan Jay Ford of Sebring');
+    expect(result).not.toBeNull();
+    expect(result.siteId).toBe(66);
+    expect(result.liveUrl).toBe('www.exact.com');
+  });
+
+  test('fuzzy match is case-insensitive', async () => {
+    await registry.setMapping('srqauto', 78, 'www.srqauto.com');
+    await registry.loadAll();
+
+    const result = registry.siteIdFor('SRQ AUTO');
+    expect(result).not.toBeNull();
+    expect(result.siteId).toBe(78);
+  });
+
+  test('fuzzy match strips hyphens and underscores', async () => {
+    await registry.setMapping('banner-ford', 41, 'www.bannerford.com');
+    await registry.loadAll();
+
+    const result = registry.siteIdFor('banner ford');
+    expect(result).not.toBeNull();
+    expect(result.siteId).toBe(41);
+  });
+
+  test('returns null when no exact or fuzzy match exists', async () => {
+    await registry.setMapping('SRQ Auto', 78, 'www.srqauto.com');
+    await registry.loadAll();
+
+    const result = registry.siteIdFor('Completely Different Dealer');
+    expect(result).toBeNull();
+  });
+});
+
 // ── cache invalidation ────────────────────────────────────────────────────────
 
 describe('cache invalidation', () => {

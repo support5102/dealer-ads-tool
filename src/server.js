@@ -183,6 +183,16 @@ if (require.main === module) {
       { runImmediately: false }
     );
     console.log('[pacing-engine-v2] scheduler registered (stub runner)');
+
+    // Inventory baseline — daily sampling for recommender-v2 (feature-flagged)
+    const inventoryBaselineRunner = require('./services/inventory-baseline-runner');
+    scheduler.registerJob(
+      'inventory-baseline-daily',
+      async () => inventoryBaselineRunner.run(),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[inventory-baseline] scheduler registered');
   }
 
   createApp(config).listen(PORT, () => {

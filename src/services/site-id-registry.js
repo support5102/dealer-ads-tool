@@ -142,9 +142,31 @@ async function loadAll() {
 }
 
 /**
+ * Normalizes a dealer name for fuzzy matching.
+ * Strips whitespace, hyphens, underscores, dots, and all non-word characters,
+ * then lowercases the result.
+ *
+ * Examples:
+ *  "Alan Jay Ford of Sebring" → "alanjayfordofsebring"
+ *  "Alanjayfordofsebring"     → "alanjayfordofsebring"
+ *  "SRQ Auto"                 → "srqauto"
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function normalize(name) {
+  return String(name || '').toLowerCase().replace(/[\s\-_.]+/g, '').replace(/[^\w]/g, '');
+}
+
+/**
  * Returns the site_id + liveUrl for a dealer name. SYNCHRONOUS — reads from cache.
  * If cache is stale, triggers an async reload and returns null for this call.
  * Next call will have a fresh cache.
+ *
+ * Lookup order:
+ *  1. Exact (case-sensitive) match — preserves operator-corrected names
+ *  2. Normalized fuzzy match — allows human-readable names (with spaces/punctuation)
+ *     to match seed-derived keys (compact lowercase strings)
  *
  * @param {string} dealerName
  * @returns {{ siteId: number, liveUrl: string } | null}
@@ -156,7 +178,22 @@ function siteIdFor(dealerName) {
     return null;
   }
 
-  return cache.get(String(dealerName || '').trim()) || null;
+  const key = String(dealerName || '').trim();
+
+  // 1. Exact match first (operator-corrected names win)
+  if (cache.has(key)) {
+    return cache.get(key);
+  }
+
+  // 2. Normalized fuzzy fallback
+  const normalizedInput = normalize(key);
+  for (const [cacheKey, value] of cache) {
+    if (normalize(cacheKey) === normalizedInput) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -280,6 +317,7 @@ module.exports = {
   removeMapping,
   seedDefaults,
   deriveDealerName,  // exported for tests
+  normalize,         // exported for tests
   SEED_MAPPINGS,     // exported for tests
   _resetForTesting,
 };
