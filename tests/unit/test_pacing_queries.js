@@ -389,10 +389,12 @@ describe('getInventory', () => {
 
 describe('getAccountLevelDailyBudget', () => {
   test('sums amount_micros across campaigns, dedupes shared budgets, picks majority bid strategy', async () => {
+    // Google Ads REST returns int64 (amount_micros) as STRINGS — test with strings
+    // to catch the += concatenation bug that would otherwise only appear in prod.
     const fakeQuery = async () => ([
-      { campaign: { id: 1, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: 50_000_000 } },
-      { campaign: { id: 2, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/b', amountMicros: 100_000_000 } },
-      { campaign: { id: 3, biddingStrategyType: 'TARGET_CPA' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: 50_000_000 } }, // shared with campaign 1
+      { campaign: { id: 1, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: '50000000' } },
+      { campaign: { id: 2, biddingStrategyType: 'MAXIMIZE_CLICKS' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/b', amountMicros: '100000000' } },
+      { campaign: { id: 3, biddingStrategyType: 'TARGET_CPA' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/a', amountMicros: '50000000' } }, // shared with campaign 1
     ]);
     const result = await getAccountLevelDailyBudget({
       accessToken: 't', developerToken: 'd', customerId: 'c', loginCustomerId: 'm',

@@ -206,14 +206,32 @@ function renderHeader(data) {
 }
 
 function renderMetrics(data) {
+  const isV2 = data.source === 'pacing_engine_v2';
   const p = data.pacing || {};
-  // pacePercent is a variance (e.g. +49 means 49% above expected).
-  // Convert to pace ratio for display: 100 + variance = 149% of expected pace.
-  const paceRatio = p.pacePercent != null ? (100 + p.pacePercent) : null;
-  const pct = paceRatio != null ? paceRatio.toFixed(1) : '--';
-  // Progress bar shows budget utilization (spend / budget)
-  const spendProgress = p.monthlyBudget > 0 ? (data.totalSpend / p.monthlyBudget) * 100 : 0;
-  const color = data.statusColor || 'gray';
+  // V1: pacePercent is a variance (+49 = 49% above expected). Display = 100 + variance.
+  // V2: pacePercent is absolute (107.8 = 107.8% of curve). Display as-is.
+  let pct, spendProgress, color, spendForDisplay, remainingForDisplay, daysTextForDisplay, reqRateForDisplay;
+  if (isV2) {
+    pct = p.pacePercent != null ? p.pacePercent.toFixed(1) : '--';
+    spendForDisplay = p.mtdSpend;
+    remainingForDisplay = p.monthlyBudget > 0 ? (p.monthlyBudget - p.mtdSpend) : 0;
+    daysTextForDisplay = p.daysRemaining != null
+      ? `${p.daysRemaining} day${p.daysRemaining !== 1 ? 's' : ''} remaining`
+      : '';
+    reqRateForDisplay = p.daysRemaining > 0 ? remainingForDisplay / p.daysRemaining : 0;
+    spendProgress = p.monthlyBudget > 0 ? (p.mtdSpend / p.monthlyBudget) * 100 : 0;
+    const pVal = p.pacePercent;
+    color = pVal > 105 ? 'red' : pVal < 95 ? 'yellow' : 'green';
+  } else {
+    const paceRatio = p.pacePercent != null ? (100 + p.pacePercent) : null;
+    pct = paceRatio != null ? paceRatio.toFixed(1) : '--';
+    spendForDisplay = data.totalSpend;
+    remainingForDisplay = p.remainingBudget;
+    daysTextForDisplay = `Day ${p.daysElapsed} of ${p.daysInMonth}`;
+    reqRateForDisplay = p.requiredDailyRate;
+    spendProgress = p.monthlyBudget > 0 ? (data.totalSpend / p.monthlyBudget) * 100 : 0;
+    color = data.statusColor || 'gray';
+  }
 
   // Post-change average card (only shown when a budget change happened this month)
   let postChangeCard = '';
@@ -245,8 +263,8 @@ function renderMetrics(data) {
     </div>
     <div class="metric-card">
       <div class="metric-label">Spend to Date</div>
-      <div class="metric-value">$${fmt(data.totalSpend)}</div>
-      <div class="metric-sub">$${fmt(p.remainingBudget)} remaining</div>
+      <div class="metric-value">$${fmt(spendForDisplay)}</div>
+      <div class="metric-sub">$${fmt(remainingForDisplay)} remaining</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Pacing</div>
@@ -254,12 +272,12 @@ function renderMetrics(data) {
       <div class="pace-bar-container">
         <div class="pace-bar ${color}" style="width:${Math.min(spendProgress, 100)}%"></div>
       </div>
-      <div class="metric-sub">Day ${p.daysElapsed} of ${p.daysInMonth}</div>
+      <div class="metric-sub">${daysTextForDisplay}</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Required Daily Rate</div>
-      <div class="metric-value">$${fmt(p.requiredDailyRate)}</div>
-      <div class="metric-sub">${p.daysRemaining} days remaining</div>
+      <div class="metric-value">$${fmt(reqRateForDisplay)}</div>
+      <div class="metric-sub">${p.daysRemaining != null ? p.daysRemaining + ' days remaining' : ''}</div>
     </div>
     ${postChangeCard}
     ${postChangeWarning}

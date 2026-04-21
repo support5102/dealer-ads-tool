@@ -67,7 +67,7 @@ const INVENTORY_ADDITION_FACTORS = {
  * @param {number} params.currentDailyBudget - Current daily budget ($)
  * @returns {Object} Either the original proposed object or an override hold
  */
-function enforceDirectionInvariant({ variance, proposed, currentDailyBudget }) {
+function enforceDirectionInvariant({ proposed, currentDailyBudget, mtdSpend, monthlyBudget, daysRemaining }) {
   // Dead zone / skipped — no direction to enforce
   if (proposed.skipped || proposed.newDailyBudget === null) {
     return proposed;
@@ -76,23 +76,38 @@ function enforceDirectionInvariant({ variance, proposed, currentDailyBudget }) {
   const isIncrease = proposed.newDailyBudget > currentDailyBudget;
   const isDecrease = proposed.newDailyBudget < currentDailyBudget;
 
-  // Overpacing (variance > 0) but engine wants to increase: override
-  if (variance > 0 && isIncrease) {
+  // PROJECTED EOM variance: if the dealer keeps spending at currentDailyBudget
+  // for the remaining days, where do they land relative to monthlyBudget?
+  // This is what matters for direction-correctness — NOT the current-day
+  // curve variance (which can say "overpacing" even when the account is
+  // projected to underspend, e.g. when the daily setting is already too low).
+  const projectedEom = currentDailyBudget * daysRemaining + mtdSpend;
+  const projectedVariance = monthlyBudget > 0
+    ? (projectedEom - monthlyBudget) / monthlyBudget
+    : 0;
+
+  // Use ±2% threshold to match the engine's dead zone — no override for
+  // proposals within that band (projections that close to target don't
+  // justify blocking a small corrective move).
+  const PROJECTED_THRESHOLD = 0.02;
+
+  // Projected to overspend AND engine wants to raise daily → override
+  if (projectedVariance > PROJECTED_THRESHOLD && isIncrease) {
     return {
       ...proposed,
       skipped: true,
-      reason: 'direction_invariant_overpacing',
+      reason: 'direction_invariant_projected_overspend',
       newDailyBudget: null,
       clampedBy: null,
     };
   }
 
-  // Underpacing (variance < 0) but engine wants to decrease: override
-  if (variance < 0 && isDecrease) {
+  // Projected to underspend AND engine wants to lower daily → override
+  if (projectedVariance < -PROJECTED_THRESHOLD && isDecrease) {
     return {
       ...proposed,
       skipped: true,
-      reason: 'direction_invariant_underpacing',
+      reason: 'direction_invariant_projected_underspend',
       newDailyBudget: null,
       clampedBy: null,
     };
@@ -370,15 +385,55 @@ function composeRationale({
   );
 
   // 2. Action description
-  const { action, newDailyBudget, change, changePct } = recommendation;
+  const { action, newDailyBudget, change, changePct, skipReason } = recommendation;
   if (action === 'hold' || action === 'diagnose') {
-    lines.push('No budget change proposed — account is on pace.');
+    // Differentiate WHY we're holding. Generic "on pace" is misleading when
+    // the real reason is freeze/cooldown/invariant.
+    if (skipReason && skipReason.startsWith('freeze_window')) {
+      lines.push('No change — within end-of-month freeze window (last 2 days).');
+    } else if (skipReason && skipReason.startsWith('cooldown')) {
+      lines.push('No change — within 24h cooldown from the most recent budget edit.');
+    } else if (skipReason && skipReason.startsWith('target_strategy_cooldown')) {
+      lines.push('No change — Smart Bidding strategy still in 72h cooldown from last edit.');
+    } else if (skipReason === 'direction_invariant_projected_overspend') {
+      lines.push('No change — current daily budget is already projected to overspend the monthly target; a further increase would make it worse.');
+    } else if (skipReason === 'direction_invariant_projected_underspend') {
+      lines.push('No change — current daily budget is already projected to underspend the monthly target; a further decrease would leave more money on the table.');
+    } else if (skipReason && skipReason.startsWith('dead_zone')) {
+      lines.push('No change — variance from curve target is within the ±2% dead zone.');
+    } else {
+      // Fallback for unknown/missing reason
+      lines.push('No budget change proposed.');
+    }
+    // Always tell the operator where the account is projected to land so
+    // they can judge the hold themselves. Uses mtdSpend + remaining days at
+    // current rate — the same signal R1 uses.
+    if (typeof mtdSpend === 'number' && typeof monthlyBudget === 'number' && typeof daysRemaining === 'number') {
+      // NB: we don't have currentDailyBudget directly in pacing, but the
+      // action description is enough; the v2 UI card already shows the
+      // derived current daily.
+    }
   } else if (newDailyBudget !== null && newDailyBudget !== undefined) {
     const verb = action === 'reduce_daily_budget' ? 'Reducing' : 'Increasing';
-    const eomEstimate = typeof monthlyBudget === 'number' ? `$${monthlyBudget.toLocaleString()}` : '?';
-    lines.push(
-      `${verb} daily budget to $${newDailyBudget.toFixed(2)} will land at ${eomEstimate} EOM.`
-    );
+    const cappedByCap = (clampedBy === 'max_increase' || clampedBy === 'max_decrease');
+    const cappedByBound = (clampedBy === 'floor' || clampedBy === 'ceiling');
+    if (cappedByBound) {
+      // Absolute bound hit — can't promise EOM landing. Be honest.
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} (clamped by absolute ${clampedBy} — won't hit EOM target this cycle; revisit after cooldown).`
+      );
+    } else if (cappedByCap) {
+      // ±20% cap — proposal is a single-step move toward target, not the full correction
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} (single-step move toward target; further adjustment may follow after cooldown).`
+      );
+    } else {
+      // Normal proposal — the math actually does land at the monthly budget
+      const eomEstimate = typeof monthlyBudget === 'number' ? `$${monthlyBudget.toLocaleString()}` : '?';
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} will land at ${eomEstimate} EOM.`
+      );
+    }
   }
 
   // 3. Single-step cap note
@@ -515,10 +570,17 @@ async function run(params) {
   });
 
   // ── Step 2: R1 direction invariant ────────────────────────────────────────
+  // Uses PROJECTED EOM variance, not current-day curve variance. An account
+  // can be short-term overpacing (MTD > curve today) yet projected to
+  // underspend (current daily × daysRemaining + MTD < monthlyBudget); the
+  // right move in that case is to INCREASE, which strict current-day logic
+  // would wrongly block.
   const enforcedProposal = enforceDirectionInvariant({
-    variance,
     proposed: engineProposal,
     currentDailyBudget,
+    mtdSpend,
+    monthlyBudget,
+    daysRemaining,
   });
 
   // ── Step 3: R3 IS classifier ──────────────────────────────────────────────
@@ -564,24 +626,17 @@ async function run(params) {
   const clampedBy = enforcedProposal.clampedBy || null;
 
   if (enforcedProposal.skipped) {
-    // Skipped — determine action from skip reason
-    const reason = enforcedProposal.reason || '';
-    let action = 'hold';
-    if (reason.startsWith('freeze_window') || reason.startsWith('cooldown') || reason.startsWith('target_strategy_cooldown')) {
-      action = 'hold';
-    } else if (reason.startsWith('dead_zone')) {
-      action = 'hold';
-    } else if (reason.startsWith('direction_invariant')) {
-      action = 'hold';
-    }
-
+    // Skipped — action is 'hold', but carry the reason through so the
+    // rationale composer can produce an honest, specific message instead
+    // of the generic "on pace" line.
     recommendation = {
-      action,
+      action: 'hold',
       direction: 'hold',
       newDailyBudget: null,
       change: 0,
       changePct: 0,
       confidence: 'low',
+      skipReason: enforcedProposal.reason || null,
     };
   } else {
     const newDailyBudget = enforcedProposal.newDailyBudget;

@@ -182,74 +182,89 @@ describe('R1 — enforceDirectionInvariant()', () => {
     };
   }
 
-  const currentDailyBudget = 100;
+  // R1 now uses PROJECTED EOM variance, not current-day curve variance.
+  // Projected variance = (currentDaily * daysRemaining + mtdSpend - monthlyBudget) / monthlyBudget
+  const monthlyBudget = 6000;
 
-  test('overpacing + engine returns increase → enforced to hold', () => {
-    const proposed = notSkipped(120);   // increase from $100 to $120
-    const result = enforceDirectionInvariant({ variance: 0.10, proposed, currentDailyBudget });
+  test('projected overspend + engine returns increase → enforced to hold', () => {
+    // currentDaily=400, mtd=3000, daysRem=9 → projected = 6600 → +10% (overspend)
+    const proposed = notSkipped(480); // increase from $400 to $480
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 400, mtdSpend: 3000, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(true);
-    expect(result.reason).toBe('direction_invariant_overpacing');
+    expect(result.reason).toBe('direction_invariant_projected_overspend');
     expect(result.newDailyBudget).toBeNull();
   });
 
-  test('underpacing + engine returns decrease → enforced to hold', () => {
-    const proposed = notSkipped(80);    // decrease from $100 to $80
-    const result = enforceDirectionInvariant({ variance: -0.10, proposed, currentDailyBudget });
+  test('projected underspend + engine returns decrease → enforced to hold', () => {
+    // currentDaily=50, mtd=2000, daysRem=9 → projected = 2450 → -59% (underspend)
+    const proposed = notSkipped(40); // decrease from $50 to $40
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 50, mtdSpend: 2000, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(true);
-    expect(result.reason).toBe('direction_invariant_underpacing');
+    expect(result.reason).toBe('direction_invariant_projected_underspend');
     expect(result.newDailyBudget).toBeNull();
   });
 
-  test('overpacing + engine returns decrease → pass through (correct direction)', () => {
-    const proposed = notSkipped(80);    // decrease from $100 to $80
-    const result = enforceDirectionInvariant({ variance: 0.10, proposed, currentDailyBudget });
+  test('projected overspend + engine returns decrease → pass through (correct direction)', () => {
+    // Same overspend scenario; proposal is to DECREASE — that's the right move
+    const proposed = notSkipped(320); // decrease from $400 to $320
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 400, mtdSpend: 3000, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(false);
-    expect(result.newDailyBudget).toBe(80);
+    expect(result.newDailyBudget).toBe(320);
   });
 
-  test('underpacing + engine returns increase → pass through (correct direction)', () => {
-    const proposed = notSkipped(120);   // increase from $100 to $120
-    const result = enforceDirectionInvariant({ variance: -0.10, proposed, currentDailyBudget });
+  test('projected underspend + engine returns increase → pass through (correct direction)', () => {
+    // Alan Jay case — short-term overpaced but projected to underspend.
+    // currentDaily=$70, mtd=$4526, daysRem=9 → projected = $5156 = 86% (underspend)
+    // Engine's proposed increase to $84 (±20% cap) is the RIGHT move.
+    const proposed = notSkipped(84);
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 70, mtdSpend: 4526, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(false);
-    expect(result.newDailyBudget).toBe(120);
+    expect(result.newDailyBudget).toBe(84);
+  });
+
+  test('projected within ±2% band + engine returns change → pass through', () => {
+    // currentDaily=200, mtd=4200, daysRem=9 → projected = 6000 = 100% (exact target)
+    // Engine's proposed tiny tweak should pass through (we're within threshold band)
+    const proposed = notSkipped(195);
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 200, mtdSpend: 4200, monthlyBudget, daysRemaining: 9,
+    });
+    expect(result.skipped).toBe(false);
+    expect(result.newDailyBudget).toBe(195);
   });
 
   test('on-pace (dead zone, already skipped) + any engine output → pass through', () => {
     const proposed = skipped('dead_zone:on_pace_within_2pct');
-    const result = enforceDirectionInvariant({ variance: 0.005, proposed, currentDailyBudget });
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 100, mtdSpend: 3000, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(true);
     expect(result.reason).toBe('dead_zone:on_pace_within_2pct');
   });
 
-  test('zero variance + engine returns same budget → pass through', () => {
-    const proposed = notSkipped(100);   // no change
-    const result = enforceDirectionInvariant({ variance: 0, proposed, currentDailyBudget });
+  test('engine returns exact same budget (no change) → pass through even when projected overspend', () => {
+    const proposed = notSkipped(400); // no change
+    const result = enforceDirectionInvariant({
+      proposed, currentDailyBudget: 400, mtdSpend: 3000, monthlyBudget, daysRemaining: 9,
+    });
     expect(result.skipped).toBe(false);
-    expect(result.newDailyBudget).toBe(100);
+    expect(result.newDailyBudget).toBe(400);
   });
 
-  test('overpacing + engine returns exact same budget (no change) → pass through', () => {
-    const proposed = notSkipped(100);   // no change — neither increase nor decrease
-    const result = enforceDirectionInvariant({ variance: 0.10, proposed, currentDailyBudget });
-    // Not strictly an increase (100 == 100), so should pass through
-    expect(result.skipped).toBe(false);
-    expect(result.newDailyBudget).toBe(100);
-  });
-
-  test('underpacing + engine returns exact same budget (no change) → pass through', () => {
-    const proposed = notSkipped(100);   // no change
-    const result = enforceDirectionInvariant({ variance: -0.10, proposed, currentDailyBudget });
-    expect(result.skipped).toBe(false);
-    expect(result.newDailyBudget).toBe(100);
-  });
-
-  test('skipped proposal always passes through regardless of variance', () => {
-    // Already-skipped proposals don't need direction enforcement
+  test('skipped proposal always passes through regardless of projected variance', () => {
     const proposal = skipped('cooldown:24h_recent_change');
-    const resultOver = enforceDirectionInvariant({ variance: 0.15, proposed: proposal, currentDailyBudget });
-    const resultUnder = enforceDirectionInvariant({ variance: -0.15, proposed: proposal, currentDailyBudget });
-    expect(resultOver.reason).toBe('cooldown:24h_recent_change');
-    expect(resultUnder.reason).toBe('cooldown:24h_recent_change');
+    const result = enforceDirectionInvariant({
+      proposed: proposal, currentDailyBudget: 100, mtdSpend: 5000, monthlyBudget, daysRemaining: 9,
+    });
+    expect(result.reason).toBe('cooldown:24h_recent_change');
   });
 });
 
