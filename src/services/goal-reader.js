@@ -103,10 +103,18 @@ function parseRow(row) {
  */
 async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
   // Phase B: when USE_DB_GOALS is on, read from Postgres instead of Sheets.
-  // Preserves same return shape so callers (routes/pacing.js etc.) don't change.
-  const { validateEnv } = require('../utils/config');
-  const cfg = validateEnv();
-  if (cfg.useDbGoals) {
+  // Preserves same return shape so callers don't change. If the config check
+  // itself fails (e.g. missing env in tests that don't set up a full env),
+  // fall through to the Sheets path. If the flag IS on but DB is broken,
+  // THAT error should surface — the DB call is outside this try/catch.
+  let useDbGoals = false;
+  try {
+    const { validateEnv } = require('../utils/config');
+    useDbGoals = validateEnv().useDbGoals;
+  } catch (_) {
+    // Flag unknown → use sheets path
+  }
+  if (useDbGoals) {
     const store = require('./dealer-goals-store');
     const goals = await store.loadAll();
     // Map the store's shape → the DealerGoal shape readGoals callers expect
@@ -171,9 +179,13 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G'
  */
 async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
   // Phase B: when USE_DB_GOALS is on, read splits from Postgres instead of Sheets.
-  const { validateEnv } = require('../utils/config');
-  const cfg = validateEnv();
-  if (cfg.useDbGoals) {
+  // Safe-fallback on config-check failure; real DB errors still surface.
+  let useDbGoals = false;
+  try {
+    const { validateEnv } = require('../utils/config');
+    useDbGoals = validateEnv().useDbGoals;
+  } catch (_) {}
+  if (useDbGoals) {
     const store = require('./dealer-goals-store');
     const goals = await store.loadAll();
     const splits = new Map();
