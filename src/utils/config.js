@@ -73,6 +73,10 @@ function validateEnv(env = process.env) {
     // Pacing Engine v2 - controls whether the daily scheduler job runs and
     // whether /api/pacing/all returns v2 columns. false = v1 behavior unchanged.
     pacingEngineV2Enabled: env.PACING_ENGINE_V2_ENABLED === 'true',
+    // Change Alerts (R8) - independent of PACING_ENGINE_V2_ENABLED.
+    // When enabled, the daily change-alerts-runner scans Google Ads change_event
+    // and creates Freshdesk tickets for budget/campaign/ad-group/location changes.
+    changeAlertsEnabled: env.CHANGE_ALERTS_ENABLED === 'true',
   };
 
   return deepFreeze(config);

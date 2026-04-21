@@ -112,8 +112,18 @@ async function initialize() {
       )
     `);
 
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS change_alert_dedup (
+        change_resource_name TEXT NOT NULL,
+        change_date_time TIMESTAMPTZ NOT NULL,
+        freshdesk_ticket_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (change_resource_name, change_date_time)
+      )
+    `);
+
     initialized = true;
-    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples tables ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }

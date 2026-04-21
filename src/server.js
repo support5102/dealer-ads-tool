@@ -195,6 +195,23 @@ if (require.main === module) {
     console.log('[inventory-baseline] scheduler registered');
   }
 
+  // Change alerts — daily (feature-flagged independently of pacing v2)
+  if (config.changeAlertsEnabled) {
+    const scheduler = require('./services/scheduler');
+    const changeAlertsRunner = require('./services/change-alerts-runner');
+    scheduler.registerJob(
+      'change-alerts-daily',
+      async () => changeAlertsRunner.run({
+        // Stub deps until the service-account auth flow exists
+        listAccounts: async () => [],
+        getRestCtxForAccount: async () => { throw new Error('getRestCtxForAccount not wired — service-account auth needed'); },
+      }),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[change-alerts] scheduler registered (stub runner)');
+  }
+
   createApp(config).listen(PORT, () => {
     console.log(`\n⚡ Dealer Ads Tool running on port ${PORT}`);
     console.log(`   URL: ${config.app.url}\n`);

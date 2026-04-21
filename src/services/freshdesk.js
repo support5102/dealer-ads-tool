@@ -184,7 +184,57 @@ function createClient(freshdeskConfig) {
     return results;
   }
 
-  return { checkConnection, listTickets, getTicket, searchTicketsByTag, getTicketsBulk };
+  /**
+   * Creates a new Freshdesk ticket.
+   *
+   * @param {Object} params
+   * @param {string} params.subject - Ticket subject
+   * @param {string} params.description - Ticket body (HTML supported)
+   * @param {number} [params.priority=2] - 1=Low, 2=Medium, 3=High, 4=Urgent
+   * @param {number} [params.status=2] - 2=Open, 3=Pending, etc.
+   * @param {string[]} [params.tags=[]] - Tags to apply
+   * @param {string} [params.assigneeEmail] - Agent email to assign to (non-fatal if not found)
+   * @returns {Promise<{id: number, url: string}>} Created ticket ID and URL
+   */
+  async function createTicket(params) {
+    const { subject, description, priority = 2, status = 2, tags = [], assigneeEmail } = params;
+    const body = {
+      subject,
+      description,
+      priority,
+      status,
+      tags,
+      email: 'ai@savvydealer.com',  // source
+    };
+    if (assigneeEmail) {
+      // Lookup the responder_id by email first
+      try {
+        const agentsRes = await http.get(`/agents?email=${encodeURIComponent(assigneeEmail)}`);
+        if (agentsRes.data && agentsRes.data[0] && agentsRes.data[0].id) {
+          body.responder_id = agentsRes.data[0].id;
+        }
+      } catch (_) { /* non-fatal — ticket unassigned if lookup fails */ }
+    }
+    const res = await http.post('/tickets', body);
+    return { id: res.data.id, url: `https://${domain}.freshdesk.com/a/tickets/${res.data.id}` };
+  }
+
+  return { checkConnection, listTickets, getTicket, searchTicketsByTag, getTicketsBulk, createTicket };
 }
 
-module.exports = { createClient, PRIORITY_LABELS, STATUS_LABELS };
+/**
+ * Returns a Freshdesk client built from env config.
+ * Returns null if Freshdesk is not configured.
+ */
+function getDefaultClient() {
+  try {
+    const { validateEnv } = require('../utils/config');
+    const cfg = validateEnv();
+    if (!cfg.freshdesk || !cfg.freshdesk.apiKey) return null;
+    return createClient(cfg.freshdesk);
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = { createClient, getDefaultClient, PRIORITY_LABELS, STATUS_LABELS };
