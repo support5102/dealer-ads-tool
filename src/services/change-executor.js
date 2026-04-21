@@ -115,6 +115,18 @@ async function applyChange(client, change, dryRun) {
   const { type, campaignName, adGroupName, details } = change;
   const customerId = getCustomerId(client);
 
+  // DEV_MODE hard block: on the staging instance, physically refuse any
+  // non-dry-run mutation. Returns a dry-run-style result so the UI still
+  // shows something intelligible instead of throwing.
+  if (!dryRun) {
+    try {
+      const { validateEnv } = require('../utils/config');
+      if (validateEnv().devMode) {
+        return `[DEV MODE] Mutation blocked: ${type} on ${campaignName || customerId}. Staging environment — set DEV_MODE=false or use prod to make real changes.`;
+      }
+    } catch (_) { /* config unreadable in tests — fall through, tests don't trigger mutations anyway */ }
+  }
+
   if (dryRun) {
     if (type === 'create_shared_budget') {
       const camps = details?.campaignNames?.length ? ` and assign ${details.campaignNames.length} campaign(s)` : '';

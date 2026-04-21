@@ -92,6 +92,27 @@ function createApp(config) {
     res.redirect('/command-center.html');
   });
 
+  // ── DEV MODE banner injector ──
+  // Adds a bright red "DEV ENVIRONMENT" bar to every HTML page when DEV_MODE=true
+  // so the operator can't mistake a staging tab for a production tab.
+  if (config.devMode) {
+    app.use((req, res, next) => {
+      const url = req.path;
+      // Only instrument HTML file requests (ends in .html or is root)
+      if (!url.endsWith('.html') && url !== '/') return next();
+      const fs = require('fs');
+      const htmlFile = url === '/' ? 'command-center.html' : url.replace(/^\//, '');
+      const filePath = path.join(__dirname, '..', 'public', htmlFile);
+      fs.readFile(filePath, 'utf8', (err, html) => {
+        if (err) return next();
+        const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;font-weight:700;text-align:center;padding:6px;font-family:system-ui,sans-serif;letter-spacing:0.5px;box-shadow:0 2px 8px rgba(0,0,0,0.4);">⚠ DEV ENVIRONMENT — mutations to Google Ads are blocked. Changes here do not affect production.</div><style>body{padding-top:32px !important;}</style>`;
+        const modified = html.replace(/<body(\s[^>]*)?>/i, m => `${m}${banner}`);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(modified);
+      });
+    });
+  }
+
   // ── Static files ──
   app.use(express.static(path.join(__dirname, '..', 'public')));
 

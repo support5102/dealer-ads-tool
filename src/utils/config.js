@@ -80,6 +80,10 @@ function validateEnv(env = process.env) {
     // DB Goals (Phase B) - when true, goal-reader reads from Postgres-backed
     // dealer-goals-store instead of Google Sheets. false = sheet-based path unchanged.
     useDbGoals: env.USE_DB_GOALS === 'true',
+    // DEV_MODE=true blocks ALL mutations to external systems (Google Ads,
+    // Freshdesk tickets). Set on the staging Cloud Run service so dev clicks
+    // can't accidentally touch real dealer accounts or create real tickets.
+    devMode: env.DEV_MODE === 'true',
   };
 
   return deepFreeze(config);
