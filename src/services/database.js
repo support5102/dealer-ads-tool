@@ -84,8 +84,36 @@ async function initialize() {
       )
     `);
 
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS dealer_site_mappings (
+        dealer_name TEXT PRIMARY KEY,
+        site_id INTEGER NOT NULL,
+        live_url TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS dealer_inventory_baseline (
+        dealer_name TEXT PRIMARY KEY,
+        rolling_90day_avg DECIMAL(10,2) NOT NULL,
+        last_sample_count INTEGER,
+        last_sample_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS dealer_inventory_samples (
+        dealer_name TEXT NOT NULL,
+        sampled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        new_vin_count INTEGER NOT NULL,
+        PRIMARY KEY (dealer_name, sampled_at)
+      )
+    `);
+
     initialized = true;
-    console.log('Database initialized: change_history, dealer_groups, dealer_group_members tables ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }
