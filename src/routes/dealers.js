@@ -249,7 +249,10 @@ function createDealersRouter(config) {
         return validateEnv();
       })();
 
-      const spreadsheetId = cfg.googleSheets && cfg.googleSheets.spreadsheetId;
+      // Config object doesn't namespace googleSheets — same pattern as other
+      // sheet-consuming routes (auth.js, budget-adjustments.js) uses process.env
+      // directly.
+      const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
       if (!spreadsheetId) {
         return res.status(500).json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID not configured' });
       }
