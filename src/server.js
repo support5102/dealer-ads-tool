@@ -13,6 +13,7 @@
 
 const express = require('express');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const cors    = require('cors');
 const path    = require('path');
 
@@ -61,7 +62,19 @@ function createApp(config) {
     origin:      config.app.url,
     credentials: true,
   }));
+  // Session store: Postgres-backed when DATABASE_URL is set (persistent across
+  // Cloud Run scale-to-zero); in-memory fallback for local dev without DB.
+  const sessionPool = database.getPool();
+  const sessionStore = sessionPool
+    ? new pgSession({
+        pool: sessionPool,
+        tableName: 'user_sessions',
+        createTableIfMissing: true,
+        pruneSessionInterval: 60 * 60, // prune expired rows hourly
+      })
+    : undefined;
   app.use(session({
+    store:             sessionStore,
     secret:            config.session.secret,
     resave:            false,
     saveUninitialized: false,
@@ -69,7 +82,7 @@ function createApp(config) {
       secure:   isProduction,
       httpOnly: true,
       sameSite: 'lax',
-      maxAge:   24 * 60 * 60 * 1000, // 24 hours
+      maxAge:   30 * 24 * 60 * 60 * 1000, // 30 days
     },
   }));
 
