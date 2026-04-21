@@ -461,6 +461,9 @@ function composeRationale({
  * @param {number} params.year
  * @param {number} params.month
  * @param {number} params.currentDay
+ * @param {Object} [params.restCtx] - Optional. When provided, triggers R6 diagnostic analyzer.
+ *   Must be { accessToken, developerToken, customerId, loginCustomerId }.
+ * @param {Object} [params._googleAds] - Optional injected google-ads module for testing.
  * @returns {Promise<Object>} Structured recommendation (see spec Section 4)
  */
 async function run(params) {
@@ -476,6 +479,8 @@ async function run(params) {
     year,
     month,
     currentDay,
+    // R6: optional REST context + optional injected googleAds module (for testing)
+    // restCtx and _googleAds are accessed via params.restCtx / params._googleAds below
   } = params;
 
   const { dealerName, monthlyBudget, pacingCurveId } = goal;
@@ -613,6 +618,39 @@ async function run(params) {
     };
   }
 
+  // ── Step 6b: R6 Diagnostic analyzer ──────────────────────────────────────
+  // Run ONLY for campaigns where shared budget is not binding AND IS is below band.
+  // restCtx is optional — only run if caller provided it (backward compat with Phase 3).
+  const diagnostics = [];
+  if (params.restCtx) {
+    const { analyze } = require('./diagnostic-analyzer');
+    const nonBindingBudgetResourceNames = new Set(
+      sharedBudgetBindings.filter(b => !b.binding).map(b => b.resourceName)
+    );
+    const campaignsInNonBindingBudget = new Set();
+    for (const sb of params.sharedBudgets || []) {
+      if (nonBindingBudgetResourceNames.has(sb.resourceName) && Array.isArray(sb.campaigns)) {
+        sb.campaigns.forEach(c => campaignsInNonBindingBudget.add(String(c.id || c.campaignId || c)));
+      }
+    }
+    for (const isItem of isAssessments) {
+      if (isItem.status === 'below_band' && campaignsInNonBindingBudget.has(String(isItem.campaignId))) {
+        try {
+          const campaignDiagnostics = await analyze({
+            restCtx: params.restCtx,
+            campaignId: isItem.campaignId,
+            campaignName: isItem.campaignName,
+            campaignType: isItem.type,
+            _googleAds: params._googleAds,
+          });
+          diagnostics.push(...campaignDiagnostics);
+        } catch (err) {
+          console.warn(`[recommender-v2] diagnostic failed for campaign ${isItem.campaignId}:`, err.message);
+        }
+      }
+    }
+  }
+
   // ── Step 7: R7 Rationale ──────────────────────────────────────────────────
   // Build inventory object for rationale (normalize field names)
   const inventoryForRationale = inventory
@@ -640,6 +678,11 @@ async function run(params) {
     clampedBy,
   });
 
+  // Append diagnostic rationale lines
+  for (const diag of diagnostics) {
+    rationale.push(`Diagnostic finding (${diag.severity}): ${diag.message}`);
+  }
+
   // ── Final output shape (spec Section 4) ───────────────────────────────────
   return {
     dealerName,
@@ -654,7 +697,7 @@ async function run(params) {
     inventory: inventoryForRationale,
     recommendation,
     rationale,
-    diagnostics: [],  // Phase 4 will populate this
+    diagnostics,
     clampedBy,
     source: 'pacing_engine_v2',
     // Exposed for callers that want per-campaign breakdown

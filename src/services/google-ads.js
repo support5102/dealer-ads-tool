@@ -1294,6 +1294,33 @@ async function getGeographicPerformance(restCtx, campaignIds) {
   }
 }
 
+/**
+ * Fetches location targeting criteria counts for a specific campaign.
+ * Used by the R6 diagnostic analyzer to detect narrow geo targeting.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @param {string} campaignId - Campaign ID to query
+ * @returns {Promise<number>} Count of LOCATION criteria for this campaign
+ */
+async function getCampaignLocations(restCtx, campaignId) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign_criterion.location.geo_target_constant,
+              campaign.id
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'LOCATION'
+         AND campaign.id = '${campaignId}'`,
+      restCtx.loginCustomerId
+    );
+    return rows.length;
+  } catch (err) {
+    console.warn('getCampaignLocations failed (non-fatal):', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -1328,4 +1355,6 @@ module.exports = {
   getKeywordDiagnostics,
   getCampaignDiagnostics,
   getSearchTermReport,
+  // R6: diagnostic location count
+  getCampaignLocations,
 };

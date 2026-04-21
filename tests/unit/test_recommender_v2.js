@@ -839,3 +839,100 @@ describe('IS_TARGETS constant', () => {
     expect(IS_TARGETS.service).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — R6 Diagnostic integration in run()
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 4 — R6 Diagnostic integration in run()', () => {
+  // Shared fake googleAds module that returns "clean" data (nothing triggers)
+  function cleanGoogleAds() {
+    return {
+      getKeywordDiagnostics: async () => [],
+      getAdCopy: async () => [],
+      getCampaignLocations: async () => 5,
+      getAdSchedules: async () => [],
+      getKeywordPerformance: async () => [],
+      getCampaignNegatives: async () => [],
+      getSearchTermReport: async () => [],
+    };
+  }
+
+  test('when restCtx is missing, diagnostics are empty (Phase 3 behavior preserved)', async () => {
+    const params = baseParams();
+    // No restCtx provided
+    const result = await run(params);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test('when restCtx present but no campaigns meet trigger conditions, analyzer NOT called', async () => {
+    // Shared budget is BINDING (dailyBudget = 20, trailing avg = 20, so NOT headroom > 1.5x)
+    // and IS is in-band — neither condition for R6 met
+    const analyzerSpy = jest.fn().mockResolvedValue([]);
+
+    const params = baseParams({
+      restCtx: { accessToken: 'tok', developerToken: 'dev', customerId: '123' },
+      sharedBudgets: [{
+        resourceName: 'sb1',
+        name: 'Test Budget',
+        dailyBudget: 20,   // 20 vs trailing avg 20 → ratio 1.0 → binding
+        campaigns: [{ campaignId: '1' }, { campaignId: '2' }, { campaignId: '3' }],
+      }],
+      impressionShare: {
+        '1': { is: 95 },   // brand in_band (brand ≥ 90)
+        '2': { is: 40 },   // regional in_band (30-50)
+        '3': { is: 85 },   // vla in_band (≥ 80)
+      },
+      campaignSpend: [
+        { campaignId: '1', campaignName: 'Test Brand', status: 'ENABLED', spend: 200 },
+        { campaignId: '2', campaignName: 'Test Regional', status: 'ENABLED', spend: 200 },
+        { campaignId: '3', campaignName: 'Test VLA', status: 'ENABLED', spend: 200 },
+      ],
+      _googleAds: cleanGoogleAds(),
+    });
+
+    const result = await run(params);
+    // Budget is binding (no headroom), IS is in-band → no campaigns qualify for R6
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test('when restCtx present AND non-binding budget AND IS below band → analyzer runs and returns diagnostic', async () => {
+    // Shared budget NOT binding: dailyBudget=500, trailing avg = 100/21 ≈ 4.76 → 500 > 1.5×4.76
+    // IS below band: VLA campaign at 60% (target ≥ 80) → below_band
+    // QS check: campaign has 2 keywords both with QS ≤ 4 → fires
+    const ga = {
+      ...cleanGoogleAds(),
+      getKeywordDiagnostics: async () => [
+        { campaignName: 'Test VLA', qualityScore: 3 },
+        { campaignName: 'Test VLA', qualityScore: 4 },
+      ],
+    };
+
+    const params = baseParams({
+      restCtx: { accessToken: 'tok', developerToken: 'dev', customerId: '123' },
+      sharedBudgets: [{
+        resourceName: 'sb1',
+        name: 'Main Budget',
+        dailyBudget: 500,   // large — not binding vs small trailing avg
+        campaigns: [{ campaignId: '3' }],
+      }],
+      impressionShare: {
+        '3': { is: 60 },   // VLA below_band (target ≥ 80)
+      },
+      campaignSpend: [
+        { campaignId: '1', campaignName: 'Test Brand', status: 'ENABLED', spend: 33 },
+        { campaignId: '2', campaignName: 'Test Regional', status: 'ENABLED', spend: 34 },
+        { campaignId: '3', campaignName: 'Test VLA', status: 'ENABLED', spend: 33 },
+      ],
+      _googleAds: ga,
+    });
+
+    const result = await run(params);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].check).toBe('quality_score');
+    expect(result.diagnostics[0].severity).toBe('high');
+    // Rationale should include the diagnostic finding
+    const hasRationaleLine = result.rationale.some(line => line.includes('Diagnostic finding'));
+    expect(hasRationaleLine).toBe(true);
+  });
+});
