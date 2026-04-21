@@ -282,7 +282,8 @@ async function applyChange(client, change, dryRun) {
 | `PORT` | `3000` | Server listen port |
 | `ANTHROPIC_API_KEY` | (required) | Claude API key for task parsing |
 | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` | Claude model for task parsing |
-| `PACING_ENGINE_V2_ENABLED` | `false` | Enables daily pacing scheduler + new "since last change" overview columns |
+| `PACING_ENGINE_V2_ENABLED` | `false` | Enables daily pacing scheduler + new "since last change" overview columns + Pacing Recommender v2 delegation |
+| `CHANGE_ALERTS_ENABLED` | `false` | Enables R8 change-detection alerts — daily scan of Google Ads `change_event` + Freshdesk ticket creation for budget/campaign/ad-group/location changes. Independent of the pacing flag. |
 
 ### Key Files
 
@@ -299,7 +300,15 @@ async function applyChange(client, change, dryRun) {
 | `src/services/pacing-engine-v2.js` | Pacing Engine v2 — damped daily controller (`proposeAdjustment` + `runForAccount`) |
 | `src/services/pacing-engine-runner.js` | Pacing Engine v2 — daily scheduler entry point |
 | `src/services/pacing-engine-deps.js` | Pacing Engine v2 — enriches route pacing results with `currentDailyBudget` + `bidStrategyType` for the advisory hook |
-| `src/services/pacing-fetcher.js` | Per-account pacing data fetcher (spend, curve target, pacingSinceLastChange) |
+| `src/services/pacing-fetcher.js` | Per-account pacing data fetcher (spend, curve target, pacingSinceLastChange). When v2 flag is on, enriches with inventory tier. |
+| `src/services/recommender-v2.js` | Pacing Recommender v2 — wraps pacing-engine-v2 + applies R1 direction-invariant, R3 IS targeting, R4 shared-budget-binding, R5 campaign-weight reshape, R7 rationale composition |
+| `src/services/diagnostic-analyzer.js` | Pacing Recommender v2 — R6 diagnostic checks (QS, ad disapproval, narrow geo, ad schedule, low bids, negative-keyword block, fall-through) |
+| `src/services/savvy-inventory.js` | Savvy Incentive API wrapper — new-VIN count per dealer, 4h cache |
+| `src/services/site-id-registry.js` | Dealer → Savvy site_id mapping (DB-backed, normalized fuzzy lookup) |
+| `src/services/inventory-baseline-store.js` | Rolling 90-day new-inventory baseline per dealer + tier classifier |
+| `src/services/inventory-baseline-runner.js` | Daily scheduled job — samples inventory for all mapped dealers |
+| `src/services/change-alerts-runner.js` | R8 change-detection runner — scans Google Ads change_event, creates Freshdesk tickets for budget/campaign/ad-group/location changes |
+| `src/services/freshdesk.js` | Freshdesk API client — ticket listing + now `createTicket` for R8 alerts |
 | `src/middleware/auth.js` | requireAuth middleware |
 | `src/middleware/error-handler.js` | Centralized error response formatting |
 | `src/utils/config.js` | Environment variable validation |

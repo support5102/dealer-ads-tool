@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-04-20
-**Current Phase:** Pacing Engine v2 (feat branch) — CODE COMPLETE (advisory mode), pending final review + merge + deploy
+**Last Updated:** 2026-04-21
+**Current Phase:** Pacing Recommender v2 (feat/pacing-recs-v2) — CODE COMPLETE, pending merge + deploy. Pacing Engine v2 shipped 2026-04-20.
 
 ---
 
@@ -29,13 +29,42 @@
 | 17 | Light Mode & UI | ✅ COMPLETE | Full light/dark mode, dealer filtering, theme toggle on all pages |
 | 18 | Logic Hardening & Features | ✅ COMPLETE | Overpacing never increases, reconciliation gated, 4-agent Opus audit, ad copy fixes, AI headlines, dismiss recs, budget splits, pausable campaigns actionable (806 tests) |
 | 19 | Campaign Builder Rebuild | ✅ COMPLETE | Vanilla JS rebuild, Command Center merged Task Manager + Builder (commit `d7699ac`) |
-| 20 | Pacing Engine v2 | ✅ CODE COMPLETE | Damped daily controller on branch `feat/pacing-engine-v2` — 13/14 tasks done, 19 commits, pending final review + merge + deploy |
+| 20 | Pacing Engine v2 | ✅ SHIPPED | Damped daily controller — merged to main + deployed 2026-04-20 (revision dealer-ads-tool-00069-sql). PR #2. |
+| 21 | Pacing Recommender v2 | 🟡 CODE COMPLETE | Accurate recommender w/ inventory (Savvy API) + IS targets + diagnostics + R8 change-detection alerts on branch `feat/pacing-recs-v2` — 7 commits (Phases 1-7), 202 new tests, pending merge + deploy |
 
 ---
 
 ## Current Phase Detail
 
-### Phase 20: Pacing Engine v2 — CODE COMPLETE (branch `feat/pacing-engine-v2`)
+### Phase 21: Pacing Recommender v2 — CODE COMPLETE (branch `feat/pacing-recs-v2`)
+
+**Goal:** Replace the existing recommendations system (users complained "sucks and isn't accurate") with one that: never suggests wrong direction, factors inventory, honors IS targets by campaign type, detects non-binding shared budgets, narrows down root causes via diagnostic checks, and creates Freshdesk tickets when someone edits things directly in Google Ads.
+
+**Completed (7 phases, 7 commits, 1323 passing tests / 23 pre-existing failing):**
+- [x] **Phase 1** Foundation — site-id registry + Savvy Inventory API wrapper + DB tables (commit `d76d66d`, +32 tests)
+- [x] **Phase 2** Inventory baseline + 4-tier classifier + pacing-fetcher enrichment (commit `d506583`, +77 tests)
+- [x] **Phase 3** Recommender core — R1 direction-invariant + R3 IS targets + R4 budget-binding + R5 campaign weights + R7 rationale (commit `1685d8f`, +63 tests)
+- [x] **Phase 4** Diagnostic analyzer — 7 checks in priority order, first-match-wins (commit `4662b2d`, +39 tests)
+- [x] **Phase 5** Flag-gated delegation from `generateRecommendation` to `recommender-v2` (commit `c61b3a0`, +10 tests)
+- [x] **Phase 6** Per-dealer UX — `pacing.html` renders V2 shape with inventory badge + rationale + diagnostics (commit `a8cb3d6`, no new tests — DOM only)
+- [x] **Phase 7** Change alerts runner (R8) — daily Freshdesk ticketing for budget/campaign/ad-group/location edits (commit `5dcf24a`, +13 tests)
+
+**Remaining:** Push, PR, merge, deploy. Same flow as pacing-v2.
+
+**Flags:**
+- `PACING_ENGINE_V2_ENABLED=true` — activates V2 recommender (delegation happens in generateRecommendation)
+- `CHANGE_ALERTS_ENABLED=true` — activates R8 daily change-detection runner (independent)
+
+**Known deferred items (from spec):**
+- R8 scheduler runs a stub — real service-account auth + account iteration is a future phase (same deferral as pacing-v2's scheduler)
+- URL-derived dealer names in site-id-registry seed are single-concatenated ("Alanjayfordofsebring"); fuzzy lookup handles this but operator should correct via future admin UI
+- `checkNegativeKeywordBlock` diagnostic uses substring match heuristic (no Google Ads API for "which negative blocked which query")
+
+**Continuation:** Everything in spec doc `.claude/docs/2026-04-21-pacing-recs-v2-spec.md`. Delete after merge.
+
+---
+
+### Phase 20: Pacing Engine v2 — SHIPPED (branch `feat/pacing-engine-v2` merged as PR #2)
 
 **Goal:** Replace weekly pacing with a damped daily budget controller. Curves per account (linear default, `alanJay9505` step 95/105). Three automation modes: `auto_apply` / `one_click` / `advisory`. Safety rails: ±20% cap, freeze last 2 days, 24h/72h cooldown, dead-zone, floor/ceiling.
 
