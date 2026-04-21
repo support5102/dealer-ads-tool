@@ -6,6 +6,14 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// Encode a JS value as a JSON literal safe to embed inside a double-quoted
+// HTML attribute (e.g. onclick="fn(${jsAttr(name)})").
+// Without this, names containing spaces or quotes would close the attribute
+// early and break inline handlers.
+function jsAttr(val) {
+  return JSON.stringify(val).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 function fmt(n) {
   if (n == null) return '—';
   return '$' + Number(n).toLocaleString();
@@ -101,7 +109,7 @@ function renderDealer(d, isOpen) {
 
   return `
 <div class="dealer-item${openClass}" data-dealer-name="${esc(d.dealerName)}">
-  <div class="dealer-header" onclick="toggleDealer(${JSON.stringify(d.dealerName)})">
+  <div class="dealer-header" onclick="toggleDealer(${jsAttr(d.dealerName)})">
     <span class="dealer-chevron">&#9654;</span>
     <span class="dealer-name-badge">${esc(d.dealerName)}</span>
     <span class="budget-badge">${fmt(d.monthlyBudget)}</span>
@@ -152,7 +160,7 @@ function renderDealer(d, isOpen) {
           <input type="text" id="edit-miscNotes-${encoded}" value="${esc(d.miscNotes || '')}" placeholder="optional notes" maxlength="500"/>
         </div>
       </div>
-      <button class="btn-sm" onclick="saveNonBudgetFields(${JSON.stringify(d.dealerName)})">Save Settings</button>
+      <button class="btn-sm" onclick="saveNonBudgetFields(${jsAttr(d.dealerName)})">Save Settings</button>
       <div id="editFeedback-${encoded}"></div>
     </div>
 
@@ -162,15 +170,15 @@ function renderDealer(d, isOpen) {
       <div class="budget-edit-row">
         <div>
           <span class="field-label">New Budget ($)</span>
-          <input type="number" id="budget-${encoded}" value="${d.monthlyBudget != null ? d.monthlyBudget : ''}" min="1" step="1" oninput="onBudgetInput(${JSON.stringify(d.dealerName)})"/>
+          <input type="number" id="budget-${encoded}" value="${d.monthlyBudget != null ? d.monthlyBudget : ''}" min="1" step="1" oninput="onBudgetInput(${jsAttr(d.dealerName)})"/>
         </div>
         <div style="flex:1">
           <span class="field-label">Note (required, min 5 chars)</span>
-          <textarea id="note-${encoded}" placeholder="Why is this changing?" maxlength="500" oninput="onBudgetInput(${JSON.stringify(d.dealerName)})"></textarea>
+          <textarea id="note-${encoded}" placeholder="Why is this changing?" maxlength="500" oninput="onBudgetInput(${jsAttr(d.dealerName)})"></textarea>
         </div>
       </div>
       <div style="margin-top:8px">
-        <button class="btn-sm" id="budgetSaveBtn-${encoded}" onclick="updateBudget(${JSON.stringify(d.dealerName)})" disabled>Save Budget</button>
+        <button class="btn-sm" id="budgetSaveBtn-${encoded}" onclick="updateBudget(${jsAttr(d.dealerName)})" disabled>Save Budget</button>
       </div>
       <div id="budgetFeedback-${encoded}"></div>
     </div>
@@ -179,7 +187,7 @@ function renderDealer(d, isOpen) {
     <div class="body-section">
       <div class="section-label">
         Budget History
-        ${history == null ? `<button class="load-history-btn" onclick="loadAndShowHistory(${JSON.stringify(d.dealerName)})">Load</button>` : ''}
+        ${history == null ? `<button class="load-history-btn" onclick="loadAndShowHistory(${jsAttr(d.dealerName)})">Load</button>` : ''}
       </div>
       <div id="historyContent-${encoded}">${historyHtml}</div>
     </div>
@@ -187,7 +195,7 @@ function renderDealer(d, isOpen) {
     <!-- Footer: delete -->
     <div class="dealer-footer">
       <span></span>
-      <button class="btn-danger" onclick="deleteDealer(${JSON.stringify(d.dealerName)})">Delete dealer</button>
+      <button class="btn-danger" onclick="deleteDealer(${jsAttr(d.dealerName)})">Delete dealer</button>
     </div>
 
   </div>
