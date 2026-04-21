@@ -754,6 +754,33 @@ function distributeAccountBudget({ pacing, dedicatedBudgets, sharedBudgets, impr
  * @returns {Object} Full recommendation with pacing, adjustments, and status
  */
 function generateRecommendation(params) {
+  // Phase 5: Flag-gated delegation to recommender-v2.
+  // When enabled, the new system runs; otherwise V1 logic below executes unchanged.
+  try {
+    const { validateEnv } = require('../utils/config');
+    const cfg = validateEnv();
+    if (cfg.pacingEngineV2Enabled && params.currentDailyBudget != null) {
+      const recommenderV2 = require('./recommender-v2');
+      return recommenderV2.run({
+        goal: params.goal,
+        campaignSpend: params.campaignSpend,
+        sharedBudgets: params.sharedBudgets,
+        impressionShare: params.impressionShare,
+        inventory: params.inventory || null,
+        currentDailyBudget: params.currentDailyBudget,
+        bidStrategyType: params.bidStrategyType || null,
+        lastChangeTimestamp: params.changeDate ? `${params.changeDate}T00:00:00Z` : null,
+        year: params.year,
+        month: params.month,
+        currentDay: params.currentDay,
+        restCtx: params.restCtx || null,
+      });
+    }
+  } catch (err) {
+    console.warn('[recommender] V2 delegation check failed, falling back to V1:', err.message);
+  }
+
+  // ──────────── existing V1 logic below this point, unchanged ────────────
   const {
     goal,
     campaignSpend,

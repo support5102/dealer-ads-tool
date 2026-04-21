@@ -12,6 +12,9 @@
 const googleAds = require('./google-ads');
 const { calculatePacing, calculateSevenDayTrend, calculateProjection, daysInMonth } = require('./pacing-calculator');
 const { cumulativeTarget } = require('./pacing-curve');
+const config = (() => {
+  try { return require('../utils/config').validateEnv(); } catch { return { pacingEngineV2Enabled: false }; }
+})();
 
 /**
  * Fetches spend data from Google Ads and computes pacing metrics for one account.
@@ -74,6 +77,34 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     today: now,
   });
 
+  // ── V2 inventory enrichment (feature-flagged, non-fatal) ─────────────────
+  let inventoryEnrichment = null;
+  if (config.pacingEngineV2Enabled) {
+    try {
+      const siteIdRegistry = require('./site-id-registry');
+      const savvyInventory = require('./savvy-inventory');
+      const baselineStore = require('./inventory-baseline-store');
+
+      const mapping = siteIdRegistry.siteIdFor(account.name);
+      if (mapping && mapping.siteId) {
+        const newVinCount = await savvyInventory.getNewVinCount(mapping.siteId);
+        const baseline = await baselineStore.getBaseline(account.name);
+        const tier = baselineStore.classifyTier({
+          newVinCount,
+          baseline,
+        });
+        inventoryEnrichment = {
+          newVinCount,
+          baselineRolling90Day: baseline ? baseline.rolling90DayAvg : null,
+          tier,
+        };
+      }
+    } catch (err) {
+      // Inventory enrichment is non-fatal. Log and continue.
+      console.warn(`[pacing-fetcher] inventory enrichment failed for ${account.name}:`, err.message);
+    }
+  }
+
   return {
     customerId: account.id,
     dealerName: account.name,
@@ -95,6 +126,7 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     pacingMode: goal.pacingMode || 'one_click',
     groupKey: group.key,
     groupLabel: group.label,
+    ...(inventoryEnrichment ? { inventory: inventoryEnrichment } : {}),
   };
 }
 

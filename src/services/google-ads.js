@@ -1093,6 +1093,49 @@ async function getAdGroupAdCounts(restCtx) {
 }
 
 /**
+ * Fetches recent change events for budget edits, campaign changes, ad group changes,
+ * and location targeting changes. Used by the R8 change-alerts runner.
+ *
+ * @param {Object} restCtx
+ * @param {number} [sinceHours=28] - Look-back window in hours (28 = daily run with 4h slack)
+ * @returns {Promise<Object[]>} Raw change_event rows with resource_type, old/new values,
+ *   change_date_time, changed_fields, user_email
+ */
+async function getRecentChangeEvents(restCtx, sinceHours = 28) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT change_event.resource_name,
+            change_event.change_date_time,
+            change_event.user_email,
+            change_event.change_resource_type,
+            change_event.change_resource_name,
+            change_event.changed_fields,
+            change_event.operation,
+            change_event.old_resource,
+            change_event.new_resource
+     FROM change_event
+     WHERE change_event.change_date_time DURING LAST_14_DAYS
+       AND change_event.change_resource_type IN (
+         'CAMPAIGN_BUDGET',
+         'CAMPAIGN',
+         'AD_GROUP',
+         'CAMPAIGN_CRITERION'
+       )
+     ORDER BY change_event.change_date_time DESC
+     LIMIT 500`,
+    restCtx.loginCustomerId
+  );
+
+  const cutoff = Date.now() - sinceHours * 60 * 60 * 1000;
+  return rows.filter(row => {
+    const dt = row.changeEvent?.changeDateTime;
+    if (!dt) return false;
+    return new Date(dt.replace(' ', 'T') + 'Z').getTime() >= cutoff;
+  });
+}
+
+/**
  * Fetches the most recent budget change event this month.
  *
  * @param {Object} restCtx - REST context
@@ -1294,6 +1337,33 @@ async function getGeographicPerformance(restCtx, campaignIds) {
   }
 }
 
+/**
+ * Fetches location targeting criteria counts for a specific campaign.
+ * Used by the R6 diagnostic analyzer to detect narrow geo targeting.
+ *
+ * @param {Object} restCtx - REST context { accessToken, developerToken, customerId, loginCustomerId }
+ * @param {string} campaignId - Campaign ID to query
+ * @returns {Promise<number>} Count of LOCATION criteria for this campaign
+ */
+async function getCampaignLocations(restCtx, campaignId) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT campaign_criterion.location.geo_target_constant,
+              campaign.id
+       FROM campaign_criterion
+       WHERE campaign_criterion.type = 'LOCATION'
+         AND campaign.id = '${campaignId}'`,
+      restCtx.loginCustomerId
+    );
+    return rows.length;
+  } catch (err) {
+    console.warn('getCampaignLocations failed (non-fatal):', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -1317,6 +1387,8 @@ module.exports = {
   // Phase 12: Deep Scanner queries
   getCampaignNegatives,
   getAdGroupAdCounts,
+  // R8: change-alerts runner
+  getRecentChangeEvents,
   // Pacing: post-change tracking
   getLastBudgetChange,
   getDailySpendBreakdown,
@@ -1328,4 +1400,6 @@ module.exports = {
   getKeywordDiagnostics,
   getCampaignDiagnostics,
   getSearchTermReport,
+  // R6: diagnostic location count
+  getCampaignLocations,
 };

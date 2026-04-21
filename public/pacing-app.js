@@ -180,6 +180,8 @@ function renderDashboard(data) {
   renderMetrics(data);
   if (data.cooldown && data.cooldown.active) {
     renderCooldown(data.cooldown);
+  } else if (data.source === 'pacing_engine_v2') {
+    renderRecommendationsV2(data);
   } else {
     renderRecommendations(data.recommendations, data.budgetSummary, data.pausableCampaigns);
   }
@@ -421,6 +423,183 @@ function renderRecommendations(recs, budgetSummary, pausableCampaigns) {
       </div>
       ${rows}
       ${pausableHtml}
+    </div>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────
+// V2 RECOMMENDATION RENDERING
+// ─────────────────────────────────────────────────────────────
+
+function renderRecommendationsV2(data) {
+  const section = document.getElementById('recommendationsSection');
+  if (!section) return;
+  const diags = data.diagnostics || [];
+  section.innerHTML = `
+    <div class="dash-section v2-rec-card">
+      <div class="dash-section-header">
+        <div class="dash-section-title">Budget Recommendation</div>
+        <div class="v2-source-pill">Engine v2</div>
+      </div>
+      <div class="v2-rec-body">
+        <div class="v2-rec-header">
+          ${renderActionBadge(data.recommendation)}
+          ${renderConfidenceBadge(data.recommendation.confidence)}
+          ${data.inventory ? renderInventoryBadge(data.inventory) : ''}
+        </div>
+        ${renderPacingSummary(data.pacing)}
+        ${renderRecommendationDetails(data.recommendation)}
+        ${renderRationale(data.rationale || [])}
+        ${diags.length > 0 ? renderDiagnostics(diags) : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderActionBadge(rec) {
+  if (!rec) return '';
+  const { action, direction, newDailyBudget, changePct } = rec;
+  let cls = 'action-badge-hold';
+  let label = 'No change — on pace';
+
+  if (action === 'reduce_daily_budget') {
+    cls = 'action-badge-reduce';
+    const pct = changePct != null ? ` (${changePct.toFixed(2)}%)` : '';
+    label = `Reduce daily budget to $${fmt(newDailyBudget)}${pct}`;
+  } else if (action === 'increase_daily_budget') {
+    cls = 'action-badge-increase';
+    const pct = changePct != null ? ` (+${changePct.toFixed(2)}%)` : '';
+    label = `Increase daily budget to $${fmt(newDailyBudget)}${pct}`;
+  } else if (action === 'pause_campaign') {
+    cls = 'action-badge-pause';
+    label = 'Pause VLA campaign';
+  } else if (action === 'diagnose') {
+    cls = 'action-badge-diagnose';
+    label = 'Diagnostic issue — see below';
+  } else if (action === 'hold') {
+    cls = 'action-badge-hold';
+    label = 'No change — on pace';
+  }
+
+  return `<div class="v2-action-badge ${esc(cls)}">${esc(label)}</div>`;
+}
+
+function renderConfidenceBadge(confidence) {
+  if (!confidence) return '';
+  const cls = `confidence-${esc(confidence.toLowerCase())}`;
+  return `<div class="v2-confidence-pill ${cls}">${esc(confidence.toUpperCase())}</div>`;
+}
+
+function renderInventoryBadge(inv) {
+  if (!inv) return '';
+  const tier = (inv.tier || 'healthy').toLowerCase();
+  const tierLabels = { healthy: 'Healthy', low: 'Low', very_low: 'Very Low', critical: 'Critical' };
+  const label = `${inv.newVinCount != null ? inv.newVinCount : '--'} new VINs / ${inv.baseline != null ? inv.baseline : '--'} baseline — ${tierLabels[tier] || esc(tier)}`;
+  return `<div class="v2-inventory-badge inventory-${esc(tier)}">${esc(label)}</div>`;
+}
+
+function renderPacingSummary(pacing) {
+  if (!pacing) return '';
+  const p = pacing;
+  const paceClass = p.pacePercent != null
+    ? (p.pacePercent > 105 ? 'v2-stat-red' : p.pacePercent < 95 ? 'v2-stat-yellow' : 'v2-stat-green')
+    : '';
+  return `
+    <div class="v2-pacing-summary">
+      <div class="v2-stat">
+        <div class="v2-stat-label">MTD Spend</div>
+        <div class="v2-stat-value">$${fmt(p.mtdSpend)}</div>
+      </div>
+      <div class="v2-stat">
+        <div class="v2-stat-label">Monthly Budget</div>
+        <div class="v2-stat-value">$${fmt(p.monthlyBudget)}</div>
+      </div>
+      <div class="v2-stat">
+        <div class="v2-stat-label">Curve Target</div>
+        <div class="v2-stat-value">$${fmt(p.curveTarget)}</div>
+      </div>
+      <div class="v2-stat">
+        <div class="v2-stat-label">Pace %</div>
+        <div class="v2-stat-value ${paceClass}">${p.pacePercent != null ? p.pacePercent.toFixed(1) + '%' : '--'}</div>
+      </div>
+      <div class="v2-stat">
+        <div class="v2-stat-label">Days Remaining</div>
+        <div class="v2-stat-value">${p.daysRemaining != null ? p.daysRemaining : '--'}</div>
+      </div>
+      ${p.curveId ? `<div class="v2-stat">
+        <div class="v2-stat-label">Curve</div>
+        <div class="v2-stat-value v2-stat-mono">${esc(p.curveId)}</div>
+      </div>` : ''}
+    </div>
+  `;
+}
+
+function renderRecommendationDetails(rec) {
+  if (!rec) return '';
+  const oldBudget = rec.newDailyBudget != null && rec.change != null
+    ? rec.newDailyBudget - rec.change
+    : null;
+  const changeSign = rec.change != null ? (rec.change >= 0 ? '+' : '') : '';
+  const pctSign = rec.changePct != null ? (rec.changePct >= 0 ? '+' : '') : '';
+  const changeDir = rec.direction === 'decrease' ? 'v2-delta-decrease' : rec.direction === 'increase' ? 'v2-delta-increase' : '';
+
+  return `
+    <div class="v2-rec-details">
+      <div class="v2-detail-row">
+        <span class="v2-detail-label">Current daily budget</span>
+        <span class="v2-detail-value">$${oldBudget != null ? fmt(oldBudget) : '--'}/day</span>
+      </div>
+      <div class="v2-detail-row">
+        <span class="v2-detail-label">Recommended daily budget</span>
+        <span class="v2-detail-value v2-detail-new">$${rec.newDailyBudget != null ? fmt(rec.newDailyBudget) : '--'}/day</span>
+      </div>
+      <div class="v2-detail-row">
+        <span class="v2-detail-label">Change</span>
+        <span class="v2-detail-value ${changeDir}">
+          ${rec.change != null ? changeSign + '$' + fmt(Math.abs(rec.change)) : '--'}
+          ${rec.changePct != null ? `(${pctSign}${rec.changePct.toFixed(2)}%)` : ''}
+        </span>
+      </div>
+      ${rec.action ? `<div class="v2-detail-row">
+        <span class="v2-detail-label">Action</span>
+        <span class="v2-detail-value v2-stat-mono">${esc(rec.action)}</span>
+      </div>` : ''}
+    </div>
+  `;
+}
+
+function renderRationale(rationale) {
+  if (!rationale || rationale.length === 0) return '';
+  const items = rationale.map(s => `<li>${esc(s)}</li>`).join('');
+  return `
+    <div class="v2-rationale-section">
+      <div class="v2-section-label">Rationale</div>
+      <ul class="v2-rationale">${items}</ul>
+    </div>
+  `;
+}
+
+function renderDiagnostics(diagnostics) {
+  if (!diagnostics || diagnostics.length === 0) return '';
+  const cards = diagnostics.map(d => {
+    const sev = (d.severity || 'low').toLowerCase();
+    const details = d.details && typeof d.details === 'object'
+      ? Object.entries(d.details).slice(0, 3).map(([k, v]) =>
+          `<tr><td class="v2-diag-key">${esc(String(k))}</td><td class="v2-diag-val">${esc(String(v))}</td></tr>`
+        ).join('')
+      : '';
+    return `
+      <div class="v2-diagnostic severity-${esc(sev)}">
+        <div class="v2-diag-check">${esc(d.check || 'diagnostic')}</div>
+        <div class="v2-diag-message">${esc(d.message || '')}</div>
+        ${details ? `<table class="v2-diag-table"><tbody>${details}</tbody></table>` : ''}
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="v2-diagnostics-section">
+      <div class="v2-section-label">Diagnostics</div>
+      ${cards}
     </div>
   `;
 }

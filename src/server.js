@@ -183,6 +183,33 @@ if (require.main === module) {
       { runImmediately: false }
     );
     console.log('[pacing-engine-v2] scheduler registered (stub runner)');
+
+    // Inventory baseline — daily sampling for recommender-v2 (feature-flagged)
+    const inventoryBaselineRunner = require('./services/inventory-baseline-runner');
+    scheduler.registerJob(
+      'inventory-baseline-daily',
+      async () => inventoryBaselineRunner.run(),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[inventory-baseline] scheduler registered');
+  }
+
+  // Change alerts — daily (feature-flagged independently of pacing v2)
+  if (config.changeAlertsEnabled) {
+    const scheduler = require('./services/scheduler');
+    const changeAlertsRunner = require('./services/change-alerts-runner');
+    scheduler.registerJob(
+      'change-alerts-daily',
+      async () => changeAlertsRunner.run({
+        // Stub deps until the service-account auth flow exists
+        listAccounts: async () => [],
+        getRestCtxForAccount: async () => { throw new Error('getRestCtxForAccount not wired — service-account auth needed'); },
+      }),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[change-alerts] scheduler registered (stub runner)');
   }
 
   createApp(config).listen(PORT, () => {
