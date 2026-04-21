@@ -345,7 +345,9 @@ async function getAccountLevelDailyBudget(restCtx) {
     if (resName && seenBudgets.has(resName)) {
       // still count the strategy, but don't double-count the budget
     } else {
-      totalMicros += row.campaignBudget?.amountMicros ?? 0;
+      // Google Ads REST returns int64 fields (amount_micros) as STRINGS to preserve
+      // precision. Must coerce to Number before summing — plain += would concatenate.
+      totalMicros += Number(row.campaignBudget?.amountMicros ?? 0);
       if (resName) seenBudgets.add(resName);
     }
 

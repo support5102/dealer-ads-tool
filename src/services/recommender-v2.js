@@ -375,10 +375,25 @@ function composeRationale({
     lines.push('No budget change proposed — account is on pace.');
   } else if (newDailyBudget !== null && newDailyBudget !== undefined) {
     const verb = action === 'reduce_daily_budget' ? 'Reducing' : 'Increasing';
-    const eomEstimate = typeof monthlyBudget === 'number' ? `$${monthlyBudget.toLocaleString()}` : '?';
-    lines.push(
-      `${verb} daily budget to $${newDailyBudget.toFixed(2)} will land at ${eomEstimate} EOM.`
-    );
+    const cappedByCap = (clampedBy === 'max_increase' || clampedBy === 'max_decrease');
+    const cappedByBound = (clampedBy === 'floor' || clampedBy === 'ceiling');
+    if (cappedByBound) {
+      // Absolute bound hit — can't promise EOM landing. Be honest.
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} (clamped by absolute ${clampedBy} — won't hit EOM target this cycle; revisit after cooldown).`
+      );
+    } else if (cappedByCap) {
+      // ±20% cap — proposal is a single-step move toward target, not the full correction
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} (single-step move toward target; further adjustment may follow after cooldown).`
+      );
+    } else {
+      // Normal proposal — the math actually does land at the monthly budget
+      const eomEstimate = typeof monthlyBudget === 'number' ? `$${monthlyBudget.toLocaleString()}` : '?';
+      lines.push(
+        `${verb} daily budget to $${newDailyBudget.toFixed(2)} will land at ${eomEstimate} EOM.`
+      );
+    }
   }
 
   // 3. Single-step cap note
