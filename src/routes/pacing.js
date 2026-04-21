@@ -394,8 +394,43 @@ function createPacingRouter(config, deps = {}) {
       // Look up dealer-specific VLA/Keyword budget splits (e.g., Alan Jay stores)
       const dealerSplit = budgetSplits.get(searchName) || null;
 
+      // Fetch current daily budget + primary bid strategy for V2 recommender
+      let currentDailyBudget = null;
+      let bidStrategyType = null;
+      try {
+        const budgetInfo = await googleAds.getAccountLevelDailyBudget(restCtx);
+        currentDailyBudget = budgetInfo.totalDailyBudget;
+        bidStrategyType = budgetInfo.primaryBidStrategy;
+      } catch (err) {
+        console.warn(`[pacing] getAccountLevelDailyBudget failed for ${customerId}: ${err.message}`);
+        // Continue without — V2 will fall back to V1 if currentDailyBudget is missing
+      }
+
+      // Inventory enrichment for V2 recommender
+      let inventory = null;
+      try {
+        const cfg = require('../utils/config').validateEnv();
+        if (cfg.pacingEngineV2Enabled) {
+          const siteIdRegistry = require('../services/site-id-registry');
+          const savvyInventory = require('../services/savvy-inventory');
+          const baselineStore = require('../services/inventory-baseline-store');
+          const mapping = siteIdRegistry.siteIdFor(goal.dealerName);
+          if (mapping && mapping.siteId) {
+            const newVinCount = await savvyInventory.getNewVinCount(mapping.siteId);
+            const baseline = await baselineStore.getBaseline(goal.dealerName);
+            inventory = {
+              newVinCount,
+              baselineRolling90Day: baseline ? baseline.rolling90DayAvg : null,
+              tier: baselineStore.classifyTier({ newVinCount, baseline }),
+            };
+          }
+        }
+      } catch (err) {
+        console.warn(`[pacing] inventory enrichment failed: ${err.message}`);
+      }
+
       const now = new Date();
-      const recommendation = generateRecommendation({
+      const recommendation = await generateRecommendation({
         goal,
         campaignSpend: adjustedSpend,
         sharedBudgets,
@@ -410,6 +445,10 @@ function createPacingRouter(config, deps = {}) {
         changeDate: lastChange.changeDate,     // cooldown detection
         excludeCampaigns: excludeNames,
         geoTargets,
+        currentDailyBudget,                   // NEW — V2 requires this
+        bidStrategyType,                       // NEW — V2 bid strategy awareness
+        inventory,                             // NEW — V2 inventory-aware recs
+        restCtx,                               // NEW — enables R6 diagnostics in V2
       });
 
       // Per-campaign impression share breakdown for the dashboard
