@@ -77,6 +77,9 @@ function validateEnv(env = process.env) {
     // When enabled, the daily change-alerts-runner scans Google Ads change_event
     // and creates Freshdesk tickets for budget/campaign/ad-group/location changes.
     changeAlertsEnabled: env.CHANGE_ALERTS_ENABLED === 'true',
+    // DB Goals (Phase B) - when true, goal-reader reads from Postgres-backed
+    // dealer-goals-store instead of Google Sheets. false = sheet-based path unchanged.
+    useDbGoals: env.USE_DB_GOALS === 'true',
   };
 
   return deepFreeze(config);

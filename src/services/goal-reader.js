@@ -102,6 +102,28 @@ function parseRow(row) {
  * @throws {Error} If the Sheets API call fails
  */
 async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G') {
+  // Phase B: when USE_DB_GOALS is on, read from Postgres instead of Sheets.
+  // Preserves same return shape so callers (routes/pacing.js etc.) don't change.
+  const { validateEnv } = require('../utils/config');
+  const cfg = validateEnv();
+  if (cfg.useDbGoals) {
+    const store = require('./dealer-goals-store');
+    const goals = await store.loadAll();
+    // Map the store's shape → the DealerGoal shape readGoals callers expect
+    return goals.map(g => ({
+      dealerName: g.dealerName,
+      monthlyBudget: g.monthlyBudget,
+      baselineInventory: null,           // not in DB yet (always null in current sheet impl too)
+      dealerNotes: g.miscNotes || null,
+      freshdeskTag: null,                // not in DB yet (always null in current sheet impl)
+      newBudget: g.newBudget || null,
+      usedBudget: g.usedBudget || null,
+      pacingMode: g.pacingMode || 'one_click',
+      pacingCurveId: g.pacingCurveId || null,
+    }));
+  }
+
+  // ───── existing Sheets API logic below this point, unchanged ─────
   if (!spreadsheetId) {
     throw new Error(
       'Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID in your environment.'
@@ -148,6 +170,26 @@ async function readGoals(sheetsClient, spreadsheetId, range = 'PPC Control!A2:G'
  * @returns {Promise<Map<string, {vlaBudget: number, keywordBudget: number}>>} Map of dealer name → budget splits
  */
 async function readBudgetSplits(sheetsClient, spreadsheetId, sheetName) {
+  // Phase B: when USE_DB_GOALS is on, read splits from Postgres instead of Sheets.
+  const { validateEnv } = require('../utils/config');
+  const cfg = validateEnv();
+  if (cfg.useDbGoals) {
+    const store = require('./dealer-goals-store');
+    const goals = await store.loadAll();
+    const splits = new Map();
+    for (const g of goals) {
+      if (g.vlaBudget != null || g.keywordBudget != null) {
+        splits.set(g.dealerName.toLowerCase(), {
+          ppcBudget: g.monthlyBudget || 0,
+          vlaBudget: g.vlaBudget || 0,
+          keywordBudget: g.keywordBudget || 0,
+        });
+      }
+    }
+    return splits;
+  }
+
+  // ───── existing Sheets API logic below this point, unchanged ─────
   if (!spreadsheetId) return new Map();
 
   const range = sheetName ? `${sheetName}!A2:F` : 'A2:F';
