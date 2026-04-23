@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Account Builder v2 — Dealer Ads Tool</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet"/>
+<script src="/theme.js"></script>
+<style>
+  .inp{width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.5rem .75rem;font-size:.875rem;outline:none;background:#fff}
+  .inp:focus{box-shadow:0 0 0 2px #60a5fa}
+  .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:.5rem;font-size:.875rem;font-weight:500;cursor:pointer;transition:background .15s}
+  .btn-primary{background:#2563eb;color:#fff}
+  .btn-primary:hover{background:#1d4ed8}
+  .btn-primary:disabled{background:#93c5fd;cursor:not-allowed}
+  .btn-secondary{background:#e5e7eb;color:#111827}
+  .btn-secondary:hover{background:#d1d5db}
+  .badge{display:inline-block;padding:.15rem .5rem;border-radius:.375rem;font-size:.75rem;font-weight:500}
+  .stat{background:#f9fafb;padding:.75rem 1rem;border-radius:.5rem;border:1px solid #e5e7eb}
+  .stat-value{font-size:1.5rem;font-weight:700;color:#111827;line-height:1}
+  .stat-label{font-size:.75rem;color:#6b7280;margin-top:.25rem;text-transform:uppercase;letter-spacing:.05em}
+  .pulse-dot{width:8px;height:8px;border-radius:50%;background:#2563eb;display:inline-block;animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .log-line{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.75rem;color:#6b7280;padding:.25rem 0}
+</style>
+</head>
+<body class="bg-gray-100">
+<div style="background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:system-ui,sans-serif;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:20px;">&#x1F697;</span>
+    <span style="color:#fff;font-weight:700;font-size:15px;">Account Builder v2</span>
+    <span style="color:#94a3b8;font-size:12px;">Paste URL → Build</span>
+  </div>
+  <div style="display:flex;gap:16px;align-items:center;">
+    <a href="/command-center.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Command Center</a>
+    <a href="/pacing-overview.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Pacing</a>
+    <a href="/builder.html" style="color:#93c5fd;text-decoration:none;font-size:13px;font-weight:500;border:2px solid #7c3aed;border-radius:6px;padding:6px 14px">Legacy Builder</a>
+    <button id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid #475569;border-radius:6px;padding:4px 10px;color:#94a3b8;font-size:12px;">&#x1F319; Dark</button>
+  </div>
+</div>
+
+<div class="max-w-4xl mx-auto p-6">
+
+  <!-- STEP 1: Input -->
+  <div id="inputCard" class="bg-white rounded-lg shadow-sm p-6 mb-6">
+    <h1 class="text-xl font-bold text-gray-900 mb-1">Build a full account from a URL</h1>
+    <p class="text-sm text-gray-600 mb-4">Paste the dealer's website. Add anything else you want to force — budget, skip models, radius, make override. One click builds the whole account.</p>
+
+    <label class="block text-sm font-medium text-gray-700 mb-1">Dealer website URL <span class="text-red-500">*</span></label>
+    <input id="urlInput" type="url" class="inp mb-3" placeholder="https://www.alanjayford.com" autocomplete="off" />
+
+    <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional — free-text)</label>
+    <textarea id="notesInput" class="inp mb-4" rows="4" placeholder="Examples:&#10;  budget: $7500/month&#10;  skip: Mustang, Mach-E&#10;  25 mile radius&#10;  commercial focus&#10;  exclude Mandeville"></textarea>
+
+    <div class="flex items-center gap-3">
+      <button id="buildBtn" class="btn btn-primary" onclick="onBuild()">
+        <span>Preview plan</span>
+      </button>
+      <span id="inputStatus" class="text-sm text-gray-500"></span>
+    </div>
+  </div>
+
+  <!-- STEP 2: Plan preview -->
+  <div id="previewCard" class="bg-white rounded-lg shadow-sm p-6 mb-6 hidden">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900" id="previewDealer">—</h2>
+        <p class="text-sm text-gray-600" id="previewMeta">—</p>
+      </div>
+      <button class="btn btn-secondary" onclick="reset()">Start over</button>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="stat">
+        <div class="stat-value" id="statCampaigns">0</div>
+        <div class="stat-label">Campaigns</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statAdGroups">0</div>
+        <div class="stat-label">Ad groups</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statKeywords">0</div>
+        <div class="stat-label">Keywords</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statNegatives">0</div>
+        <div class="stat-label">Negatives</div>
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">Model campaigns <span id="modelCount" class="text-gray-500 font-normal"></span></h3>
+      <div id="modelList" class="text-sm text-gray-700 flex flex-wrap gap-2"></div>
+    </div>
+
+    <div id="competitorsBox" class="mb-4 hidden">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">Competitor conquest</h3>
+      <div id="competitorList" class="text-sm text-gray-700 flex flex-wrap gap-2"></div>
+    </div>
+
+    <div id="nearbyBox" class="mb-4 hidden">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">Regional cities</h3>
+      <div id="nearbyList" class="text-sm text-gray-700 flex flex-wrap gap-2"></div>
+    </div>
+
+    <div id="warningsBox" class="mb-4 hidden">
+      <h3 class="text-sm font-semibold text-amber-800 mb-2">Warnings</h3>
+      <ul id="warningsList" class="text-sm text-amber-900 list-disc pl-5 space-y-1"></ul>
+    </div>
+
+    <div class="border-t border-gray-200 pt-4 flex items-center gap-3">
+      <button id="downloadBtn" class="btn btn-primary" onclick="onDownloadCsv()">
+        <span>Download Ads Editor CSV</span>
+      </button>
+      <button class="btn btn-secondary" onclick="rebuild()">Rebuild with tweaked notes</button>
+      <span id="downloadStatus" class="text-sm text-gray-500"></span>
+    </div>
+  </div>
+
+  <!-- Working indicator -->
+  <div id="workingCard" class="bg-white rounded-lg shadow-sm p-6 mb-6 hidden">
+    <div class="flex items-center gap-3 mb-3">
+      <span class="pulse-dot"></span>
+      <span id="workingText" class="text-sm font-medium text-gray-700">Researching dealer…</span>
+    </div>
+    <div id="workingLog" class="border-t border-gray-100 pt-2"></div>
+  </div>
+
+  <!-- Error -->
+  <div id="errorCard" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 hidden">
+    <div class="flex items-start gap-3">
+      <span class="text-red-600 text-xl">&#9888;</span>
+      <div>
+        <h3 class="text-sm font-semibold text-red-800 mb-1">Couldn't build account</h3>
+        <p id="errorMsg" class="text-sm text-red-700"></p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+let currentInput = null;  // { url, notes } used for CSV download
+
+// ── DOM helpers ────────────────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function show(id) { $(id).classList.remove('hidden'); }
+function hide(id) { $(id).classList.add('hidden'); }
+function chip(text, color) {
+  const c = color || 'gray';
+  return `<span class="badge" style="background:${c==='red'?'#fee2e2':c==='blue'?'#dbeafe':'#f3f4f6'};color:${c==='red'?'#991b1b':c==='blue'?'#1e40af':'#374151'}">${escapeHtml(text)}</span>`;
+}
+function escapeHtml(s) {
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function logLine(text) {
+  const el = document.createElement('div');
+  el.className = 'log-line';
+  el.textContent = text;
+  $('workingLog').appendChild(el);
+}
+
+// ── Event handlers ─────────────────────────────────────────────────────────
+async function onBuild() {
+  const url = $('urlInput').value.trim();
+  const notes = $('notesInput').value;
+
+  if (!url) {
+    $('inputStatus').textContent = 'URL is required.';
+    return;
+  }
+
+  // Normalize: add https:// if missing
+  const normalUrl = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+
+  currentInput = { url: normalUrl, notes };
+
+  hide('previewCard');
+  hide('errorCard');
+  show('workingCard');
+  $('workingText').textContent = 'Researching dealer…';
+  $('workingLog').innerHTML = '';
+  logLine('Calling enricher (Claude web_search)…');
+  $('buildBtn').disabled = true;
+  $('inputStatus').textContent = '';
+
+  try {
+    const res = await fetch('/api/account-builder/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentInput),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed (HTTP ' + res.status + ')');
+    }
+
+    hide('workingCard');
+    renderPreview(data);
+    show('previewCard');
+    window.scrollTo({ top: $('previewCard').offsetTop - 20, behavior: 'smooth' });
+  } catch (err) {
+    hide('workingCard');
+    $('errorMsg').textContent = err.message;
+    show('errorCard');
+  } finally {
+    $('buildBtn').disabled = false;
+  }
+}
+
+function renderPreview(data) {
+  const { plan, profile, warnings } = data;
+
+  $('previewDealer').textContent = plan.dealer || profile.dealerName || '(unnamed)';
+
+  const metaParts = [];
+  if (plan.city && plan.state) metaParts.push(plan.city + ', ' + plan.state);
+  if (plan.platform && plan.platform !== 'unknown') metaParts.push('platform: ' + plan.platform);
+  metaParts.push('makes: ' + (plan.makes || []).join(' + '));
+  $('previewMeta').textContent = metaParts.join('  •  ');
+
+  $('statCampaigns').textContent  = plan.campaignCount || 0;
+  $('statAdGroups').textContent   = plan.adGroupCount || 0;
+  $('statKeywords').textContent   = plan.keywordCount || 0;
+  $('statNegatives').textContent  = plan.negativeCount || 0;
+
+  // Model campaigns list
+  const models = [];
+  for (const g of (data.groups || [])) {
+    for (const m of (g.models || [])) models.push(g.make + ' ' + m.name);
+  }
+  $('modelCount').textContent = models.length ? '(' + models.length + ')' : '';
+  $('modelList').innerHTML = models.map(m => chip(m, 'blue')).join('');
+
+  // Competitors
+  if (profile.competitors && profile.competitors.length) {
+    $('competitorList').innerHTML = profile.competitors.map(c => chip(c, 'red')).join('');
+    show('competitorsBox');
+  } else {
+    hide('competitorsBox');
+  }
+
+  // Nearby cities
+  if (profile.nearbyCities && profile.nearbyCities.length) {
+    $('nearbyList').innerHTML = profile.nearbyCities.map(c => chip(c)).join('');
+    show('nearbyBox');
+  } else {
+    hide('nearbyBox');
+  }
+
+  // Warnings
+  if (warnings && warnings.length) {
+    $('warningsList').innerHTML = warnings.map(w => '<li>' + escapeHtml(w) + '</li>').join('');
+    show('warningsBox');
+  } else {
+    hide('warningsBox');
+  }
+}
+
+async function onDownloadCsv() {
+  if (!currentInput) return;
+  $('downloadStatus').textContent = 'Generating CSV…';
+  $('downloadBtn').disabled = true;
+
+  try {
+    const res = await fetch('/api/account-builder/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentInput),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const nameMatch = cd.match(/filename="([^"]+)"/);
+    const filename = nameMatch ? nameMatch[1] : 'dealer_ads_editor.csv';
+
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(dlUrl);
+
+    $('downloadStatus').textContent = 'Saved ' + filename + '.';
+  } catch (err) {
+    $('downloadStatus').textContent = 'Error: ' + err.message;
+  } finally {
+    $('downloadBtn').disabled = false;
+  }
+}
+
+function rebuild() {
+  hide('previewCard');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  $('notesInput').focus();
+}
+
+function reset() {
+  currentInput = null;
+  $('urlInput').value = '';
+  $('notesInput').value = '';
+  hide('previewCard');
+  hide('errorCard');
+  $('inputStatus').textContent = '';
+  $('downloadStatus').textContent = '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  $('urlInput').focus();
+}
+
+// Expose for inline onclick
+window.onBuild = onBuild;
+window.onDownloadCsv = onDownloadCsv;
+window.rebuild = rebuild;
+window.reset = reset;
+
+// Focus URL on load
+document.addEventListener('DOMContentLoaded', () => $('urlInput').focus());
+</script>
+</body>
+</html>
