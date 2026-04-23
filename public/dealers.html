@@ -413,10 +413,11 @@
     <div id="createFeedback"></div>
   </div>
 
+  <!-- Empty state is a SIBLING of the list, not a child — otherwise list.innerHTML resets destroy its reference -->
+  <div class="empty-dealers" id="emptyState" style="display:none">No dealers yet. Create one above.</div>
+
   <!-- Dealer list -->
-  <div id="dealerList" class="dealer-list">
-    <div class="empty-dealers" id="emptyState" style="display:none">No dealers yet. Create one above.</div>
-  </div>
+  <div id="dealerList" class="dealer-list"></div>
 
 </div>
 

@@ -75,13 +75,12 @@ function render() {
   const empty = document.getElementById('emptyState');
 
   if (state.dealers.length === 0) {
-    empty.style.display = 'block';
-    list.innerHTML = '';
-    list.appendChild(empty);
+    if (empty) empty.style.display = 'block';
+    if (list) list.innerHTML = '';
     return;
   }
 
-  empty.style.display = 'none';
+  if (empty) empty.style.display = 'none';
 
   // Preserve open/close state across re-renders
   const openNames = new Set();
