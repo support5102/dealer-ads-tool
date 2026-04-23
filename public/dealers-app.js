@@ -454,7 +454,18 @@ async function importFromSheet() {
   await loadDealers();
   render();
 }
+// Expose all inline-onclick handlers to window explicitly. Without this,
+// some deployment contexts (strict mode, minifiers, ad-blockers that
+// inject scripts) can orphan top-level function declarations from the
+// global scope, making `onclick="foo(...)"` find nothing.
 window.importFromSheet = importFromSheet;
+window.toggleDealer = toggleDealer;
+window.saveNonBudgetFields = saveNonBudgetFields;
+window.updateBudget = updateBudget;
+window.onBudgetInput = onBudgetInput;
+window.loadAndShowHistory = loadAndShowHistory;
+window.deleteDealer = deleteDealer;
+window.createDealer = createDealer;
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
