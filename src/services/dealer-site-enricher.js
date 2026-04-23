@@ -204,7 +204,7 @@ async function enrichFromUrl(claudeConfig, url, notes, deps = {}) {
     max_tokens: 2048,
     system: enricherSystemPrompt(),
     messages: [{ role: 'user', content: enricherUserPrompt(url, notes) }],
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
   };
 
   let response;
