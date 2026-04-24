@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Command Center - Dealer Ads Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="command-center.css">
+</head>
+<body>
+  <div class="cc-layout">
+    <!-- Header -->
+    <header class="cc-header">
+      <div class="cc-header-left">
+        <h1>Command Center</h1>
+        <span class="subtitle" id="connectionStatus">Not connected</span>
+      </div>
+      <nav class="cc-nav">
+        <a href="/pacing-overview.html">Pacing</a>
+        <a href="/audit.html">Auditor</a>
+        <a href="/command-center.html" class="active">Command Center</a>
+        <a href="/change-history.html">History</a>
+        <a href="/groups.html">Groups</a>
+        <a href="/dealers.html">Dealers</a>
+        <a href="/auth/google" id="connectBtn" style="background:#6366f1;border-color:#6366f1;color:white">Connect Google Ads</a>
+      </nav>
+    </header>
+
+    <div class="cc-body">
+      <!-- Sidebar -->
+      <aside class="cc-sidebar">
+        <div class="cc-sidebar-section">
+          <h3>Account</h3>
+          <select class="cc-account-select" id="accountSelect" onchange="selectAccount(this.value)">
+            <option value="">-- Select account --</option>
+          </select>
+        </div>
+
+        <div class="cc-sidebar-section" id="freshdeskSection" style="display:none">
+          <h3>Freshdesk Tickets</h3>
+          <ul class="cc-ticket-list" id="ticketList"></ul>
+        </div>
+
+        <div class="cc-sidebar-section">
+          <button class="cc-new-chat-btn" onclick="newChat()">+ New Conversation</button>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <div class="cc-main">
+        <div class="cc-messages" id="messages">
+          <div class="cc-welcome" id="welcome">
+            <h2>Dealer Ads Command Center</h2>
+            <p>Paste a dealer homepage to build a full account, drop a Freshdesk ticket to execute tasks, or type any command. I'll ask questions when I'm unsure.</p>
+            <div class="cc-welcome-actions">
+              <button class="cc-welcome-action" onclick="setInput('Paste a dealer homepage URL here...')">Build Account</button>
+              <button class="cc-welcome-action" onclick="setInput('Audit this account')">Audit Account</button>
+              <button class="cc-welcome-action" onclick="setInput('Create a new campaign for...')">Create Campaign</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-input-bar">
+          <div class="cc-input-row">
+            <textarea class="cc-input" id="chatInput" placeholder="Paste a URL, ticket, or type a task..." rows="1" onkeydown="handleKey(event)"></textarea>
+            <button class="cc-send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+          </div>
+          <div class="cc-input-hint">Ctrl+Enter to send. Supports: URLs, Freshdesk tickets, plain-English tasks, "audit this account"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="command-center.js"></script>
+</body>
+</html>

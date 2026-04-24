@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dealers Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <link rel="stylesheet" href="/pacing-styles.css"/>
+  <script src="/theme.js"></script>
+  <style>
+    .dealers-main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px;
+      max-width: 960px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .dealers-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .dealers-sub {
+      font-size: 12px;
+      color: var(--text3);
+      margin-bottom: 24px;
+    }
+
+    /* Create dealer card */
+    .create-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 28px;
+    }
+    .create-card h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0 0 14px;
+    }
+    .create-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .create-grid input, .create-grid select {
+      padding: 7px 12px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .create-grid input:focus, .create-grid select:focus {
+      border-color: var(--blue);
+    }
+    .create-grid .full-width {
+      grid-column: 1 / -1;
+    }
+    .create-actions {
+      margin-top: 10px;
+    }
+
+    /* Dealer list */
+    .dealer-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .dealer-item {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .dealer-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .dealer-header:hover { background: rgba(59,130,246,0.04); }
+    .dealer-chevron {
+      font-size: 10px;
+      color: var(--text3);
+      transition: transform 0.15s;
+      flex-shrink: 0;
+    }
+    .dealer-item.open .dealer-chevron { transform: rotate(90deg); }
+    .dealer-name-badge {
+      font-family: 'Syne', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      flex: 1;
+    }
+    .budget-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .mode-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text3);
+      font-family: 'DM Mono', monospace;
+    }
+    .splits-badge {
+      font-size: 11px;
+      color: var(--text3);
+      font-family: 'DM Mono', monospace;
+    }
+
+    /* Dealer body */
+    .dealer-body {
+      display: none;
+      border-top: 1px solid var(--border2);
+    }
+    .dealer-item.open .dealer-body { display: block; }
+
+    /* Sections inside body */
+    .body-section {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border2);
+    }
+    .body-section:last-child { border-bottom: none; }
+    .section-label {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+
+    /* Form fields */
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .field-grid input, .field-grid select, .field-grid textarea {
+      padding: 6px 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .field-grid input:focus, .field-grid select:focus, .field-grid textarea:focus {
+      border-color: var(--blue);
+    }
+    .field-grid .full-width { grid-column: 1 / -1; }
+    .field-label {
+      font-size: 11px;
+      color: var(--text3);
+      margin-bottom: 3px;
+      display: block;
+    }
+
+    /* Budget edit section */
+    .budget-edit-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .budget-edit-row input[type=number] {
+      padding: 6px 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      width: 160px;
+    }
+    .budget-edit-row input:focus { border-color: var(--blue); }
+    .budget-edit-row textarea {
+      padding: 6px 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      flex: 1;
+      min-width: 200px;
+      resize: vertical;
+      min-height: 48px;
+      font-family: inherit;
+    }
+    .budget-edit-row textarea:focus { border-color: var(--blue); }
+
+    /* Budget history */
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .history-entry {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 12px;
+      padding: 5px 8px;
+      background: var(--bg3);
+      border-radius: 6px;
+      flex-wrap: wrap;
+    }
+    .history-date { color: var(--text3); font-family: 'DM Mono', monospace; }
+    .history-arrow { color: var(--text3); }
+    .history-budget { color: var(--text); font-family: 'DM Mono', monospace; font-weight: 500; }
+    .history-by { color: var(--text3); font-size: 11px; }
+    .history-note { color: var(--text2); font-style: italic; flex: 1; }
+    .history-empty { font-size: 12px; color: var(--text3); font-style: italic; }
+
+    /* Footer */
+    .dealer-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border2);
+    }
+
+    /* Feedback */
+    .feedback {
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+    }
+    .feedback.ok  { background: #071a0e; border: 1px solid #166534; color: #4ade80; }
+    .feedback.err { background: #3d0d0d; border: 1px solid #991b1b; color: #f87171; }
+
+    /* Utilities */
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      cursor: pointer;
+    }
+    .btn-sm:hover { border-color: var(--blue); color: var(--text); }
+    .btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-danger {
+      padding: 5px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid #991b1b;
+      background: transparent;
+      color: #f87171;
+      cursor: pointer;
+    }
+    .btn-danger:hover { background: #3d0d0d; }
+    .empty-dealers {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text3);
+      font-size: 13px;
+    }
+    .load-history-btn {
+      font-size: 11px;
+      color: var(--blue);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+    }
+    /* Import section */
+    .import-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding: 12px 16px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .btn-secondary {
+      padding: 6px 14px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { border-color: var(--blue); color: var(--text); }
+    .import-help {
+      font-size: 12px;
+      color: var(--text3);
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">D</div>
+    <div>
+      <div class="logo-text">Dealers Admin</div>
+      <div class="logo-sub">Goals &middot; Budgets &middot; Pacing Config</div>
+    </div>
+  </div>
+  <div class="header-right" id="headerRight">
+    <a href="/command-center.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Command Center</a>
+    <a href="/pacing-overview.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Pacing</a>
+    <a href="/audit.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Auditor</a>
+    <a href="/change-history.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">History</a>
+    <a href="/groups.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Groups</a>
+    <a href="/dealers.html" style="color:#fff;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #3b82f6;border-radius:8px;padding:5px 14px;background:rgba(59,130,246,0.15);">Dealers</a>
+    <span class="connect-btn" id="authStatus" style="pointer-events:none;opacity:0.5">Checking...</span>
+    <button class="nav-link" id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;">🌙 Dark</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="dealers-main">
+
+  <div class="dealers-title">Dealers</div>
+  <div class="dealers-sub">Manage dealer goals, monthly budgets, pacing config, and budget split allocations.</div>
+
+  <!-- Import from Sheet -->
+  <div class="import-section">
+    <button class="btn-secondary" onclick="importFromSheet()">Import from Google Sheet</button>
+    <span class="import-help">One-time migration from PPC Control sheet into the database.</span>
+  </div>
+  <div id="importFeedback"></div>
+
+  <!-- Create dealer -->
+  <div class="create-card">
+    <h3>Create Dealer</h3>
+    <div class="create-grid">
+      <div>
+        <span class="field-label">Dealer Name *</span>
+        <input type="text" id="newDealerName" placeholder="e.g. Honda of Spring Hill" maxlength="120"/>
+      </div>
+      <div>
+        <span class="field-label">Monthly Budget *</span>
+        <input type="number" id="newMonthlyBudget" placeholder="e.g. 10000" min="1" step="1"/>
+      </div>
+      <div>
+        <span class="field-label">Pacing Mode</span>
+        <select id="newPacingMode">
+          <option value="one_click">one_click</option>
+          <option value="advisory">advisory</option>
+          <option value="auto_apply">auto_apply</option>
+        </select>
+      </div>
+      <div>
+        <span class="field-label">Pacing Curve</span>
+        <select id="newPacingCurveId">
+          <option value="">(none)</option>
+          <option value="linear">linear</option>
+          <option value="alanJay9505">alanJay9505</option>
+        </select>
+      </div>
+      <div>
+        <span class="field-label">New Budget</span>
+        <input type="number" id="newNewBudget" placeholder="optional" min="0" step="1"/>
+      </div>
+      <div>
+        <span class="field-label">Used Budget</span>
+        <input type="number" id="newUsedBudget" placeholder="optional" min="0" step="1"/>
+      </div>
+      <div>
+        <span class="field-label">VLA Budget</span>
+        <input type="number" id="newVlaBudget" placeholder="optional" min="0" step="1"/>
+      </div>
+      <div>
+        <span class="field-label">Keyword Budget</span>
+        <input type="number" id="newKeywordBudget" placeholder="optional" min="0" step="1"/>
+      </div>
+      <div class="full-width">
+        <span class="field-label">Misc Notes</span>
+        <input type="text" id="newMiscNotes" placeholder="optional notes" maxlength="500"/>
+      </div>
+    </div>
+    <div class="create-actions">
+      <button class="btn-primary" onclick="createDealer()">Create Dealer</button>
+    </div>
+    <div id="createFeedback"></div>
+  </div>
+
+  <!-- Empty state is a SIBLING of the list, not a child — otherwise list.innerHTML resets destroy its reference -->
+  <div class="empty-dealers" id="emptyState" style="display:none">No dealers yet. Create one above.</div>
+
+  <!-- Dealer list -->
+  <div id="dealerList" class="dealer-list"></div>
+
+</div>
+
+<script src="/dealers-app.js"></script>
+</body>
+</html>
