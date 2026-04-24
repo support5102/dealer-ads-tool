@@ -52,9 +52,6 @@ app.use(session({
 // ─────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Root → command center
-app.get('/', (req, res) => res.redirect('/command-center.html'));
-
 // SESSION middleware moved to top of file (after cors)
 
 // ─────────────────────────────────────────────────────────────
