@@ -61,11 +61,11 @@ var state = {
   errs: [], done: false, cnt: 0
 };
 
-function newM() { return {id:Math.random(),name:"",year1:"2025",year2:"2026",customUrl:"",stock:""}; }
+function newM() { return {id:Math.random(),name:"",year1:"2026",year2:"2027",customUrl:"",stock:"",urlStatus:null}; }
 function newG() { return {id:Math.random(),make:"",baseUrl:"",templateUrl:"",templateModel:"",siteType:"",models:[newM()]}; }
 function mkGrp(make) {
   return {id:Math.random(),make:make,baseUrl:"",templateUrl:"",templateModel:"",siteType:"",
-    models:MM[make]?MM[make].map(function(n){return {id:Math.random(),name:n,year1:"2025",year2:"2026",customUrl:"",stock:""};}):[newM()]};
+    models:MM[make]?MM[make].map(function(n){return {id:Math.random(),name:n,year1:"2026",year2:"2027",customUrl:"",stock:"",urlStatus:null};}):[newM()]};
 }
 
 // ── AI HELPERS (identical to React version) ────────────────────────────────────
@@ -92,14 +92,14 @@ function parseJ(txt) {
 }
 
 async function geocode(city, st) {
-  var txt = await callAI(
-    "You return GPS coordinates as JSON. Return ONLY raw JSON with no markdown, no explanation, no code blocks.",
-    "GPS coordinates for " + city + ", " + st + " USA. Respond with only a JSON object containing lat and lng as decimal numbers."
-  );
-  var clean = txt.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim();
-  var j = parseJ(clean);
-  if (!j || j.lat === undefined || j.lng === undefined) throw new Error("Bad geocode response: " + clean.slice(0,80));
-  return [{lat: +j.lat, lng: +j.lng, city: city, state: st, label: city + ", " + st}];
+  // Use free Nominatim geocoding API — no API key needed
+  var query = encodeURIComponent(city + ", " + st + ", USA");
+  var resp = await fetch("https://nominatim.openstreetmap.org/search?q=" + query + "&format=json&limit=1&countrycodes=us", {
+    headers: { "User-Agent": "DealerAdsBuilder/1.0" }
+  });
+  var data = await resp.json();
+  if (!data || !data[0]) throw new Error("Could not find coordinates for " + city + ", " + st);
+  return [{lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), city: city, state: st, label: city + ", " + st}];
 }
 
 async function autofill(url, onStatus) {
@@ -890,27 +890,84 @@ function renderMakeCard(g, gi) {
 
     mCard.appendChild(mGrid);
 
-    // Preview URL
+    // Preview URL with verification status
     var u = getUrl();
     if (u && m.name) {
-      mCard.appendChild(el("p", {className: "mt-2 text-xs font-mono text-green-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 break-all"}, u));
+      var urlWrap = el("div", {className: "mt-2 flex items-center gap-2"});
+      var urlStyle = "text-xs font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1 break-all flex-1 ";
+      if (m.urlStatus === "ok") urlStyle += "text-green-700 border-green-300 bg-green-50";
+      else if (m.urlStatus === "error" || m.urlStatus === "redirect_home") urlStyle += "text-red-600 border-red-300 bg-red-50";
+      else urlStyle += "text-green-700";
+      var statusIcon = m.urlStatus === "ok" ? "\u2705 " : m.urlStatus === "error" ? "\u274C " : m.urlStatus === "redirect_home" ? "\u26A0\uFE0F " : "";
+      urlWrap.appendChild(el("p", {className: urlStyle}, statusIcon + u));
+      mCard.appendChild(urlWrap);
     }
 
     modelsWrap.appendChild(mCard);
   });
   body.appendChild(modelsWrap);
 
-  // Add model button
-  body.appendChild(el("button", {
-    className: "mt-2 text-xs text-green-600 font-semibold",
-    onClick: function(){ state.groups[gi].models.push(newM()); render(); }
-  }, "+ Add Model"));
+  // Verify All URLs button
+  body.appendChild(el("div", {className: "flex gap-2 mt-3"}, [
+    el("button", {
+      className: "text-xs text-blue-600 font-semibold px-3 py-1 border border-blue-300 rounded-lg bg-blue-50",
+      onClick: (function(groupIdx) { return function() { verifyGroupUrls(groupIdx); }; })(gi)
+    }, "\uD83D\uDD0D Verify All URLs"),
+    el("button", {
+      className: "text-xs text-green-600 font-semibold",
+      onClick: function(){ state.groups[gi].models.push(newM()); render(); }
+    }, "+ Add Model")
+  ]));
 
   card.appendChild(body);
   return card;
 }
 
 // ── EVENT HANDLERS ─────────────────────────────────────────────────────────────
+
+// ── URL VERIFICATION (no AI needed — pure HTTP checks) ─────────────────────────
+
+async function verifyGroupUrls(gi) {
+  var g = state.groups[gi];
+  if (!g) return;
+
+  // Collect all URLs for this make group
+  var urlMap = {};
+  g.models.forEach(function(m, mi) {
+    var u = "";
+    if (m.customUrl && m.customUrl.trim()) u = m.customUrl.trim();
+    else if (g.baseUrl && m.name) u = buildInventoryUrl(g.baseUrl, g.make, m.name, state.city, state.st, g.siteType);
+    if (u) urlMap[mi] = u;
+  });
+
+  var urls = Object.values(urlMap);
+  if (urls.length === 0) { alert("No URLs to verify — add a Website URL first"); return; }
+
+  // Mark all as checking
+  g.models.forEach(function(m) { m.urlStatus = "checking"; });
+  render();
+
+  try {
+    var res = await fetch("/api/builder/verify-urls", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ urls: urls })
+    });
+    var data = await res.json();
+    if (data.results) {
+      // Map results back to models
+      var resultMap = {};
+      data.results.forEach(function(r) { resultMap[r.url] = r.status; });
+      Object.keys(urlMap).forEach(function(mi) {
+        var url = urlMap[mi];
+        state.groups[gi].models[parseInt(mi)].urlStatus = resultMap[url] || "unknown";
+      });
+    }
+  } catch(ex) {
+    g.models.forEach(function(m) { m.urlStatus = null; });
+  }
+  render();
+}
 
 function addMsg(m) {
   state.autoMsg = state.autoMsg.slice(-2).concat([m]);

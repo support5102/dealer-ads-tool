@@ -81,6 +81,54 @@ function createBuilderRouter(config) {
     }
   });
 
+  // ────────────────────────────────────────────────────────────
+  // URL verification — no AI needed, just HTTP checks
+  // ────────────────────────────────────────────────────────────
+  router.post('/api/builder/verify-urls', async (req, res) => {
+    const { urls } = req.body;
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ error: 'urls array required' });
+    }
+    if (urls.length > 100) {
+      return res.status(400).json({ error: 'Max 100 URLs per request' });
+    }
+
+    try {
+      // Inline HTTP check — no link-checker dependency needed
+      const results = await Promise.allSettled(urls.map(async (url) => {
+        if (!url || !url.startsWith('http')) return { url, status: 'invalid', error: 'Not a valid URL' };
+        try {
+          const response = await axios.get(url, {
+            timeout: 8000,
+            maxRedirects: 5,
+            validateStatus: () => true,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DealerAdsAuditor/1.0)' },
+          });
+          const finalUrl = (response.request?.res?.responseUrl) || url;
+          let finalPath = '/';
+          try { finalPath = new URL(finalUrl).pathname || '/'; } catch (_) {}
+          const origPath = new URL(url).pathname || '/';
+
+          if (response.status >= 400) {
+            return { url, status: 'error', statusCode: response.status };
+          }
+          if (origPath !== '/' && (finalPath === '/' || finalPath === '')) {
+            return { url, status: 'redirect_home', finalUrl };
+          }
+          return { url, status: 'ok', statusCode: response.status };
+        } catch (err) {
+          return { url, status: 'error', error: err.message?.slice(0, 80) };
+        }
+      }));
+
+      res.json({
+        results: results.map(r => r.status === 'fulfilled' ? r.value : { url: '', status: 'error', error: String(r.reason) })
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 
