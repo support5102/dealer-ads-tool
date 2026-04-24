@@ -30,12 +30,43 @@ function getStatusColor(account) {
 let currentData = null;
 let sortCol = 'pacePercent';
 let sortAsc = false;
+let selectedGroup = 'all'; // 'all' or a group key like 'alan_jay'
 
 // ── Filtering ──
+
+function getAvailableGroups(accounts) {
+  const byKey = new Map();
+  for (const a of accounts) {
+    if (a.groupKey && !byKey.has(a.groupKey)) {
+      byKey.set(a.groupKey, a.groupLabel || a.groupKey);
+    }
+  }
+  return [['all', 'All Dealers'], ...Array.from(byKey.entries())];
+}
+
+function renderGroupFilter(accounts) {
+  const groups = getAvailableGroups(accounts);
+  const options = groups.map(([key, label]) => {
+    const selected = key === selectedGroup ? ' selected' : '';
+    const count = key === 'all' ? accounts.length : accounts.filter(a => a.groupKey === key).length;
+    return `<option value="${key}"${selected}>${label} (${count})</option>`;
+  }).join('');
+  return `<select id="group-filter" onchange="handleGroupChange(this.value)" style="padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;outline:none;">${options}</select>`;
+}
+
+function handleGroupChange(value) {
+  selectedGroup = value;
+  if (currentData) renderTable(getFilteredAccounts());
+}
 
 function getFilteredAccounts() {
   if (!currentData) return [];
   let accounts = currentData.accounts;
+
+  // Group filter
+  if (selectedGroup !== 'all') {
+    accounts = accounts.filter(a => a.groupKey === selectedGroup);
+  }
 
   // Text search filter
   const searchEl = document.getElementById('filterInput');
@@ -135,7 +166,9 @@ async function loadOverview() {
 
     currentData = data;
     renderSummary(data);
-    renderTable(data.accounts);
+    const groupFilterEl = document.getElementById('group-filter-container');
+    if (groupFilterEl) groupFilterEl.innerHTML = renderGroupFilter(data.accounts);
+    renderTable(getFilteredAccounts());
     renderFailed(data.failed);
   } catch (err) {
     content.innerHTML = `<div class="error-msg">Network error: ${esc(err.message)}</div>`;
@@ -194,6 +227,37 @@ function handleSort(col) {
   if (currentData) renderTable(getFilteredAccounts());
 }
 
+function renderPacingSinceLastChange(a) {
+  if (a.pacingSinceLastChange == null) return '<span style="color:var(--text3);">—</span>';
+  const pct = a.pacingSinceLastChange;
+  const cls = pct >= 95 && pct <= 105 ? 'pace-green'
+            : pct > 105 ? 'pace-red'
+            : 'pace-yellow';
+  return `<span class="${cls}">${pct.toFixed(1)}%</span>`;
+}
+
+function renderDaysSinceLastChange(a) {
+  if (a.daysSinceLastChange == null) return '<span style="color:var(--text3);">Never</span>';
+  return `${a.daysSinceLastChange}d`;
+}
+
+function buildPacingExplanation(a) {
+  const parts = [];
+  parts.push(`Current pacing: ${(100 + a.pacePercent).toFixed(1)}%`);
+  if (a.changeDate) {
+    parts.push(`Last budget change: ${a.changeDate} (${a.daysSinceLastChange ?? '?'} days ago)`);
+    if (a.pacingSinceLastChange != null) {
+      parts.push(`Since change: pacing at ${a.pacingSinceLastChange.toFixed(1)}%`);
+    }
+  } else {
+    parts.push(`No budget changes recorded this month`);
+  }
+  if (a.pacingCurveId && a.pacingCurveId !== 'linear') {
+    parts.push(`Curve: ${a.pacingCurveId}`);
+  }
+  return parts.join(' · ');
+}
+
 function renderTable(accounts) {
   const sorted = sortAccounts(accounts);
   const content = document.getElementById('content');
@@ -205,8 +269,8 @@ function renderTable(accounts) {
     { key: 'pacePercent', label: 'Pacing' },
     { key: 'status', label: 'Status' },
     { key: 'dailyAdjustment', label: 'Daily Adj.' },
-    { key: 'sevenDayAvg', label: '7-Day Avg' },
-    { key: 'sevenDayTrendPercent', label: '7-Day Trend' },
+    { key: 'pacingSinceLastChange', label: 'Pacing Since Last Change' },
+    { key: 'daysSinceLastChange', label: 'Days Since Change' },
     { key: 'projectedStatus', label: 'Projection' },
   ];
 
@@ -224,18 +288,16 @@ function renderTable(accounts) {
     const isLastDay = new Date().getDate() === new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
     const adjValue = isLastDay ? remainingBudget : a.dailyAdjustment;
     const adjClass = adjValue >= 0 ? 'adj-positive' : 'adj-negative';
-    const trendClass = a.sevenDayTrend === 'up' ? 'trend-up' : a.sevenDayTrend === 'down' ? 'trend-down' : 'trend-flat';
-    const trendArrow = a.sevenDayTrend === 'up' ? '↑' : a.sevenDayTrend === 'down' ? '↓' : '→';
 
     return `<tr onclick="window.location.href='/pacing.html?account=${esc(a.customerId)}'">
       <td>${esc(a.dealerName)}</td>
       <td>${fmtCurrency(a.mtdSpend)}</td>
-      <td>${fmtCurrency(a.monthlyBudget)}</td>
-      <td class="${paceClass}">${(100 + a.pacePercent).toFixed(1)}%</td>
+      <td>${fmtCurrency(a.monthlyBudget)} <button class="budget-edit-btn" onclick="event.stopPropagation(); openBudgetModal('${esc(a.dealerName).replace(/'/g, "\\'")}', ${a.monthlyBudget})" title="Edit monthly budget">&#9998;</button></td>
+      <td class="${paceClass}" title="${esc(buildPacingExplanation(a))}">${(100 + a.pacePercent).toFixed(1)}%</td>
       <td><span class="status-mini ${color}">${STATUS_LABELS[a.status] || a.status}</span>${a.changeDate ? ' <span title="Budget changed ' + esc(a.changeDate) + '" style="font-size:10px;color:var(--text3);">⏳</span>' : ''}</td>
       <td class="${adjClass}">${isLastDay ? fmtSignedCurrency(remainingBudget) + ' left' : fmtSignedCurrency(adjValue) + '/day'}</td>
-      <td>${fmtCurrency(a.sevenDayAvg)}/day</td>
-      <td class="${trendClass}">${trendArrow} ${fmtPercent(a.sevenDayTrendPercent)}</td>
+      <td>${renderPacingSinceLastChange(a)}</td>
+      <td>${renderDaysSinceLastChange(a)}</td>
       <td title="${a.changeDate ? 'Since ' + esc(a.changeDate) + ': ' + fmtCurrency(a.postChangeDailyAvg || 0) + '/day → Proj: ' + fmtCurrency(a.projectedSpend) : 'Full-month avg → Proj: ' + fmtCurrency(a.projectedSpend)}"><span class="status-mini ${PROJ_COLORS[a.projectedStatus] || 'gray'}">${PROJ_LABELS[a.projectedStatus] || 'N/A'}</span></td>
     </tr>`;
   }).join('');
@@ -265,3 +327,100 @@ function renderFailed(failed) {
 
 // ── Init ──
 checkAuth();
+
+// ── Budget Edit Modal ──
+
+let modalState = { dealerName: null, currentBudget: 0 };
+
+function openBudgetModal(dealerName, currentBudget) {
+  modalState = { dealerName, currentBudget };
+  document.getElementById('modalDealer').textContent = dealerName;
+  document.getElementById('modalCurrentBudget').textContent = '$' + Number(currentBudget).toFixed(2);
+  document.getElementById('modalNewBudget').value = currentBudget;
+  document.getElementById('modalNote').value = '';
+  document.getElementById('modalFeedback').textContent = '';
+  document.getElementById('modalFeedback').className = 'modal-feedback';
+  document.getElementById('budgetEditModal').style.display = 'flex';
+  validateModalForm();
+  // Wire change listeners (first time only)
+  if (!openBudgetModal._wired) {
+    document.getElementById('modalNewBudget').addEventListener('input', validateModalForm);
+    document.getElementById('modalNote').addEventListener('input', validateModalForm);
+    // Esc closes modal
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeBudgetModal();
+    });
+    // Enter submits if save button is enabled
+    document.getElementById('modalNote').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        const btn = document.getElementById('modalSaveBtn');
+        if (!btn.disabled) saveBudget();
+      }
+    });
+    // Overlay click closes modal
+    document.getElementById('budgetEditModal').addEventListener('click', function(e) {
+      if (e.target === this) closeBudgetModal();
+    });
+    openBudgetModal._wired = true;
+  }
+  // Focus the new-budget input
+  setTimeout(() => document.getElementById('modalNewBudget').focus(), 50);
+}
+
+function closeBudgetModal() {
+  document.getElementById('budgetEditModal').style.display = 'none';
+}
+
+function validateModalForm() {
+  const budgetInput = document.getElementById('modalNewBudget');
+  const noteInput = document.getElementById('modalNote');
+  const saveBtn = document.getElementById('modalSaveBtn');
+  const budget = parseFloat(budgetInput.value);
+  const noteOk = noteInput.value.trim().length >= 5;
+  const budgetOk = Number.isFinite(budget) && budget > 0;
+  // Also require change from current (don't save a no-op)
+  const changed = Math.abs(budget - modalState.currentBudget) > 0.005;
+  saveBtn.disabled = !(noteOk && budgetOk && changed);
+}
+
+async function saveBudget() {
+  const saveBtn = document.getElementById('modalSaveBtn');
+  const feedback = document.getElementById('modalFeedback');
+  saveBtn.disabled = true;
+  feedback.textContent = '';
+  try {
+    const res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        monthlyBudget: parseFloat(document.getElementById('modalNewBudget').value),
+        note: document.getElementById('modalNote').value.trim(),
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      feedback.textContent = data.error || `Save failed (HTTP ${res.status})`;
+      feedback.className = 'modal-feedback err';
+      saveBtn.disabled = false;
+      return;
+    }
+    feedback.textContent = 'Saved.';
+    feedback.className = 'modal-feedback ok';
+    // Reload the overview so the new budget shows immediately
+    setTimeout(() => {
+      closeBudgetModal();
+      if (typeof loadOverview === 'function') loadOverview();
+      else window.location.reload();
+    }, 600);
+  } catch (err) {
+    feedback.textContent = err.message || 'Network error';
+    feedback.className = 'modal-feedback err';
+    saveBtn.disabled = false;
+  }
+}
+
+// Expose for inline onclick handlers
+window.openBudgetModal = openBudgetModal;
+window.closeBudgetModal = closeBudgetModal;
+window.saveBudget = saveBudget;

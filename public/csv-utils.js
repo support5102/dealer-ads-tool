@@ -89,3 +89,8 @@ function buildAdsCSV(rows) {
   }
   return '\uFEFF' + lines.join('\r\n');
 }
+
+// Node.js module export (browser ignores this)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ADS_COLS, blankAdsRow, buildAdsCSV };
+}
