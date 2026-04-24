@@ -138,6 +138,51 @@ async function findComps(city, st, makes, dealer, onStatus) {
 
 // ── URL HELPERS ────────────────────────────────────────────────────────────────
 
+// Common URL abbreviations used by dealer websites
+// When swapping model names in URLs, use the alias if one exists
+var MODEL_URL_ALIASES = {
+  "F-250 Super Duty": "F-250SD",
+  "F-350 Super Duty": "F-350SD",
+  "Silverado 2500HD": "Silverado-2500HD",
+  "Silverado 3500HD": "Silverado-3500HD",
+  "Sierra 2500HD": "Sierra-2500HD",
+  "Sierra 3500HD": "Sierra-3500HD",
+  "Corvette": "Corvette",
+  "Mustang Mach-E": "Mustang-Mach-E",
+  "Corolla Hatchback": "Corolla-Hatchback",
+  "Corolla Cross": "Corolla-Cross",
+  "Corolla Cross Hybrid": "Corolla-Cross-Hybrid",
+  "Corolla Hybrid": "Corolla-Hybrid",
+  "RAV4 Hybrid": "RAV4-Hybrid",
+  "RAV4 Prime": "RAV4-Prime",
+  "Highlander Hybrid": "Highlander-Hybrid",
+  "Grand Highlander": "Grand-Highlander",
+  "Grand Highlander Hybrid": "Grand-Highlander-Hybrid",
+  "Grand Cherokee": "Grand-Cherokee",
+  "Grand Cherokee L": "Grand-Cherokee-L",
+  "Grand Wagoneer": "Grand-Wagoneer",
+  "Pacifica Hybrid": "Pacifica-Hybrid",
+  "Bronco Sport": "Bronco-Sport",
+  "ProMaster City": "ProMaster-City",
+  "Encore GX": "Encore-GX",
+  "Yukon XL": "Yukon-XL",
+  "Escalade ESV": "Escalade-ESV",
+  "Prius Prime": "Prius-Prime",
+  "Civic Hatchback": "Civic-Hatchback",
+  "Civic Hybrid": "Civic-Hybrid",
+  "Accord Hybrid": "Accord-Hybrid",
+  "CR-V Hybrid": "CR-V-Hybrid",
+  "Ioniq 5": "Ioniq-5",
+  "Ioniq 6": "Ioniq-6",
+  "Atlas Cross Sport": "Atlas-Cross-Sport",
+  "Golf GTI": "Golf-GTI",
+  "Golf R": "Golf-R",
+  "MX-5 Miata": "MX-5-Miata",
+  "e-tron GT": "e-tron-GT",
+  "Q4 e-tron": "Q4-e-tron",
+  "C40 Recharge": "C40-Recharge",
+};
+
 /**
  * Detects which model name from the MM list appears in a template URL,
  * then replaces it with the target model. Works for ANY site — no need
@@ -172,27 +217,39 @@ function parseTpl(tpl, sm, mo, groupMake) {
 
   // Generic: find any known model name in the URL and swap it
   var models = MM[groupMake] || [];
-  // Sort longest first so "F-150" matches before "F"
+  // Also check URL aliases as source patterns
+  var allAliases = Object.keys(MODEL_URL_ALIASES).map(function(k){ return MODEL_URL_ALIASES[k]; });
+  // Sort longest first so "F-250SD" matches before "F-250"
   var sorted = models.slice().sort(function(a,b){ return b.length - a.length; });
 
   for (var i = 0; i < sorted.length; i++) {
     var m = sorted[i];
-    // Try exact, URL-encoded (+, -, %20), and case-insensitive variants
-    var variants = [
-      m,
-      m.replace(/\s+/g, "+"),
-      m.replace(/\s+/g, "-"),
-      m.replace(/\s+/g, "%20"),
-      m.replace(/\s+/g, "+").replace(/-/g, "+"),
-    ];
+    var alias = MODEL_URL_ALIASES[m] || null;
+    // Try alias first, then exact, then URL-encoded variants
+    var variants = [];
+    if (alias) variants.push(alias);
+    variants.push(m);
+    variants.push(m.replace(/\s+/g, "+"));
+    variants.push(m.replace(/\s+/g, "-"));
+    variants.push(m.replace(/\s+/g, "%20"));
+
     for (var v = 0; v < variants.length; v++) {
       var idx = u.toLowerCase().indexOf(variants[v].toLowerCase());
       if (idx >= 0) {
-        // Found this model in the URL — replace with target model using same encoding
-        var sep = variants[v].indexOf("+") >= 0 ? "+" : variants[v].indexOf("-") >= 0 && mo.indexOf("-") < 0 ? "-" : variants[v].indexOf("%20") >= 0 ? "%20" : "+";
-        var replacement = mo.replace(/\s+/g, sep);
-        // If original was hyphenated (like F-150), keep hyphens in replacement
-        if (m.indexOf("-") >= 0 && mo.indexOf("-") >= 0) replacement = mo;
+        // Found this model in the URL — replace with target model
+        // Use the target model's alias if it has one, otherwise match encoding
+        var targetAlias = MODEL_URL_ALIASES[mo];
+        var replacement;
+        if (targetAlias) {
+          replacement = targetAlias;
+        } else {
+          // Match the encoding style of what we found
+          var found = variants[v];
+          if (found.indexOf("+") >= 0) replacement = mo.replace(/\s+/g, "+");
+          else if (found.indexOf("%20") >= 0) replacement = mo.replace(/\s+/g, "%20");
+          else if (found.indexOf("-") >= 0 && mo.indexOf("-") < 0) replacement = mo.replace(/\s+/g, "-");
+          else replacement = mo.replace(/\s+/g, "+");
+        }
         return u.substring(0, idx) + replacement + u.substring(idx + variants[v].length);
       }
     }
