@@ -537,7 +537,7 @@ function render() {
     el("span", {style:{fontSize:"20px"}}, "\u26A1"),
     el("div", {}, [
       el("b", {className: "text-white text-sm"}, "Auto-Fill Everything"),
-      el("p", {className: "text-xs", style:{color:"#bfdbfe"}}, "Paste a new inventory page URL \u2192 auto-detects site type, makes, models, location & competitors")
+      el("p", {className: "text-xs", style:{color:"#bfdbfe"}}, "Paste the dealer website URL \u2192 sets base URL & detects site type. Then select make and verify URLs.")
     ])
   ]));
   var afBody = el("div", {className: "p-5"});
@@ -546,7 +546,7 @@ function render() {
     className: "text-white font-bold text-sm px-5 py-2 rounded-xl whitespace-nowrap",
     style: {background:"#2563eb", opacity: (state.busy||!state.autoUrl.trim()) ? "0.5" : "1"},
     onClick: runFill
-  }, state.busy ? "Working\u2026" : "Fill It In");
+  }, state.busy ? "Working\u2026" : "Set URL");
   if (state.busy || !state.autoUrl.trim()) afBtn.disabled = true;
   var afInp = inp(state.autoUrl, "https://dealer.com/inventory/new/ford/f-150", "flex-1", function(v){
     state.autoUrl = v;
@@ -977,46 +977,33 @@ function addMsg(m) {
 async function runFill() {
   if (!state.autoUrl.trim()) return;
   state.busy = true; state.autoMsg = []; render();
-  var info = await autofill(state.autoUrl.trim(), addMsg);
-  if (info) {
-    var base = state.autoUrl.trim().replace(/\/$/, "").replace(/^(https?:\/\/[^\/]+).*$/, "$1");
-    if (info.dealerName) state.dealer = info.dealerName;
-    if (info.city) state.city = info.city;
-    if (info.state) state.st = info.state;
-    if (info.makes && info.makes.length) {
-      var st = info.autofusion ? "autofusion" : info.teamvelocity ? "teamvelocity" : info.dealerinspire ? "dealerinspire" : info.eprocess ? "eprocess" : "";
-      state.groups = info.makes.map(function(mk) {
-        var g = mkGrp(mk);
-        g.baseUrl = base;
-        g.templateUrl = info.inventoryUrl || "";
-        g.templateModel = info.inventoryModel || "";
-        g.siteType = st;
-        return g;
-      });
-    }
-    if (info.autofusion) addMsg("Autofusion detected \u2014 URLs: /search/New+Make+Model+tmM");
-    if (info.teamvelocity) addMsg("Team Velocity detected \u2014 paste one model URL in Example Inventory URL field");
-    if (info.dealerinspire) addMsg("Dealer Inspire detected \u2014 URLs: /new-vehicles/model/");
-    if (info.eprocess) addMsg("eProcess detected \u2014 paste Override URL on each model row");
 
-    if (info.city && info.state) {
-      addMsg("Finding nearby cities...");
-      try {
-        var nct = await callAI("Return a JSON array of city names only, no explanation.",
-          "List 5 cities within 30 miles of " + info.city + ", " + info.state + " USA. Return only a JSON array like: [\"City1\",\"City2\"]", 150);
-        var nd = parseJ(nct.replace(/```[a-z]*/gi,"").replace(/```/g,"").trim());
-        if (Array.isArray(nd) && nd.length) state.nearbyCities = nd;
-      } catch(ex) {}
-    }
-    if (info.city && info.state && info.makes && info.makes.length) {
-      addMsg("Finding competitors...");
-      state.findingC = true; render();
-      var fc = await findComps(info.city, info.state, info.makes, info.dealerName || "", addMsg);
-      state.findingC = false;
-      if (fc.length) state.comps = fc;
-    }
-    addMsg("All done! Review below then generate.");
+  var url = state.autoUrl.trim();
+  var base = url.replace(/\/$/, "").replace(/^(https?:\/\/[^\/]+).*$/, "$1");
+
+  // Detect site type from URL patterns
+  var siteType = "";
+  if (/\/search\/New\+/i.test(url)) siteType = "autofusion";
+  else if (/\/inventory\/new\//i.test(url)) siteType = "teamvelocity";
+  else if (/\/new-vehicles\//i.test(url)) siteType = "dealerinspire";
+  else if (/\/search\/new-.*\?.*tp=new/i.test(url)) siteType = "eprocess";
+
+  // Set the base URL on all groups
+  state.groups.forEach(function(g) {
+    g.baseUrl = base;
+    if (siteType) g.siteType = siteType;
+    // If a template URL was pasted (contains a model path), use it
+    if (url !== base && url.indexOf("/") > 8) g.templateUrl = url;
+  });
+
+  if (siteType) {
+    addMsg("\u2705 Detected site type: " + siteType);
+  } else {
+    addMsg("\u2139\uFE0F Site type not auto-detected \u2014 select it manually or paste a model inventory URL as the template");
   }
+  addMsg("\u2705 Base URL set: " + base);
+  addMsg("\u2139\uFE0F Select your make below, then click \"\uD83D\uDD0D Verify All URLs\" to check every model link");
+
   state.busy = false;
   render();
 }
