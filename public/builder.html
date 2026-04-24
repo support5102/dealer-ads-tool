@@ -138,8 +138,24 @@ async function findComps(city, st, makes, dealer, onStatus) {
 
 // ── URL HELPERS ────────────────────────────────────────────────────────────────
 
+/**
+ * Detects which model name from the MM list appears in a template URL,
+ * then replaces it with the target model. Works for ANY site — no need
+ * to know the platform type.
+ *
+ * Example:
+ *   tpl = "https://dealer.com/searchnew.aspx?Make=Ford&ModelAndTrim=F-150"
+ *   groupMake = "Ford"
+ *   mo = "Explorer"
+ *   → finds "F-150" in the URL, replaces with "Explorer"
+ *   → "https://dealer.com/searchnew.aspx?Make=Ford&ModelAndTrim=Explorer"
+ *
+ * Handles URL-encoded variants: spaces as +, -, %20, or literal.
+ */
 function parseTpl(tpl, sm, mo, groupMake) {
   if (!tpl || !mo) return tpl || "";
+
+  // First try known platform patterns (exact match)
   var u = tpl;
   var slug = function(s){return s.toLowerCase().replace(/\s+/g,"-");};
   var mkSlug = groupMake ? slug(groupMake) : "";
@@ -153,6 +169,35 @@ function parseTpl(tpl, sm, mo, groupMake) {
   if (/\/new-vehicles\/[a-z0-9-]+\/?/i.test(u)) {
     return u.replace(/\/new-vehicles\/[a-z0-9-]+\/?/i, "/new-vehicles/" + mo.toLowerCase().replace(/\s+/g,"-") + "/");
   }
+
+  // Generic: find any known model name in the URL and swap it
+  var models = MM[groupMake] || [];
+  // Sort longest first so "F-150" matches before "F"
+  var sorted = models.slice().sort(function(a,b){ return b.length - a.length; });
+
+  for (var i = 0; i < sorted.length; i++) {
+    var m = sorted[i];
+    // Try exact, URL-encoded (+, -, %20), and case-insensitive variants
+    var variants = [
+      m,
+      m.replace(/\s+/g, "+"),
+      m.replace(/\s+/g, "-"),
+      m.replace(/\s+/g, "%20"),
+      m.replace(/\s+/g, "+").replace(/-/g, "+"),
+    ];
+    for (var v = 0; v < variants.length; v++) {
+      var idx = u.toLowerCase().indexOf(variants[v].toLowerCase());
+      if (idx >= 0) {
+        // Found this model in the URL — replace with target model using same encoding
+        var sep = variants[v].indexOf("+") >= 0 ? "+" : variants[v].indexOf("-") >= 0 && mo.indexOf("-") < 0 ? "-" : variants[v].indexOf("%20") >= 0 ? "%20" : "+";
+        var replacement = mo.replace(/\s+/g, sep);
+        // If original was hyphenated (like F-150), keep hyphens in replacement
+        if (m.indexOf("-") >= 0 && mo.indexOf("-") >= 0) replacement = mo;
+        return u.substring(0, idx) + replacement + u.substring(idx + variants[v].length);
+      }
+    }
+  }
+
   return null;
 }
 
@@ -164,6 +209,10 @@ function buildInventoryUrl(baseUrl, make, model, city, st, siteType) {
   }
   if (siteType === "dealerinspire") {
     return base + "/new-vehicles/" + (model||"").toLowerCase().replace(/\s+/g,"-") + "/";
+  }
+  if (siteType === "teamvelocity") {
+    var sl2 = function(s){return (s||"").toLowerCase().replace(/\s+/g,"-");};
+    return base + "/inventory/new/" + sl2(make) + "/" + sl2(model);
   }
   var sl = function(s){return (s||"").toLowerCase().replace(/\s+/g,"-");};
   return base + "/search/new-" + sl(make) + "-" + sl(model) + "-" + sl(city) + "-" + sl(st).slice(0,2) + "/?tp=new";
@@ -800,27 +849,33 @@ function renderMakeCard(g, gi) {
   urlRow.appendChild(stDiv);
   body.appendChild(urlRow);
 
-  // Template URL (for non-autofusion, non-eprocess, non-dealerinspire)
-  if (g.siteType !== "autofusion" && g.siteType !== "eprocess" && g.siteType !== "dealerinspire") {
-    var tplDiv = el("div");
-    tplDiv.appendChild(el("p", {className: "text-xs text-gray-500 mb-1", innerHTML: "Example Inventory URL <span class='text-gray-400'>(paste any one model's URL \u2014 others auto-generate)</span>"}));
-    var tplInp = inp(g.templateUrl, "https://dealer.com/inventory/new/ford/f-150?paymenttype=cash", "mb-1 font-mono text-xs", function(v) {
-      state.groups[gi].templateUrl = v.trim();
-      var parts = v.trim().split("/");
-      var mo = parts[parts.length-1] ? parts[parts.length-1].split("?")[0] : "";
-      state.groups[gi].templateModel = mo.replace(/-/g," ").replace(/\w/g, function(c){return c.toUpperCase();});
-    });
-    tplDiv.appendChild(tplInp);
-    if (g.templateUrl && g.templateModel) {
-      tplDiv.appendChild(el("p", {className: "text-xs text-gray-400 mb-1", innerHTML: "Template model detected: <b>" + g.templateModel + "</b>"}));
+  // Template URL — always shown. Paste ONE model URL and all others auto-generate.
+  var tplDiv = el("div", {className: "mb-3"});
+  tplDiv.appendChild(el("p", {className: "text-xs font-semibold text-blue-600 mb-1"}, "\u2B50 Paste ONE model inventory URL \u2014 all other models swap automatically"));
+  var tplInp = inp(g.templateUrl, "https://dealer.com/searchnew.aspx?Make=Ford&ModelAndTrim=F-150", "font-mono text-xs", function(v) {
+    state.groups[gi].templateUrl = v.trim();
+    // Try to detect which model this URL is for
+    var models = MM[g.make] || [];
+    var sorted = models.slice().sort(function(a,b){ return b.length - a.length; });
+    var detected = "";
+    var lower = v.toLowerCase();
+    for (var i = 0; i < sorted.length; i++) {
+      var variants = [sorted[i], sorted[i].replace(/\s+/g,"+"), sorted[i].replace(/\s+/g,"-"), sorted[i].replace(/\s+/g,"%20")];
+      for (var j = 0; j < variants.length; j++) {
+        if (lower.indexOf(variants[j].toLowerCase()) >= 0) { detected = sorted[i]; break; }
+      }
+      if (detected) break;
     }
-    body.appendChild(tplDiv);
+    state.groups[gi].templateModel = detected;
+    render();
+  });
+  tplDiv.appendChild(tplInp);
+  if (g.templateUrl && g.templateModel) {
+    tplDiv.appendChild(el("p", {className: "text-xs text-green-600 mt-1 font-semibold"}, "\u2705 Detected model: " + g.templateModel + " \u2014 swapping for all other models"));
+  } else if (g.templateUrl && !g.templateModel) {
+    tplDiv.appendChild(el("p", {className: "text-xs text-orange-500 mt-1"}, "\u26A0\uFE0F Could not detect model name in URL \u2014 make sure the URL contains a model name from the list below"));
   }
-
-  // Platform hints
-  if (g.siteType === "autofusion") body.appendChild(el("p", {className: "text-xs text-green-600 mb-3"}, "Autofusion \u2014 URLs auto-built as /search/New+Make+Model+tmM"));
-  if (g.siteType === "dealerinspire") body.appendChild(el("p", {className: "text-xs text-green-600 mb-3"}, "Dealer Inspire \u2014 URLs auto-built as /new-vehicles/model/"));
-  if (g.siteType === "eprocess") body.appendChild(el("p", {className: "text-xs text-orange-500 mb-3"}, "eProcess \u2014 paste Override URL on each model row below"));
+  body.appendChild(tplDiv);
 
   // Models header
   body.appendChild(el("p", {className: "text-xs font-bold text-gray-600 mb-2"}, "MODELS"));
