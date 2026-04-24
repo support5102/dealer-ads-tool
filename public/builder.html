@@ -140,48 +140,24 @@ async function findComps(city, st, makes, dealer, onStatus) {
 
 // Common URL abbreviations used by dealer websites
 // When swapping model names in URLs, use the alias if one exists
-var MODEL_URL_ALIASES = {
-  "F-250 Super Duty": "F-250SD",
-  "F-350 Super Duty": "F-350SD",
-  "Silverado 2500HD": "Silverado-2500HD",
-  "Silverado 3500HD": "Silverado-3500HD",
-  "Sierra 2500HD": "Sierra-2500HD",
-  "Sierra 3500HD": "Sierra-3500HD",
-  "Corvette": "Corvette",
-  "Mustang Mach-E": "Mustang-Mach-E",
-  "Corolla Hatchback": "Corolla-Hatchback",
-  "Corolla Cross": "Corolla-Cross",
-  "Corolla Cross Hybrid": "Corolla-Cross-Hybrid",
-  "Corolla Hybrid": "Corolla-Hybrid",
-  "RAV4 Hybrid": "RAV4-Hybrid",
-  "RAV4 Prime": "RAV4-Prime",
-  "Highlander Hybrid": "Highlander-Hybrid",
-  "Grand Highlander": "Grand-Highlander",
-  "Grand Highlander Hybrid": "Grand-Highlander-Hybrid",
-  "Grand Cherokee": "Grand-Cherokee",
-  "Grand Cherokee L": "Grand-Cherokee-L",
-  "Grand Wagoneer": "Grand-Wagoneer",
-  "Pacifica Hybrid": "Pacifica-Hybrid",
-  "Bronco Sport": "Bronco-Sport",
-  "ProMaster City": "ProMaster-City",
-  "Encore GX": "Encore-GX",
-  "Yukon XL": "Yukon-XL",
-  "Escalade ESV": "Escalade-ESV",
-  "Prius Prime": "Prius-Prime",
-  "Civic Hatchback": "Civic-Hatchback",
-  "Civic Hybrid": "Civic-Hybrid",
-  "Accord Hybrid": "Accord-Hybrid",
-  "CR-V Hybrid": "CR-V-Hybrid",
-  "Ioniq 5": "Ioniq-5",
-  "Ioniq 6": "Ioniq-6",
-  "Atlas Cross Sport": "Atlas-Cross-Sport",
-  "Golf GTI": "Golf-GTI",
-  "Golf R": "Golf-R",
-  "MX-5 Miata": "MX-5-Miata",
-  "e-tron GT": "e-tron-GT",
-  "Q4 e-tron": "Q4-e-tron",
-  "C40 Recharge": "C40-Recharge",
-};
+// URL aliases: abbreviations + %20 for spaces on multi-word models
+var MODEL_URL_ALIASES = {};
+// Auto-generate: any model with a space gets %20 encoding
+(function() {
+  var allMakes = Object.keys(MM);
+  for (var i = 0; i < allMakes.length; i++) {
+    var models = MM[allMakes[i]];
+    for (var j = 0; j < models.length; j++) {
+      var m = models[j];
+      if (m.indexOf(" ") >= 0) {
+        MODEL_URL_ALIASES[m] = m.replace(/\s+/g, "%20");
+      }
+    }
+  }
+  // Override specific abbreviations used by dealer sites
+  MODEL_URL_ALIASES["F-250 Super Duty"] = "F-250SD";
+  MODEL_URL_ALIASES["F-350 Super Duty"] = "F-350SD";
+})();
 
 /**
  * Detects which model name from the MM list appears in a template URL,
