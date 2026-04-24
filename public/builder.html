@@ -987,22 +987,58 @@ async function runFill() {
   else if (/\/inventory\/new\//i.test(url)) siteType = "teamvelocity";
   else if (/\/new-vehicles\//i.test(url)) siteType = "dealerinspire";
   else if (/\/search\/new-.*\?.*tp=new/i.test(url)) siteType = "eprocess";
+  else if (/searchnew\.aspx/i.test(url)) siteType = "eprocess";
 
-  // Set the base URL on all groups
-  state.groups.forEach(function(g) {
-    g.baseUrl = base;
-    if (siteType) g.siteType = siteType;
-    // If a template URL was pasted (contains a model path), use it
-    if (url !== base && url.indexOf("/") > 8) g.templateUrl = url;
-  });
+  // Try to detect the make from the URL
+  var detectedMakes = [];
+  var allMakes = SINGLES.concat(Object.keys(COMBOS));
+  // Check URL params (e.g. ?Make=Ford)
+  try {
+    var params = new URL(url).searchParams;
+    var mkParam = params.get("Make") || params.get("make") || params.get("mk") || "";
+    if (mkParam) {
+      var found = SINGLES.find(function(s) { return s.toLowerCase() === mkParam.toLowerCase(); });
+      if (found) detectedMakes.push(found);
+    }
+  } catch(_) {}
+  // Check URL path segments (e.g. /new/ford/ or /new-vehicles/ford/)
+  if (detectedMakes.length === 0) {
+    var lower = url.toLowerCase();
+    SINGLES.forEach(function(mk) {
+      var slug = mk.toLowerCase().replace(/\s+/g, "-");
+      if (lower.indexOf("/" + slug + "/") >= 0 || lower.indexOf("/" + slug + "?") >= 0 ||
+          lower.indexOf("+" + slug + "+") >= 0 || lower.indexOf("=" + slug) >= 0) {
+        detectedMakes.push(mk);
+      }
+    });
+  }
+
+  // Auto-populate makes and models
+  if (detectedMakes.length > 0) {
+    state.groups = detectedMakes.map(function(mk) {
+      var g = mkGrp(mk);
+      g.baseUrl = base;
+      g.siteType = siteType;
+      if (url !== base) g.templateUrl = url;
+      return g;
+    });
+    addMsg("\u2705 Detected make: " + detectedMakes.join(", "));
+    addMsg("\u2705 Loaded " + state.groups.reduce(function(sum, g) { return sum + g.models.length; }, 0) + " models");
+  } else {
+    // No make detected — just set the base URL, user picks make manually
+    state.groups.forEach(function(g) {
+      g.baseUrl = base;
+      if (siteType) g.siteType = siteType;
+      if (url !== base) g.templateUrl = url;
+    });
+    addMsg("\u2139\uFE0F Could not detect make from URL \u2014 select one below");
+  }
 
   if (siteType) {
-    addMsg("\u2705 Detected site type: " + siteType);
-  } else {
-    addMsg("\u2139\uFE0F Site type not auto-detected \u2014 select it manually or paste a model inventory URL as the template");
+    addMsg("\u2705 Site type: " + siteType);
   }
-  addMsg("\u2705 Base URL set: " + base);
-  addMsg("\u2139\uFE0F Select your make below, then click \"\uD83D\uDD0D Verify All URLs\" to check every model link");
+  addMsg("\u2705 Base URL: " + base);
+  addMsg("\u2139\uFE0F Click \"\uD83D\uDD0D Verify All URLs\" to check every model inventory link");
 
   state.busy = false;
   render();
