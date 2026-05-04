@@ -6,3 +6,4 @@ coverage/
 Thumbs.db
 .claude/
 .deploy-dev-env.yaml
+.worktrees/
