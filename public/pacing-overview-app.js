@@ -514,8 +514,8 @@ async function fetchPendingRevert(dealerName) {
     if (!pr) return;
     modalState.pendingRevert = pr;
     const dueDate = new Date(pr.revertDueDate);
-    const monthName = dueDate.toLocaleString('en-US', { month: 'short' });
-    const day = dueDate.getDate();
+    const monthName = dueDate.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    const day = dueDate.getUTCDate();
     const sign = pr.bumpAmount >= 0 ? '+' : '−';
     const absAmt = Math.abs(pr.bumpAmount).toFixed(2);
     text.textContent = `This dealer has a pending revert: ${sign}$${absAmt} rest-of-month queued for ${monthName} ${day}. Saving any change on this modal will cancel it.`;
