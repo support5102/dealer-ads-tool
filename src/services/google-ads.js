@@ -1146,12 +1146,16 @@ async function getRecentChangeEvents(restCtx, sinceHours = 28) {
 async function getLastBudgetChange(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
   try {
+    // change_event enforces "must be within last 30 days" strictly. The DURING LAST_30_DAYS
+    // macro hits that boundary and gets rejected with START_DATE_TOO_OLD. Use an explicit
+    // 29-day window via change_date_time >= <date> instead.
+    const startDate = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
       `SELECT change_event.change_date_time
        FROM change_event
-       WHERE change_event.change_date_time DURING LAST_30_DAYS
+       WHERE change_event.change_date_time >= '${startDate}'
          AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
        ORDER BY change_event.change_date_time DESC
        LIMIT 5`,
