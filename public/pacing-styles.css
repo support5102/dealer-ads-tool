@@ -826,3 +826,86 @@
   padding: 8px 20px;
   font-size: 13px;
 }
+
+/* ── Budget edit modal: tabs ─────────────────────────────────────────────── */
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.modal-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.modal-tab:hover { color: var(--text); }
+.modal-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent, #4a90e2);
+}
+.modal-tab-panel { display: none; }
+.modal-tab-panel.active { display: block; }
+
+/* ── Pending-revert callout banner ──────────────────────────────────────── */
+.modal-callout {
+  background: #4d3a14;
+  border: 1px solid #b88516;
+  border-radius: 6px;
+  color: #ffd166;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.modal-callout-icon { font-size: 18px; }
+
+/* ── Adjust-by-amount: scope radios ──────────────────────────────────────── */
+.modal-scope-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scope-radio {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.scope-radio.sub { padding-left: 24px; font-size: 13px; color: var(--text-muted); }
+.scope-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 4px;
+  margin-top: -4px;
+}
+.scope-sub.disabled { opacity: 0.5; pointer-events: none; }
+
+/* ── Adjust-by-amount: live preview ─────────────────────────────────────── */
+.modal-preview {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.preview-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: var(--text-muted);
+}
+.preview-row strong { color: var(--text); font-weight: 600; }

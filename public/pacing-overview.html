@@ -212,18 +212,62 @@
     </div>
     <div class="modal-body">
       <div class="modal-dealer" id="modalDealer"></div>
-      <div class="modal-field">
-        <label>Current budget</label>
-        <div class="modal-current" id="modalCurrentBudget"></div>
+
+      <div id="modalPendingRevertBanner" class="modal-callout" style="display:none">
+        <span class="modal-callout-icon">&#9888;</span>
+        <span id="modalPendingRevertText"></span>
       </div>
-      <div class="modal-field">
-        <label for="modalNewBudget">New monthly budget ($)</label>
-        <input type="number" id="modalNewBudget" min="0" step="0.01" />
+
+      <div class="modal-tabs">
+        <button type="button" class="modal-tab active" data-tab="set-total">Set total</button>
+        <button type="button" class="modal-tab" data-tab="adjust">Adjust by amount</button>
       </div>
-      <div class="modal-field">
-        <label for="modalNote">Note <span class="required">(required, min 5 chars)</span></label>
-        <textarea id="modalNote" rows="3" placeholder="Why is this changing? E.g., summer promo push, dealer requested increase, contract change..."></textarea>
+
+      <!-- Tab: Set total (existing flow) -->
+      <div class="modal-tab-panel active" data-tab-panel="set-total">
+        <div class="modal-field">
+          <label>Current budget</label>
+          <div class="modal-current" id="modalCurrentBudget"></div>
+        </div>
+        <div class="modal-field">
+          <label for="modalNewBudget">New monthly budget ($)</label>
+          <input type="number" id="modalNewBudget" min="0" step="0.01" />
+        </div>
+        <div class="modal-field">
+          <label for="modalNote">Note <span class="required">(required, min 5 chars)</span></label>
+          <textarea id="modalNote" rows="3" placeholder="Why is this changing? E.g., summer promo push, dealer requested increase, contract change..."></textarea>
+        </div>
       </div>
+
+      <!-- Tab: Adjust by amount (new) -->
+      <div class="modal-tab-panel" data-tab-panel="adjust">
+        <div class="modal-field">
+          <label for="modalAdjustAmount">Amount ($, signed)</label>
+          <input type="number" id="modalAdjustAmount" step="0.01" placeholder="e.g. 30 or -50" />
+        </div>
+        <div class="modal-field">
+          <label>Scope</label>
+          <div class="modal-scope-group">
+            <label class="scope-radio"><input type="radio" name="adjustScope" value="day" /> Day — adjusts daily budget</label>
+            <div class="scope-sub" id="adjustDaySubGroup">
+              <label class="scope-radio sub"><input type="radio" name="adjustDaySubScope" value="forward" /> Apply going forward (prorated)</label>
+              <label class="scope-radio sub"><input type="radio" name="adjustDaySubScope" value="whole_month" /> Apply for whole month (rebases current month)</label>
+            </div>
+            <label class="scope-radio"><input type="radio" name="adjustScope" value="rest_of_month" /> Rest of month — temporary, reverts next month</label>
+            <label class="scope-radio"><input type="radio" name="adjustScope" value="month" /> Month — permanent monthly change</label>
+          </div>
+        </div>
+        <div class="modal-field">
+          <label for="modalAdjustNote">Note <span class="required">(required, min 5 chars)</span></label>
+          <textarea id="modalAdjustNote" rows="3" placeholder="Why is this changing?"></textarea>
+        </div>
+        <div class="modal-preview" id="modalAdjustPreview">
+          <div class="preview-row"><span>Current monthly:</span> <strong id="previewCurrent">—</strong></div>
+          <div class="preview-row"><span>After change:</span> <strong id="previewAfter">—</strong></div>
+          <div class="preview-row"><span>Reverts:</span> <strong id="previewReverts">—</strong></div>
+        </div>
+      </div>
+
       <div id="modalFeedback" class="modal-feedback"></div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick="closeBudgetModal()">Cancel</button>
