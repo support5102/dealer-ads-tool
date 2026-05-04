@@ -1146,10 +1146,15 @@ async function getRecentChangeEvents(restCtx, sinceHours = 28) {
 async function getLastBudgetChange(restCtx) {
   const doQuery = restCtx._queryFn || queryViaRest;
   try {
-    // change_event enforces "must be within last 30 days" strictly. The DURING LAST_30_DAYS
-    // macro hits that boundary and gets rejected with START_DATE_TOO_OLD. Use an explicit
-    // 29-day window via change_date_time >= <date> instead.
-    const startDate = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // Scope the search to the current calendar month — "Days Since Change" resets on
+    // the 1st of each month. On day 30/31 of a 31-day month, start-of-month would be
+    // exactly 30 days ago and Google Ads rejects with START_DATE_TOO_OLD, so clamp to
+    // 28 days ago in that edge case.
+    const currentDate = new Date();
+    const startOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), 1));
+    const twentyEightDaysAgo = new Date(currentDate.getTime() - 28 * 24 * 60 * 60 * 1000);
+    const startDate = (startOfMonth.getTime() > twentyEightDaysAgo.getTime() ? startOfMonth : twentyEightDaysAgo)
+      .toISOString().slice(0, 10);
     // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
