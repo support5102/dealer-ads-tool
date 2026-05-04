@@ -84,6 +84,12 @@ function validateEnv(env = process.env) {
     // Freshdesk tickets). Set on the staging Cloud Run service so dev clicks
     // can't accidentally touch real dealer accounts or create real tickets.
     devMode: env.DEV_MODE === 'true',
+    // Adjust-by-amount budget tab — gates the new tab in the budget-edit modal.
+    // Set-total tab works regardless. Default OFF.
+    budgetAdjustByAmountEnabled: env.BUDGET_ADJUST_BY_AMOUNT_ENABLED === 'true',
+    // Budget-revert reminders — gates the daily runner that files Freshdesk
+    // tickets for due rest-of-month reverts. Default OFF (queue still grows).
+    budgetRevertRemindersEnabled: env.BUDGET_REVERT_REMINDERS_ENABLED === 'true',
   };
 
   return deepFreeze(config);
