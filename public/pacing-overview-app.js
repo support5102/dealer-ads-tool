@@ -330,40 +330,38 @@ checkAuth();
 
 // ── Budget Edit Modal ──
 
-let modalState = { dealerName: null, currentBudget: 0 };
+let modalState = {
+  dealerName: null,
+  currentBudget: 0,
+  activeTab: 'set-total',          // 'set-total' | 'adjust'
+  pendingRevert: null,              // populated by openBudgetModal from /pending-revert
+};
 
 function openBudgetModal(dealerName, currentBudget) {
-  modalState = { dealerName, currentBudget };
+  modalState = { dealerName, currentBudget, activeTab: 'set-total', pendingRevert: null };
+
   document.getElementById('modalDealer').textContent = dealerName;
   document.getElementById('modalCurrentBudget').textContent = '$' + Number(currentBudget).toFixed(2);
   document.getElementById('modalNewBudget').value = currentBudget;
   document.getElementById('modalNote').value = '';
+  document.getElementById('modalAdjustAmount').value = '';
+  document.getElementById('modalAdjustNote').value = '';
+  document.querySelectorAll('input[name="adjustScope"]').forEach(r => { r.checked = false; });
+  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => { r.checked = false; });
+  setSubGroupEnabled(false);
+
   document.getElementById('modalFeedback').textContent = '';
   document.getElementById('modalFeedback').className = 'modal-feedback';
+  setActiveTab('set-total');
   document.getElementById('budgetEditModal').style.display = 'flex';
+
   validateModalForm();
-  // Wire change listeners (first time only)
+  fetchPendingRevert(dealerName);
+
   if (!openBudgetModal._wired) {
-    document.getElementById('modalNewBudget').addEventListener('input', validateModalForm);
-    document.getElementById('modalNote').addEventListener('input', validateModalForm);
-    // Esc closes modal
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') closeBudgetModal();
-    });
-    // Enter submits if save button is enabled
-    document.getElementById('modalNote').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && e.ctrlKey) {
-        const btn = document.getElementById('modalSaveBtn');
-        if (!btn.disabled) saveBudget();
-      }
-    });
-    // Overlay click closes modal
-    document.getElementById('budgetEditModal').addEventListener('click', function(e) {
-      if (e.target === this) closeBudgetModal();
-    });
+    wireModal();
     openBudgetModal._wired = true;
   }
-  // Focus the new-budget input
   setTimeout(() => document.getElementById('modalNewBudget').focus(), 50);
 }
 
@@ -371,16 +369,158 @@ function closeBudgetModal() {
   document.getElementById('budgetEditModal').style.display = 'none';
 }
 
+function setActiveTab(tab) {
+  modalState.activeTab = tab;
+  document.querySelectorAll('.modal-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab);
+  });
+  document.querySelectorAll('.modal-tab-panel').forEach(el => {
+    el.classList.toggle('active', el.dataset.tabPanel === tab);
+  });
+  validateModalForm();
+}
+
+function setSubGroupEnabled(enabled) {
+  document.getElementById('adjustDaySubGroup').classList.toggle('disabled', !enabled);
+  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => { r.disabled = !enabled; });
+}
+
+function wireModal() {
+  document.querySelectorAll('.modal-tab').forEach(el => {
+    el.addEventListener('click', () => setActiveTab(el.dataset.tab));
+  });
+  document.getElementById('modalNewBudget').addEventListener('input', validateModalForm);
+  document.getElementById('modalNote').addEventListener('input', validateModalForm);
+  document.getElementById('modalAdjustAmount').addEventListener('input', () => {
+    validateModalForm();
+    renderPreview();
+  });
+  document.getElementById('modalAdjustNote').addEventListener('input', validateModalForm);
+  document.querySelectorAll('input[name="adjustScope"]').forEach(r => {
+    r.addEventListener('change', () => {
+      setSubGroupEnabled(r.value === 'day' && r.checked);
+      validateModalForm();
+      renderPreview();
+    });
+  });
+  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => {
+    r.addEventListener('change', () => {
+      validateModalForm();
+      renderPreview();
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeBudgetModal();
+  });
+  document.querySelectorAll('#modalNote, #modalAdjustNote').forEach(el => {
+    el.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        const btn = document.getElementById('modalSaveBtn');
+        if (!btn.disabled) saveBudget();
+      }
+    });
+  });
+  document.getElementById('budgetEditModal').addEventListener('click', function(e) {
+    if (e.target === this) closeBudgetModal();
+  });
+}
+
+function getSelectedScope() {
+  const r = document.querySelector('input[name="adjustScope"]:checked');
+  return r ? r.value : null;
+}
+function getSelectedDaySubScope() {
+  const r = document.querySelector('input[name="adjustDaySubScope"]:checked');
+  return r ? r.value : null;
+}
+
 function validateModalForm() {
-  const budgetInput = document.getElementById('modalNewBudget');
-  const noteInput = document.getElementById('modalNote');
   const saveBtn = document.getElementById('modalSaveBtn');
-  const budget = parseFloat(budgetInput.value);
-  const noteOk = noteInput.value.trim().length >= 5;
-  const budgetOk = Number.isFinite(budget) && budget > 0;
-  // Also require change from current (don't save a no-op)
-  const changed = Math.abs(budget - modalState.currentBudget) > 0.005;
-  saveBtn.disabled = !(noteOk && budgetOk && changed);
+  if (modalState.activeTab === 'set-total') {
+    const budget = parseFloat(document.getElementById('modalNewBudget').value);
+    const note = document.getElementById('modalNote').value.trim();
+    const noteOk = note.length >= 5;
+    const budgetOk = Number.isFinite(budget) && budget > 0;
+    const changed = Math.abs(budget - modalState.currentBudget) > 0.005;
+    saveBtn.disabled = !(noteOk && budgetOk && changed);
+  } else {
+    const amount = parseFloat(document.getElementById('modalAdjustAmount').value);
+    const note = document.getElementById('modalAdjustNote').value.trim();
+    const scope = getSelectedScope();
+    const daySubScope = getSelectedDaySubScope();
+    const noteOk = note.length >= 5;
+    const amountOk = Number.isFinite(amount) && amount !== 0;
+    const scopeOk = scope === 'rest_of_month' || scope === 'month' ||
+                    (scope === 'day' && (daySubScope === 'forward' || daySubScope === 'whole_month'));
+    saveBtn.disabled = !(noteOk && amountOk && scopeOk);
+  }
+}
+
+function renderPreview() {
+  const amount = parseFloat(document.getElementById('modalAdjustAmount').value);
+  const scope = getSelectedScope();
+  const daySubScope = getSelectedDaySubScope();
+  const current = modalState.currentBudget;
+  const elCurrent = document.getElementById('previewCurrent');
+  const elAfter   = document.getElementById('previewAfter');
+  const elReverts = document.getElementById('previewReverts');
+  elCurrent.textContent = '$' + Number(current).toFixed(2);
+
+  if (!Number.isFinite(amount) || amount === 0 || !scope) {
+    elAfter.textContent = '—';
+    elReverts.textContent = '—';
+    return;
+  }
+  const today = new Date();
+  const D = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const R = D - today.getDate() + 1;
+  const oldDaily = current / D;
+
+  let after;
+  let revertText = 'No (permanent)';
+  if (scope === 'rest_of_month') {
+    after = current + amount;
+    const firstNext = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const monthName = firstNext.toLocaleString('en-US', { month: 'short' });
+    revertText = `Yes — reverts on ${monthName} 1`;
+  } else if (scope === 'month') {
+    after = current + amount;
+  } else if (scope === 'day') {
+    if (daySubScope === 'forward') {
+      after = current + amount * R;
+    } else if (daySubScope === 'whole_month') {
+      after = (oldDaily + amount) * D;
+    } else {
+      elAfter.textContent = '—';
+      elReverts.textContent = '—';
+      return;
+    }
+  }
+  elAfter.textContent = '$' + Number(after).toFixed(2);
+  elReverts.textContent = revertText;
+}
+
+async function fetchPendingRevert(dealerName) {
+  const banner = document.getElementById('modalPendingRevertBanner');
+  const text = document.getElementById('modalPendingRevertText');
+  banner.style.display = 'none';
+  try {
+    const res = await fetch(`/api/dealers/${encodeURIComponent(dealerName)}/pending-revert`, {
+      credentials: 'include',
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const pr = data.pendingRevert;
+    if (!pr) return;
+    modalState.pendingRevert = pr;
+    const dueDate = new Date(pr.revertDueDate);
+    const monthName = dueDate.toLocaleString('en-US', { month: 'short' });
+    const day = dueDate.getDate();
+    const sign = pr.bumpAmount >= 0 ? '+' : '−';
+    const absAmt = Math.abs(pr.bumpAmount).toFixed(2);
+    text.textContent = `This dealer has a pending revert: ${sign}$${absAmt} rest-of-month queued for ${monthName} ${day}. Saving any change on this modal will cancel it.`;
+    banner.style.display = 'flex';
+  } catch (_) { /* non-fatal */ }
 }
 
 async function saveBudget() {
@@ -389,15 +529,30 @@ async function saveBudget() {
   saveBtn.disabled = true;
   feedback.textContent = '';
   try {
-    const res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        monthlyBudget: parseFloat(document.getElementById('modalNewBudget').value),
-        note: document.getElementById('modalNote').value.trim(),
-      }),
-    });
+    let res;
+    if (modalState.activeTab === 'set-total') {
+      res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          monthlyBudget: parseFloat(document.getElementById('modalNewBudget').value),
+          note: document.getElementById('modalNote').value.trim(),
+        }),
+      });
+    } else {
+      res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget-adjust`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: parseFloat(document.getElementById('modalAdjustAmount').value),
+          scope: getSelectedScope(),
+          daySubScope: getSelectedDaySubScope(),
+          note: document.getElementById('modalAdjustNote').value.trim(),
+        }),
+      });
+    }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       feedback.textContent = data.error || `Save failed (HTTP ${res.status})`;
@@ -407,7 +562,6 @@ async function saveBudget() {
     }
     feedback.textContent = 'Saved.';
     feedback.className = 'modal-feedback ok';
-    // Reload the overview so the new budget shows immediately
     setTimeout(() => {
       closeBudgetModal();
       if (typeof loadOverview === 'function') loadOverview();
