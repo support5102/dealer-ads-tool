@@ -207,6 +207,66 @@ function createDealersRouter(config) {
     }
   });
 
+  // ── POST /api/dealers/:dealerName/budget-adjust ──────────────────────────────
+  // Adjust by amount with one of four scopes (day_forward / day_whole_month /
+  // rest_of_month / month). Cancels any open pending revert. For rest_of_month,
+  // creates a new pending_budget_reverts row.
+  router.post('/api/dealers/:dealerName/budget-adjust', requireAuth, async (req, res, next) => {
+    try {
+      const dealerName = decodeURIComponent(req.params.dealerName);
+      const { amount, scope, daySubScope, note } = req.body || {};
+
+      if (!note || String(note).trim().length < 5) {
+        return res.status(400).json({ error: 'note is required and must be at least 5 characters' });
+      }
+      const amountNum = parseFloat(amount);
+      if (!Number.isFinite(amountNum) || amountNum === 0) {
+        return res.status(400).json({ error: 'amount must be a finite non-zero number' });
+      }
+      const validScopes = ['day', 'rest_of_month', 'month'];
+      if (!validScopes.includes(scope)) {
+        return res.status(400).json({ error: `scope must be one of: ${validScopes.join(', ')}` });
+      }
+      if (scope === 'day' && !['forward', 'whole_month'].includes(daySubScope)) {
+        return res.status(400).json({ error: 'daySubScope must be "forward" or "whole_month" when scope="day"' });
+      }
+
+      const changedBy = req.session.userEmail || 'unknown';
+      let result;
+      try {
+        result = await store.applyBudgetAdjust({
+          dealerName, scope, daySubScope, amount: amountNum,
+          note: String(note).trim(), changedBy,
+        });
+      } catch (storeErr) {
+        if (storeErr.message && storeErr.message.includes('not found')) {
+          return res.status(404).json({ error: storeErr.message });
+        }
+        if (storeErr.message && /must be|positive|at least 5/.test(storeErr.message)) {
+          return res.status(400).json({ error: storeErr.message });
+        }
+        throw storeErr;
+      }
+
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── GET /api/dealers/:dealerName/pending-revert ──────────────────────────────
+  // Returns the open pending revert for a dealer (null if none). Used by the
+  // modal callout banner.
+  router.get('/api/dealers/:dealerName/pending-revert', requireAuth, async (req, res, next) => {
+    try {
+      const dealerName = decodeURIComponent(req.params.dealerName);
+      const pendingRevert = await store.getPendingRevert(dealerName);
+      res.json({ pendingRevert });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ── DELETE /api/dealers/:dealerName ───────────────────────────────────────────
   router.delete('/api/dealers/:dealerName', requireAuth, async (req, res, next) => {
     try {
