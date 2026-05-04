@@ -248,6 +248,21 @@ if (require.main === module) {
     console.log('[change-alerts] scheduler registered (stub runner)');
   }
 
+  // Budget revert reminders — daily (feature-flagged independently)
+  if (config.budgetRevertRemindersEnabled) {
+    const scheduler = require('./services/scheduler');
+    const budgetRevertRunner = require('./services/budget-revert-runner');
+    scheduler.registerJob(
+      'budget-revert-daily',
+      async () => budgetRevertRunner.runBudgetRevertReminders({
+        today: new Date(),
+      }),
+      24 * 60 * 60 * 1000,
+      { runImmediately: false }
+    );
+    console.log('[budget-revert] scheduler registered');
+  }
+
   createApp(config).listen(PORT, () => {
     console.log(`\n⚡ Dealer Ads Tool running on port ${PORT}`);
     console.log(`   URL: ${config.app.url}\n`);
