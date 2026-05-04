@@ -327,6 +327,23 @@ function renderFailed(failed) {
 
 // ── Init ──
 checkAuth();
+loadFeatureFlags();
+
+// ── Feature flags ──
+
+let featureFlags = { budgetAdjustByAmountEnabled: false };
+
+async function loadFeatureFlags() {
+  try {
+    const res = await fetch('/api/config/features', { credentials: 'include' });
+    if (!res.ok) return;
+    featureFlags = await res.json();
+    if (featureFlags.budgetAdjustByAmountEnabled) {
+      const adjustTabBtn = document.querySelector('.modal-tab[data-tab="adjust"]');
+      if (adjustTabBtn) adjustTabBtn.style.display = '';
+    }
+  } catch (_) { /* defensive: leave tab hidden */ }
+}
 
 // ── Budget Edit Modal ──
 

@@ -111,3 +111,30 @@ describe('GET /api/dealers/:dealerName/pending-revert', () => {
     expect(res.body.pendingRevert.bumpAmount).toBe(30);
   });
 });
+
+describe('GET /api/config/features', () => {
+  test('default config (flag unset) → budgetAdjustByAmountEnabled is false', async () => {
+    const app = createTestApp();
+    const agent = await authenticatedAgent(app);
+
+    const res = await agent.get('/api/config/features');
+    expect(res.status).toBe(200);
+    expect(res.body.budgetAdjustByAmountEnabled).toBe(false);
+  });
+
+  test('flag set to true in config → budgetAdjustByAmountEnabled is true', async () => {
+    const app = createTestApp({ budgetAdjustByAmountEnabled: true });
+    const agent = await authenticatedAgent(app);
+
+    const res = await agent.get('/api/config/features');
+    expect(res.status).toBe(200);
+    expect(res.body.budgetAdjustByAmountEnabled).toBe(true);
+  });
+
+  test('returns 401 when not authenticated', async () => {
+    const app = createTestApp();
+    const supertest = require('supertest');
+    const res = await supertest(app).get('/api/config/features');
+    expect(res.status).toBe(401);
+  });
+});

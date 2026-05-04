@@ -267,6 +267,15 @@ function createDealersRouter(config) {
     }
   });
 
+  // ── GET /api/config/features ─────────────────────────────────────────────────
+  // Feature-flag visibility for the frontend. Reads from the same config object
+  // validateEnv() produces. Default OFF for any flag not explicitly set in env.
+  router.get('/api/config/features', requireAuth, (req, res) => {
+    res.json({
+      budgetAdjustByAmountEnabled: !!(config && config.budgetAdjustByAmountEnabled),
+    });
+  });
+
   // ── DELETE /api/dealers/:dealerName ───────────────────────────────────────────
   router.delete('/api/dealers/:dealerName', requireAuth, async (req, res, next) => {
     try {

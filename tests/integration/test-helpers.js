@@ -42,10 +42,11 @@ const TEST_CONFIG = {
  * Creates a test Express app with fake config.
  * Includes a test-only session injection endpoint.
  *
+ * @param {object} [overrides] - Config overrides merged on top of TEST_CONFIG
  * @returns {express.Application}
  */
-function createTestApp() {
-  const app = createApp(TEST_CONFIG);
+function createTestApp(overrides = {}) {
+  const app = createApp({ ...TEST_CONFIG, ...overrides });
 
   // Test-only endpoint to set session data (registered once per app instance).
   // Placed after createApp routes but before any test sends requests.
