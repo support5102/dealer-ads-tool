@@ -117,6 +117,34 @@ describe('compute() — set_total (used by Set-total tab)', () => {
   });
 });
 
+describe('compute() — scope: day_rest_of_month (temporary daily bump)', () => {
+  test('+$30 day rest_of_month on May 15: monthly += 30×17, daily UNCHANGED, dailyBudgetWritten=false', () => {
+    const result = math.compute({
+      scope: 'day',
+      daySubScope: 'rest_of_month',
+      amount: 30,
+      currentMonthly: 3000,
+      today: MAY_15,
+    });
+    expect(result.newMonthlyBudget).toBe(3510);
+    expect(result.newDailyBudget).toBeNull();
+    expect(result.dailyBudgetWritten).toBe(false);
+  });
+
+  test('-$10 (decrease) day rest_of_month is supported', () => {
+    const result = math.compute({
+      scope: 'day',
+      daySubScope: 'rest_of_month',
+      amount: -10,
+      currentMonthly: 3000,
+      today: MAY_15,
+    });
+    expect(result.newMonthlyBudget).toBe(2830);   // 3000 - 10*17
+    expect(result.newDailyBudget).toBeNull();
+    expect(result.dailyBudgetWritten).toBe(false);
+  });
+});
+
 describe('compute() — validation', () => {
   test('amount: 0 throws', () => {
     expect(() => math.compute({

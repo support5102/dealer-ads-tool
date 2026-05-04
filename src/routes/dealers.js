@@ -227,8 +227,8 @@ function createDealersRouter(config) {
       if (!validScopes.includes(scope)) {
         return res.status(400).json({ error: `scope must be one of: ${validScopes.join(', ')}` });
       }
-      if (scope === 'day' && !['forward', 'whole_month'].includes(daySubScope)) {
-        return res.status(400).json({ error: 'daySubScope must be "forward" or "whole_month" when scope="day"' });
+      if (scope === 'day' && !['forward', 'whole_month', 'rest_of_month'].includes(daySubScope)) {
+        return res.status(400).json({ error: 'daySubScope must be "forward", "whole_month", or "rest_of_month" when scope="day"' });
       }
 
       const changedBy = req.session.userEmail || 'unknown';

@@ -425,6 +425,37 @@ describe('applyBudgetAdjust() — rest_of_month scope', () => {
   });
 });
 
+describe('applyBudgetAdjust() — day rest_of_month (temporary)', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('+$30 day rest_of_month: monthly += 30×17 = 3510, daily unchanged, pending revert created', async () => {
+    const result = await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'day', daySubScope: 'rest_of_month', amount: 30,
+      note: 'Daily bump just for the rest of May',
+      today: MAY_15,
+    });
+
+    expect(result.newMonthlyBudget).toBe(3510);
+    expect(result.newDailyBudget).toBeNull();
+    expect(result.pendingRevertId).not.toBeNull();
+
+    await store.loadAll();
+    const goal = store.goalFor('Test Dealer');
+    expect(goal.monthlyBudget).toBe(3510);
+    expect(goal.dailyBudget == null).toBe(true);
+
+    const pending = await store.getPendingRevert('Test Dealer');
+    expect(pending).not.toBeNull();
+    expect(pending.bumpAmount).toBe(510);          // monthly delta, not the user-typed $30
+    expect(pending.baselineMonthlyBudget).toBe(3000);
+    expect(pending.bumpedMonthlyBudget).toBe(3510);
+    expect(pending.revertDueDate.toISOString().slice(0, 10)).toBe('2026-06-01');
+  });
+});
+
 describe('applyBudgetAdjust() — pending-revert cancellation (E2/E3)', () => {
   beforeEach(async () => {
     await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });

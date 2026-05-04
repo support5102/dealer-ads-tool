@@ -365,7 +365,8 @@ function openBudgetModal(dealerName, currentBudget) {
   document.getElementById('modalAdjustNote').value = '';
   document.querySelectorAll('input[name="adjustScope"]').forEach(r => { r.checked = false; });
   document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => { r.checked = false; });
-  setSubGroupEnabled(false);
+  document.querySelectorAll('input[name="adjustMonthSubScope"]').forEach(r => { r.checked = false; });
+  setSubGroupEnabled(null);
 
   document.getElementById('modalFeedback').textContent = '';
   document.getElementById('modalFeedback').className = 'modal-feedback';
@@ -397,9 +398,14 @@ function setActiveTab(tab) {
   validateModalForm();
 }
 
-function setSubGroupEnabled(enabled) {
-  document.getElementById('adjustDaySubGroup').classList.toggle('disabled', !enabled);
-  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => { r.disabled = !enabled; });
+function setSubGroupEnabled(activeScope) {
+  // activeScope: 'day' | 'month' | null. Enables only the matching sub-group.
+  const dayActive   = activeScope === 'day';
+  const monthActive = activeScope === 'month';
+  document.getElementById('adjustDaySubGroup').classList.toggle('disabled', !dayActive);
+  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => { r.disabled = !dayActive; });
+  document.getElementById('adjustMonthSubGroup').classList.toggle('disabled', !monthActive);
+  document.querySelectorAll('input[name="adjustMonthSubScope"]').forEach(r => { r.disabled = !monthActive; });
 }
 
 function wireModal() {
@@ -415,12 +421,12 @@ function wireModal() {
   document.getElementById('modalAdjustNote').addEventListener('input', validateModalForm);
   document.querySelectorAll('input[name="adjustScope"]').forEach(r => {
     r.addEventListener('change', () => {
-      setSubGroupEnabled(r.value === 'day' && r.checked);
+      setSubGroupEnabled(r.checked ? r.value : null);
       validateModalForm();
       renderPreview();
     });
   });
-  document.querySelectorAll('input[name="adjustDaySubScope"]').forEach(r => {
+  document.querySelectorAll('input[name="adjustDaySubScope"], input[name="adjustMonthSubScope"]').forEach(r => {
     r.addEventListener('change', () => {
       validateModalForm();
       renderPreview();
@@ -450,6 +456,10 @@ function getSelectedDaySubScope() {
   const r = document.querySelector('input[name="adjustDaySubScope"]:checked');
   return r ? r.value : null;
 }
+function getSelectedMonthSubScope() {
+  const r = document.querySelector('input[name="adjustMonthSubScope"]:checked');
+  return r ? r.value : null;
+}
 
 function validateModalForm() {
   const saveBtn = document.getElementById('modalSaveBtn');
@@ -464,11 +474,13 @@ function validateModalForm() {
     const amount = parseFloat(document.getElementById('modalAdjustAmount').value);
     const note = document.getElementById('modalAdjustNote').value.trim();
     const scope = getSelectedScope();
-    const daySubScope = getSelectedDaySubScope();
+    const daySub = getSelectedDaySubScope();
+    const monthSub = getSelectedMonthSubScope();
     const noteOk = note.length >= 5;
     const amountOk = Number.isFinite(amount) && amount !== 0;
-    const scopeOk = scope === 'rest_of_month' || scope === 'month' ||
-                    (scope === 'day' && (daySubScope === 'forward' || daySubScope === 'whole_month'));
+    const scopeOk =
+      (scope === 'day'   && ['forward', 'whole_month', 'rest_of_month'].includes(daySub)) ||
+      (scope === 'month' && ['permanent', 'rest_of_month'].includes(monthSub));
     saveBtn.disabled = !(noteOk && amountOk && scopeOk);
   }
 }
@@ -476,7 +488,8 @@ function validateModalForm() {
 function renderPreview() {
   const amount = parseFloat(document.getElementById('modalAdjustAmount').value);
   const scope = getSelectedScope();
-  const daySubScope = getSelectedDaySubScope();
+  const daySub = getSelectedDaySubScope();
+  const monthSub = getSelectedMonthSubScope();
   const current = modalState.currentBudget;
   const elCurrent = document.getElementById('previewCurrent');
   const elAfter   = document.getElementById('previewAfter');
@@ -492,21 +505,30 @@ function renderPreview() {
   const D = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const R = D - today.getDate() + 1;
   const oldDaily = current / D;
+  const firstNext = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const nextMonthLabel = firstNext.toLocaleString('en-US', { month: 'short' }) + ' 1';
 
   let after;
   let revertText = 'No (permanent)';
-  if (scope === 'rest_of_month') {
-    after = current + amount;
-    const firstNext = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    const monthName = firstNext.toLocaleString('en-US', { month: 'short' });
-    revertText = `Yes — reverts on ${monthName} 1`;
-  } else if (scope === 'month') {
-    after = current + amount;
-  } else if (scope === 'day') {
-    if (daySubScope === 'forward') {
+  if (scope === 'day') {
+    if (daySub === 'forward') {
       after = current + amount * R;
-    } else if (daySubScope === 'whole_month') {
+    } else if (daySub === 'whole_month') {
       after = (oldDaily + amount) * D;
+    } else if (daySub === 'rest_of_month') {
+      after = current + amount * R;
+      revertText = `Yes — reverts on ${nextMonthLabel}`;
+    } else {
+      elAfter.textContent = '—';
+      elReverts.textContent = '—';
+      return;
+    }
+  } else if (scope === 'month') {
+    if (monthSub === 'permanent') {
+      after = current + amount;
+    } else if (monthSub === 'rest_of_month') {
+      after = current + amount;
+      revertText = `Yes — reverts on ${nextMonthLabel}`;
     } else {
       elAfter.textContent = '—';
       elReverts.textContent = '—';
@@ -558,14 +580,28 @@ async function saveBudget() {
         }),
       });
     } else {
+      const uiScope = getSelectedScope();
+      const uiDaySub = getSelectedDaySubScope();
+      const uiMonthSub = getSelectedMonthSubScope();
+      // Translate UI to backend payload:
+      //   Day  + (forward|whole_month|rest_of_month) → scope='day',           daySubScope=<sub>
+      //   Month + permanent                           → scope='month'
+      //   Month + rest_of_month                       → scope='rest_of_month' (existing legacy enum)
+      let payloadScope = uiScope;
+      let payloadDaySub = null;
+      if (uiScope === 'day') {
+        payloadDaySub = uiDaySub;
+      } else if (uiScope === 'month') {
+        payloadScope = uiMonthSub === 'rest_of_month' ? 'rest_of_month' : 'month';
+      }
       res = await fetch(`/api/dealers/${encodeURIComponent(modalState.dealerName)}/budget-adjust`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount: parseFloat(document.getElementById('modalAdjustAmount').value),
-          scope: getSelectedScope(),
-          daySubScope: getSelectedDaySubScope(),
+          scope: payloadScope,
+          daySubScope: payloadDaySub,
           note: document.getElementById('modalAdjustNote').value.trim(),
         }),
       });

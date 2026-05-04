@@ -34,6 +34,24 @@ describe('POST /api/dealers/:dealerName/budget-adjust', () => {
     expect(res.body.pendingRevertId).not.toBeNull();
   });
 
+  test('day scope with daySubScope=rest_of_month: 200 + pendingRevertId set', async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+    const app = createTestApp();
+    const agent = await authenticatedAgent(app);
+
+    const res = await agent
+      .post(`/api/dealers/${encodeURIComponent('Test Dealer')}/budget-adjust`)
+      .send({
+        amount: 30, scope: 'day', daySubScope: 'rest_of_month',
+        note: 'Daily +$30 just for rest of this month',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.newMonthlyBudget).toBeGreaterThan(3000);
+    expect(res.body.newDailyBudget).toBeNull();
+    expect(res.body.pendingRevertId).not.toBeNull();
+  });
+
   test('day scope without daySubScope returns 400', async () => {
     await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
     const app = createTestApp();

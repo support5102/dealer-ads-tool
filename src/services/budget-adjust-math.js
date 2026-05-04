@@ -44,22 +44,31 @@ function compute(opts) {
     newDailyBudget = round2(newTotal / D);
     dailyBudgetWritten = true;
   } else if (scope === 'day') {
-    if (daySubScope !== 'forward' && daySubScope !== 'whole_month') {
-      throw new Error('daySubScope must be "forward" or "whole_month" when scope="day"');
+    const validDaySubScopes = ['forward', 'whole_month', 'rest_of_month'];
+    if (!validDaySubScopes.includes(daySubScope)) {
+      throw new Error('daySubScope must be "forward", "whole_month", or "rest_of_month" when scope="day"');
     }
     requireFiniteNonZero(amount, 'amount');
     const oldDaily = currentMonthly / D;
-    const newDaily = oldDaily + amount;
-    if (newDaily <= 0) {
-      throw new Error('Resulting daily_budget must be positive');
-    }
-    newDailyBudget = round2(newDaily);
-    if (daySubScope === 'forward') {
+    if (daySubScope === 'rest_of_month') {
+      // Temporary daily bump for the remaining days only — daily_budget unchanged,
+      // monthly_budget gains amount × R for this month, auto-revert next month.
       newMonthlyBudget = round2(currentMonthly + amount * R);
+      newDailyBudget = null;
+      dailyBudgetWritten = false;
     } else {
-      newMonthlyBudget = round2(newDaily * D);
+      const newDaily = oldDaily + amount;
+      if (newDaily <= 0) {
+        throw new Error('Resulting daily_budget must be positive');
+      }
+      newDailyBudget = round2(newDaily);
+      if (daySubScope === 'forward') {
+        newMonthlyBudget = round2(currentMonthly + amount * R);
+      } else {
+        newMonthlyBudget = round2(newDaily * D);
+      }
+      dailyBudgetWritten = true;
     }
-    dailyBudgetWritten = true;
   } else if (scope === 'rest_of_month') {
     requireFiniteNonZero(amount, 'amount');
     newMonthlyBudget = round2(currentMonthly + amount);

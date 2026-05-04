@@ -520,11 +520,12 @@ function applyBudgetAdjustInMemory({ dealerName, scope, daySubScope, amount, not
   inMemoryChanges.push(changeRow);
 
   let pendingRevertId = null;
-  if (scope === 'rest_of_month') {
+  const isTemporary = scope === 'rest_of_month' || (scope === 'day' && daySubScope === 'rest_of_month');
+  if (isTemporary) {
     pendingRevertId = nextRevertId++;
     inMemoryReverts.push({
       id: pendingRevertId, dealerName,
-      bumpAmount: amount,
+      bumpAmount: Math.round((newMonthlyBudget - currentMonthly) * 100) / 100,
       baselineMonthlyBudget: currentMonthly,
       bumpedMonthlyBudget: newMonthlyBudget,
       appliedChangeId: changeId,
@@ -597,14 +598,16 @@ async function applyBudgetAdjustDb({ pool, dealerName, scope, daySubScope, amoun
     const newChangeId = changeRes.rows[0].id;
 
     let pendingRevertId = null;
-    if (scope === 'rest_of_month') {
+    const isTemporary = scope === 'rest_of_month' || (scope === 'day' && daySubScope === 'rest_of_month');
+    if (isTemporary) {
+      const monthlyDelta = Math.round((newMonthlyBudget - currentMonthly) * 100) / 100;
       const revertRes = await client.query(
         `INSERT INTO pending_budget_reverts
            (dealer_name, bump_amount, baseline_monthly_budget, bumped_monthly_budget,
             applied_change_id, applied_by, revert_due_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [dealerName, amount, currentMonthly, newMonthlyBudget, newChangeId, changedBy,
+        [dealerName, monthlyDelta, currentMonthly, newMonthlyBudget, newChangeId, changedBy,
          math.firstOfNextMonth(today)]
       );
       pendingRevertId = revertRes.rows[0].id;
