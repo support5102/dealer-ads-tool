@@ -168,8 +168,93 @@ async function initialize() {
       console.error('Database initialization error (idx_dealer_budget_changes_dealer):', err.message);
     }
 
+    // Step 2: Add new columns to dealer_budget_changes
+    try {
+      await p.query(`
+        ALTER TABLE dealer_budget_changes
+          ADD COLUMN IF NOT EXISTS change_scope TEXT,
+          ADD COLUMN IF NOT EXISTS change_amount NUMERIC(10,2),
+          ADD COLUMN IF NOT EXISTS linked_revert_id INTEGER
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_budget_changes columns):', err.message);
+    }
+
+    // Step 3: Add pending_budget_reverts table
+    try {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS pending_budget_reverts (
+          id SERIAL PRIMARY KEY,
+          dealer_name TEXT NOT NULL,
+          bump_amount NUMERIC(10,2) NOT NULL,
+          baseline_monthly_budget NUMERIC(10,2) NOT NULL,
+          bumped_monthly_budget NUMERIC(10,2) NOT NULL,
+          applied_change_id INTEGER REFERENCES dealer_budget_changes(id),
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          applied_by TEXT,
+          revert_due_date DATE NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          ticket_id TEXT,
+          ticket_filed_at TIMESTAMPTZ
+        )
+      `);
+    } catch (err) {
+      console.error('Database initialization error (pending_budget_reverts):', err.message);
+    }
+
+    try {
+      await p.query(`
+        CREATE INDEX IF NOT EXISTS idx_pending_reverts_due
+          ON pending_budget_reverts (status, revert_due_date)
+      `);
+      await p.query(`
+        CREATE INDEX IF NOT EXISTS idx_pending_reverts_dealer
+          ON pending_budget_reverts (dealer_name, status)
+      `);
+    } catch (err) {
+      console.error('Database initialization error (pending_budget_reverts indexes):', err.message);
+    }
+
+    // Step 4: Add deferred FK on dealer_budget_changes.linked_revert_id
+    try {
+      await p.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conname = 'dealer_budget_changes_linked_revert_id_fkey'
+          ) THEN
+            ALTER TABLE dealer_budget_changes
+              ADD CONSTRAINT dealer_budget_changes_linked_revert_id_fkey
+              FOREIGN KEY (linked_revert_id) REFERENCES pending_budget_reverts(id);
+          END IF;
+        END $$;
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_budget_changes FK):', err.message);
+    }
+
+    // Step 5: Add daily_budget column to dealer_goals
+    try {
+      await p.query(`
+        ALTER TABLE dealer_goals
+          ADD COLUMN IF NOT EXISTS daily_budget NUMERIC(10,2)
+      `);
+      await p.query(`
+        UPDATE dealer_goals
+           SET daily_budget = ROUND(
+                 monthly_budget::numeric
+                 / EXTRACT(DAY FROM (DATE_TRUNC('month', NOW()) + INTERVAL '1 month - 1 day'))::numeric,
+                 2
+               )
+         WHERE monthly_budget IS NOT NULL AND daily_budget IS NULL
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_goals.daily_budget):', err.message);
+    }
+
     initialized = true;
-    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup, dealer_goals, dealer_budget_changes tables ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup, dealer_goals, dealer_budget_changes, pending_budget_reverts tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }
