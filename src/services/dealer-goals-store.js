@@ -12,11 +12,14 @@
  */
 
 const db = require('./database');
+const math = require('./budget-adjust-math');
 
 // ── In-memory fallback state (used when DATABASE_URL is not set) ──
 const inMemoryGoals = new Map();   // dealerName → goal object
-const inMemoryChanges = [];        // [{ id, dealerName, oldBudget, newBudget, note, changedAt, changedBy }]
+const inMemoryChanges = [];        // [{ id, dealerName, oldBudget, newBudget, note, changedAt, changedBy, changeScope, changeAmount, linkedRevertId }]
+const inMemoryReverts = [];        // [{ id, dealerName, bumpAmount, baselineMonthlyBudget, bumpedMonthlyBudget, appliedChangeId, appliedAt, appliedBy, revertDueDate, status, ticketId, ticketFiledAt }]
 let nextChangeId = 1;
+let nextRevertId = 1;
 
 // ── Sync cache (populated by loadAll, invalidated on writes) ──
 let cache = null; // null = stale; Map<dealerName, goal> = fresh
@@ -35,6 +38,7 @@ function rowToGoal(row) {
   return {
     dealerName:    row.dealer_name,
     monthlyBudget: row.monthly_budget !== null ? Number(row.monthly_budget) : null,
+    dailyBudget:   row.daily_budget   != null ? Number(row.daily_budget)    : null,
     newBudget:     row.new_budget     !== null ? Number(row.new_budget)     : null,
     usedBudget:    row.used_budget    !== null ? Number(row.used_budget)    : null,
     miscNotes:     row.misc_notes     ?? null,
@@ -53,12 +57,15 @@ function rowToGoal(row) {
  */
 function rowToChange(row) {
   return {
-    id:         row.id,
-    oldBudget:  row.old_monthly_budget !== null ? Number(row.old_monthly_budget) : null,
-    newBudget:  Number(row.new_monthly_budget),
-    note:       row.note,
-    changedAt:  row.changed_at,
-    changedBy:  row.changed_by ?? null,
+    id:               row.id,
+    oldBudget:        row.old_monthly_budget !== null ? Number(row.old_monthly_budget) : null,
+    newBudget:        Number(row.new_monthly_budget),
+    note:             row.note,
+    changedAt:        row.changed_at,
+    changedBy:        row.changed_by ?? null,
+    changeScope:      row.change_scope ?? null,
+    changeAmount:     row.change_amount != null ? Number(row.change_amount) : null,
+    linkedRevertId:   row.linked_revert_id ?? null,
   };
 }
 
@@ -228,6 +235,7 @@ async function upsertGoal(goal) {
   const result = {
     dealerName,
     monthlyBudget: Number(monthlyBudget),
+    dailyBudget:   inMemoryGoals.get(dealerName)?.dailyBudget ?? null,
     newBudget:     newBudget     !== null ? Number(newBudget)     : null,
     usedBudget:    usedBudget    !== null ? Number(usedBudget)    : null,
     miscNotes:     miscNotes,
@@ -240,13 +248,16 @@ async function upsertGoal(goal) {
 
   if (isNew) {
     inMemoryChanges.push({
-      id:         nextChangeId++,
+      id:             nextChangeId++,
       dealerName,
-      oldBudget:  null,
-      newBudget:  Number(monthlyBudget),
-      note:       'Dealer added',
-      changedAt:  new Date(),
-      changedBy:  updatedBy ?? null,
+      oldBudget:      null,
+      newBudget:      Number(monthlyBudget),
+      note:           'Dealer added',
+      changedAt:      new Date(),
+      changedBy:      updatedBy ?? null,
+      changeScope:    null,
+      changeAmount:   null,
+      linkedRevertId: null,
     });
   }
 
@@ -267,7 +278,11 @@ async function upsertGoal(goal) {
  * @returns {Promise<void>}
  * @throws {Error} If note is missing/too short, budget is invalid, or dealer not found
  */
-async function updateMonthlyBudget(dealerName, newBudget, note, changedBy) {
+async function updateMonthlyBudget(dealerName, newBudget, note, changedBy, options = {}) {
+  const today = options.today || new Date();
+  const D = math.daysInMonth(today);
+  const newDaily = Math.round((newBudget / D) * 100) / 100;
+
   // Validate note
   if (note == null || String(note).trim().length === 0) {
     throw new Error('Note must be at least 5 characters');
@@ -301,14 +316,24 @@ async function updateMonthlyBudget(dealerName, newBudget, note, changedBy) {
         : null;
 
       await client.query(
-        'UPDATE dealer_goals SET monthly_budget = $1, updated_at = NOW(), updated_by = $2 WHERE dealer_name = $3',
-        [newBudget, changedBy ?? null, dealerName]
+        `UPDATE pending_budget_reverts
+            SET status='cancelled'
+          WHERE dealer_name = $1 AND status = 'pending'`,
+        [dealerName]
+      );
+
+      await client.query(
+        `UPDATE dealer_goals
+            SET monthly_budget = $1, daily_budget = $2,
+                updated_at = NOW(), updated_by = $3
+          WHERE dealer_name = $4`,
+        [newBudget, newDaily, changedBy ?? null, dealerName]
       );
 
       await client.query(`
         INSERT INTO dealer_budget_changes
-          (dealer_name, old_monthly_budget, new_monthly_budget, note, changed_by)
-        VALUES ($1, $2, $3, $4, $5)
+          (dealer_name, old_monthly_budget, new_monthly_budget, note, changed_by, change_scope)
+        VALUES ($1, $2, $3, $4, $5, 'set_total')
       `, [dealerName, oldBudget, newBudget, note, changedBy ?? null]);
 
       await client.query('COMMIT');
@@ -327,18 +352,31 @@ async function updateMonthlyBudget(dealerName, newBudget, note, changedBy) {
     throw new Error(`Dealer not found: ${dealerName}`);
   }
 
+  for (const r of inMemoryReverts) {
+    if (r.dealerName === dealerName && r.status === 'pending') {
+      r.status = 'cancelled';
+    }
+  }
+
   const existing = inMemoryGoals.get(dealerName);
   const oldBudget = existing.monthlyBudget;
 
-  inMemoryGoals.set(dealerName, { ...existing, monthlyBudget: newBudget });
+  inMemoryGoals.set(dealerName, {
+    ...existing,
+    monthlyBudget: newBudget,
+    dailyBudget:   newDaily,
+  });
   inMemoryChanges.push({
-    id:         nextChangeId++,
+    id:             nextChangeId++,
     dealerName,
     oldBudget,
     newBudget,
-    note:       String(note).trim(),
-    changedAt:  new Date(),
-    changedBy:  changedBy ?? null,
+    note:           String(note).trim(),
+    changedAt:      new Date(),
+    changedBy:      changedBy ?? null,
+    changeScope:    'set_total',
+    changeAmount:   null,
+    linkedRevertId: null,
   });
 
   cache = null;
@@ -409,13 +447,225 @@ async function getBudgetHistory(dealerName) {
     .slice()
     .reverse()
     .map(c => ({
-      id:        c.id,
-      oldBudget: c.oldBudget,
-      newBudget: c.newBudget,
-      note:      c.note,
-      changedAt: c.changedAt,
-      changedBy: c.changedBy,
+      id:             c.id,
+      oldBudget:      c.oldBudget,
+      newBudget:      c.newBudget,
+      note:           c.note,
+      changedAt:      c.changedAt,
+      changedBy:      c.changedBy,
+      changeScope:    c.changeScope ?? null,
+      changeAmount:   c.changeAmount ?? null,
+      linkedRevertId: c.linkedRevertId ?? null,
     }));
+}
+
+/**
+ * Applies a budget adjustment with one of four scopes. Persists atomically to
+ * dealer_goals + dealer_budget_changes (+ pending_budget_reverts for rest_of_month).
+ * Cancels any open pending revert for this dealer regardless of new scope.
+ */
+async function applyBudgetAdjust(args) {
+  const {
+    dealerName, scope, daySubScope, amount, note, changedBy = null,
+    today = new Date(),
+  } = args;
+
+  if (!note || String(note).trim().length < 5) {
+    throw new Error('Note must be at least 5 characters');
+  }
+
+  const pool = db.getPool();
+  if (pool) {
+    return await applyBudgetAdjustDb({
+      pool, dealerName, scope, daySubScope, amount, note: String(note).trim(),
+      changedBy, today,
+    });
+  }
+  return applyBudgetAdjustInMemory({
+    dealerName, scope, daySubScope, amount, note: String(note).trim(),
+    changedBy, today,
+  });
+}
+
+function applyBudgetAdjustInMemory({ dealerName, scope, daySubScope, amount, note, changedBy, today }) {
+  const existing = inMemoryGoals.get(dealerName);
+  if (!existing) throw new Error(`Dealer not found: ${dealerName}`);
+  const currentMonthly = existing.monthlyBudget;
+
+  const { newMonthlyBudget, newDailyBudget, dailyBudgetWritten } = math.compute({
+    scope, daySubScope, amount, currentMonthly, today,
+  });
+
+  for (const r of inMemoryReverts) {
+    if (r.dealerName === dealerName && r.status === 'pending') {
+      r.status = 'cancelled';
+    }
+  }
+
+  inMemoryGoals.set(dealerName, {
+    ...existing,
+    monthlyBudget: newMonthlyBudget,
+    dailyBudget:   dailyBudgetWritten ? newDailyBudget : existing.dailyBudget,
+  });
+
+  const changeId = nextChangeId++;
+  const changeRow = {
+    id: changeId, dealerName,
+    oldBudget: currentMonthly, newBudget: newMonthlyBudget,
+    note, changedAt: new Date(), changedBy,
+    changeScope: scope === 'day' ? `day_${daySubScope}` : scope,
+    changeAmount: amount,
+    linkedRevertId: null,
+  };
+  inMemoryChanges.push(changeRow);
+
+  let pendingRevertId = null;
+  if (scope === 'rest_of_month') {
+    pendingRevertId = nextRevertId++;
+    inMemoryReverts.push({
+      id: pendingRevertId, dealerName,
+      bumpAmount: amount,
+      baselineMonthlyBudget: currentMonthly,
+      bumpedMonthlyBudget: newMonthlyBudget,
+      appliedChangeId: changeId,
+      appliedAt: new Date(),
+      appliedBy: changedBy,
+      revertDueDate: math.firstOfNextMonth(today),
+      status: 'pending',
+      ticketId: null,
+      ticketFiledAt: null,
+    });
+    changeRow.linkedRevertId = pendingRevertId;
+  }
+
+  cache = null;
+  return { newMonthlyBudget, newDailyBudget: dailyBudgetWritten ? newDailyBudget : null, pendingRevertId };
+}
+
+async function applyBudgetAdjustDb({ pool, dealerName, scope, daySubScope, amount, note, changedBy, today }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existingRes = await client.query(
+      'SELECT monthly_budget, daily_budget FROM dealer_goals WHERE dealer_name = $1',
+      [dealerName]
+    );
+    if (existingRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      throw new Error(`Dealer not found: ${dealerName}`);
+    }
+    const currentMonthly = Number(existingRes.rows[0].monthly_budget);
+
+    const { newMonthlyBudget, newDailyBudget, dailyBudgetWritten } = math.compute({
+      scope, daySubScope, amount, currentMonthly, today,
+    });
+
+    await client.query(
+      `UPDATE pending_budget_reverts
+          SET status = 'cancelled'
+        WHERE dealer_name = $1 AND status = 'pending'`,
+      [dealerName]
+    );
+
+    if (dailyBudgetWritten) {
+      await client.query(
+        `UPDATE dealer_goals
+            SET monthly_budget = $1, daily_budget = $2,
+                updated_at = NOW(), updated_by = $3
+          WHERE dealer_name = $4`,
+        [newMonthlyBudget, newDailyBudget, changedBy, dealerName]
+      );
+    } else {
+      await client.query(
+        `UPDATE dealer_goals
+            SET monthly_budget = $1, updated_at = NOW(), updated_by = $2
+          WHERE dealer_name = $3`,
+        [newMonthlyBudget, changedBy, dealerName]
+      );
+    }
+
+    const changeScope = scope === 'day' ? `day_${daySubScope}` : scope;
+    const changeRes = await client.query(
+      `INSERT INTO dealer_budget_changes
+         (dealer_name, old_monthly_budget, new_monthly_budget, note, changed_by,
+          change_scope, change_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [dealerName, currentMonthly, newMonthlyBudget, note, changedBy, changeScope, amount]
+    );
+    const newChangeId = changeRes.rows[0].id;
+
+    let pendingRevertId = null;
+    if (scope === 'rest_of_month') {
+      const revertRes = await client.query(
+        `INSERT INTO pending_budget_reverts
+           (dealer_name, bump_amount, baseline_monthly_budget, bumped_monthly_budget,
+            applied_change_id, applied_by, revert_due_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [dealerName, amount, currentMonthly, newMonthlyBudget, newChangeId, changedBy,
+         math.firstOfNextMonth(today)]
+      );
+      pendingRevertId = revertRes.rows[0].id;
+
+      await client.query(
+        `UPDATE dealer_budget_changes SET linked_revert_id = $1 WHERE id = $2`,
+        [pendingRevertId, newChangeId]
+      );
+    }
+
+    await client.query('COMMIT');
+    cache = null;
+    return { newMonthlyBudget, newDailyBudget: dailyBudgetWritten ? newDailyBudget : null, pendingRevertId };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Returns the most recent OPEN pending revert for a dealer, or null if none.
+ */
+async function getPendingRevert(dealerName) {
+  const pool = db.getPool();
+  if (pool) {
+    const res = await pool.query(
+      `SELECT id, dealer_name, bump_amount, baseline_monthly_budget,
+              bumped_monthly_budget, applied_change_id, applied_at, applied_by,
+              revert_due_date, status, ticket_id, ticket_filed_at
+         FROM pending_budget_reverts
+        WHERE dealer_name = $1 AND status = 'pending'
+        ORDER BY applied_at DESC
+        LIMIT 1`,
+      [dealerName]
+    );
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      dealerName: r.dealer_name,
+      bumpAmount: Number(r.bump_amount),
+      baselineMonthlyBudget: Number(r.baseline_monthly_budget),
+      bumpedMonthlyBudget: Number(r.bumped_monthly_budget),
+      appliedChangeId: r.applied_change_id,
+      appliedAt: r.applied_at,
+      appliedBy: r.applied_by,
+      revertDueDate: r.revert_due_date,
+      status: r.status,
+      ticketId: r.ticket_id,
+      ticketFiledAt: r.ticket_filed_at,
+    };
+  }
+  for (let i = inMemoryReverts.length - 1; i >= 0; i--) {
+    const r = inMemoryReverts[i];
+    if (r.dealerName === dealerName && r.status === 'pending') {
+      return { ...r };
+    }
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,7 +678,9 @@ async function getBudgetHistory(dealerName) {
 function _resetForTesting() {
   inMemoryGoals.clear();
   inMemoryChanges.length = 0;
+  inMemoryReverts.length = 0;
   nextChangeId = 1;
+  nextRevertId = 1;
   cache = null;
 }
 
@@ -441,6 +693,8 @@ module.exports = {
   // Async writes
   upsertGoal,
   updateMonthlyBudget,
+  applyBudgetAdjust,
+  getPendingRevert,
   deleteGoal,
   getBudgetHistory,
   // Testing

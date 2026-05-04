@@ -336,3 +336,153 @@ describe('cache invalidation', () => {
     expect(store.allGoals()[0].monthlyBudget).toBe(9000);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyBudgetAdjust() — in-memory path
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MAY_15 = new Date(Date.UTC(2026, 4, 15, 12, 0, 0));
+
+describe('applyBudgetAdjust() — month scope', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('+$30 month: writes monthly_budget=3030 + daily_budget synced + audit row, no pending revert', async () => {
+    const result = await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'month',
+      amount: 30,
+      note: 'Permanent monthly bump',
+      changedBy: 'tester@example.com',
+      today: MAY_15,
+    });
+
+    expect(result.newMonthlyBudget).toBe(3030);
+    expect(result.pendingRevertId).toBeNull();
+
+    await store.loadAll();
+    const goal = store.goalFor('Test Dealer');
+    expect(goal.monthlyBudget).toBe(3030);
+    expect(goal.dailyBudget).toBeCloseTo(3030 / 31, 2);
+
+    const history = await store.getBudgetHistory('Test Dealer');
+    expect(history[0].newBudget).toBe(3030);
+    expect(history[0].changeScope).toBe('month');
+    expect(history[0].changeAmount).toBe(30);
+  });
+});
+
+describe('applyBudgetAdjust() — day scope', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('+$30 day forward (prorated): correct monthly + daily on May 15', async () => {
+    const result = await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'day', daySubScope: 'forward', amount: 30,
+      note: 'Push hard the rest of this month',
+      today: MAY_15,
+    });
+    expect(result.newMonthlyBudget).toBe(3510);
+
+    await store.loadAll();
+    const goal = store.goalFor('Test Dealer');
+    expect(goal.monthlyBudget).toBe(3510);
+    expect(goal.dailyBudget).toBeCloseTo(3000 / 31 + 30, 1);
+  });
+});
+
+describe('applyBudgetAdjust() — rest_of_month scope', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('+$30 rest-of-month: writes monthly=3030, daily UNCHANGED, creates pending revert row', async () => {
+    const result = await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'rest_of_month', amount: 30,
+      note: 'Just for May',
+      today: MAY_15,
+    });
+
+    expect(result.newMonthlyBudget).toBe(3030);
+    expect(result.pendingRevertId).not.toBeNull();
+
+    await store.loadAll();
+    const goal = store.goalFor('Test Dealer');
+    expect(goal.monthlyBudget).toBe(3030);
+    expect(goal.dailyBudget == null).toBe(true);
+
+    const pending = await store.getPendingRevert('Test Dealer');
+    expect(pending).not.toBeNull();
+    expect(pending.bumpAmount).toBe(30);
+    expect(pending.baselineMonthlyBudget).toBe(3000);
+    expect(pending.bumpedMonthlyBudget).toBe(3030);
+    expect(pending.status).toBe('pending');
+    expect(pending.revertDueDate.toISOString().slice(0, 10)).toBe('2026-06-01');
+  });
+});
+
+describe('applyBudgetAdjust() — pending-revert cancellation (E2/E3)', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+    await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'rest_of_month', amount: 30,
+      note: 'First bump',
+      today: MAY_15,
+    });
+  });
+
+  test('subsequent month-scope adjust cancels the pending revert', async () => {
+    await store.applyBudgetAdjust({
+      dealerName: 'Test Dealer',
+      scope: 'month', amount: 100,
+      note: 'Make it permanent and bigger',
+      today: MAY_15,
+    });
+    const pending = await store.getPendingRevert('Test Dealer');
+    expect(pending).toBeNull();
+  });
+
+  test('subsequent set-total cancels the pending revert', async () => {
+    await store.updateMonthlyBudget('Test Dealer', 5000, 'Reset to flat target', 'tester@example.com');
+    const pending = await store.getPendingRevert('Test Dealer');
+    expect(pending).toBeNull();
+  });
+});
+
+describe('applyBudgetAdjust() — validation', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('note shorter than 5 chars throws', async () => {
+    await expect(store.applyBudgetAdjust({
+      dealerName: 'Test Dealer', scope: 'month', amount: 30, note: 'x', today: MAY_15,
+    })).rejects.toThrow(/at least 5 characters/);
+  });
+
+  test('unknown dealer throws', async () => {
+    await expect(store.applyBudgetAdjust({
+      dealerName: 'Nonexistent', scope: 'month', amount: 30, note: 'valid note', today: MAY_15,
+    })).rejects.toThrow(/not found/);
+  });
+});
+
+describe('updateMonthlyBudget() — extended behaviour', () => {
+  beforeEach(async () => {
+    await store.upsertGoal({ dealerName: 'Test Dealer', monthlyBudget: 3000 });
+  });
+
+  test('writes daily_budget = new_monthly / D', async () => {
+    await store.updateMonthlyBudget('Test Dealer', 4200, 'flat target', 'tester', { today: MAY_15 });
+
+    await store.loadAll();
+    const goal = store.goalFor('Test Dealer');
+    expect(goal.monthlyBudget).toBe(4200);
+    expect(goal.dailyBudget).toBeCloseTo(4200 / 31, 2);
+  });
+});
