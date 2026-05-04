@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-04-21
-**Current Phase:** Pacing Recommender v2 (feat/pacing-recs-v2) — CODE COMPLETE, pending merge + deploy. Pacing Engine v2 shipped 2026-04-20.
+**Last Updated:** 2026-05-04
+**Current Phase:** Budget Adjust-by-Amount (feat/budget-adjust-by-amount, off feat/db-goals) — CODE COMPLETE, ready for dev deploy. Pacing Engine v2 shipped 2026-04-20.
 
 ---
 
@@ -32,6 +32,7 @@
 | 20 | Pacing Engine v2 | ✅ SHIPPED | Damped daily controller — merged to main + deployed 2026-04-20 (revision dealer-ads-tool-00069-sql). PR #2. |
 | 21 | Pacing Recommender v2 | 🟡 CODE COMPLETE | Accurate recommender w/ inventory (Savvy API) + IS targets + diagnostics + R8 change-detection alerts on branch `feat/pacing-recs-v2` — 7 commits (Phases 1-7), 202 new tests, pending merge + deploy |
 | 22 | DB-Backed Dealer Goals | 🟡 CODE COMPLETE | Replaces Google Sheets with Postgres-backed admin UI (feat/db-goals). Mandatory note + audit for every budget change. 5 phases, ~6 commits. Pending migration + cutover. |
+| 23 | Budget Adjust-by-Amount | 🟡 CODE COMPLETE | Two-tab budget-edit modal: Set-total (existing) + Adjust-by-amount (new). 4 scopes — day forward (prorated), day whole-month (rebases), rest-of-month (auto-revert ticket on day 1 of next month), month (permanent). Daily Freshdesk revert-reminder runner. Branch `feat/budget-adjust-by-amount` (off feat/db-goals), 11 commits, 67 new tests, no regressions. Two flags default OFF. Pending dev smoke + prod flip. |
 
 ---
 

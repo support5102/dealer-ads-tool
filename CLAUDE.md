@@ -285,6 +285,8 @@ async function applyChange(client, change, dryRun) {
 | `PACING_ENGINE_V2_ENABLED` | `false` | Enables daily pacing scheduler + new "since last change" overview columns + Pacing Recommender v2 delegation |
 | `CHANGE_ALERTS_ENABLED` | `false` | Enables R8 change-detection alerts — daily scan of Google Ads `change_event` + Freshdesk ticket creation for budget/campaign/ad-group/location changes. Independent of the pacing flag. |
 | `USE_DB_GOALS` | `false` | When true, reads dealer goals from Postgres instead of Google Sheets. One-time migration via dealers page Import button; flip flag after verifying. |
+| `BUDGET_ADJUST_BY_AMOUNT_ENABLED` | `false` | Reveals the "Adjust by amount" tab in the pacing-overview budget-edit modal (4 scopes: day forward / day whole-month / rest-of-month / month). The Set-total tab works regardless. Frontend tab is hidden when off; backend POST /api/dealers/:name/budget-adjust still serves but is unreachable from the UI. |
+| `BUDGET_REVERT_REMINDERS_ENABLED` | `false` | Enables the daily `budget-revert-daily` scheduled job. When a rest-of-month bump's revert_due_date arrives, files one Freshdesk reminder ticket per dealer. Without this flag, pending reverts queue up but no tickets fire — useful for dev to inspect the queue. |
 
 ### Key Files
 
