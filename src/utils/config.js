@@ -90,6 +90,9 @@ function validateEnv(env = process.env) {
     // Budget-revert reminders — gates the daily runner that files Freshdesk
     // tickets for due rest-of-month reverts. Default OFF (queue still grows).
     budgetRevertRemindersEnabled: env.BUDGET_REVERT_REMINDERS_ENABLED === 'true',
+    // All-Accounts Cleanup tab on the audit page — gates the new section + all
+    // /api/all-accounts/* routes. Default OFF.
+    allAccountsCleanupEnabled: env.ALL_ACCOUNTS_CLEANUP_ENABLED === 'true',
   };
 
   return deepFreeze(config);

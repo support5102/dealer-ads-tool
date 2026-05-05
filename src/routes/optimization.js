@@ -201,6 +201,82 @@ function createOptimizationRouter(config) {
     }
   });
 
+  // ────────────────────────────────────────────────────────────────────────
+  // /api/all-accounts/* — MCC-wide cleanup endpoints
+  // ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Discovers child accounts under the session's MCC. Used by all /api/all-accounts/* routes.
+   */
+  async function discoverAccountsForSession(req) {
+    const mccId = req.session.mccId;
+    if (!mccId) {
+      const err = new Error('No MCC selected');
+      err.status = 400;
+      throw err;
+    }
+    const accessToken = await googleAds.refreshAccessToken(
+      config.googleAds, req.session.tokens.refresh_token
+    );
+    const accountIterator = require('../services/account-iterator');
+    const all = await accountIterator.discoverAccounts(config.googleAds, accessToken, mccId);
+    return {
+      accessToken,
+      accounts: all.filter(a => !a.isManager).map(a => ({
+        customerId: a.customerId,
+        name: a.name,
+      })),
+    };
+  }
+
+  function makeBuildRestCtx(req, accessToken) {
+    return (account) => ({
+      accessToken,
+      developerToken: config.googleAds.developerToken,
+      customerId: String(account.customerId).replace(/-/g, ''),
+      loginCustomerId: req.session.mccId,
+    });
+  }
+
+  function requireCleanupFlag(req, res, next) {
+    if (!config.allAccountsCleanupEnabled) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    next();
+  }
+
+  router.get('/api/all-accounts/recommendations', requireAuth, requireCleanupFlag, async (req, res, next) => {
+    try {
+      const { accessToken, accounts } = await discoverAccountsForSession(req);
+      const aggregator = require('../services/mcc-recommendation-aggregator');
+      const result = await aggregator.aggregateRecommendations({
+        accounts,
+        buildRestCtx: makeBuildRestCtx(req, accessToken),
+        getRecs: googleAds.getRecommendations,
+      });
+      res.json(result);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
+  router.get('/api/all-accounts/auto-assets', requireAuth, requireCleanupFlag, async (req, res, next) => {
+    try {
+      const { accessToken, accounts } = await discoverAccountsForSession(req);
+      const aggregator = require('../services/mcc-auto-asset-aggregator');
+      const result = await aggregator.aggregateAutoAssets({
+        accounts,
+        buildRestCtx: makeBuildRestCtx(req, accessToken),
+        getAssets: googleAds.getAutoCreatedAssets,
+      });
+      res.json(result);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
   return router;
 }
 
