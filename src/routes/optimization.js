@@ -277,6 +277,85 @@ function createOptimizationRouter(config) {
     }
   });
 
+  router.post('/api/all-accounts/recommendations/dismiss-by-type',
+    requireAuth, requireCleanupFlag, async (req, res, next) => {
+    try {
+      const { type } = req.body || {};
+      if (!type || typeof type !== 'string') {
+        return res.status(400).json({ error: 'type is required (string)' });
+      }
+      const { accessToken, accounts } = await discoverAccountsForSession(req);
+      const dismisser = require('../services/mcc-recommendation-dismisser');
+      const result = await dismisser.dismissByType({
+        type,
+        accounts,
+        buildRestCtx: makeBuildRestCtx(req, accessToken),
+        getRecs: googleAds.getRecommendations,
+        dismissFn: googleAds.dismissRecommendations,
+        devMode: !!config.devMode,
+        userEmail: req.session.userEmail || 'unknown',
+      });
+      res.json(result);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
+  router.post('/api/all-accounts/recommendations/dismiss-selected',
+    requireAuth, requireCleanupFlag, async (req, res, next) => {
+    try {
+      const { items } = req.body || {};
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ error: 'items is required (array)' });
+      }
+      for (const i of items) {
+        if (!i || typeof i.customerId !== 'string' || typeof i.resourceName !== 'string') {
+          return res.status(400).json({ error: 'each item must have customerId + resourceName' });
+        }
+      }
+      const { accessToken, accounts } = await discoverAccountsForSession(req);
+      const dismisser = require('../services/mcc-recommendation-dismisser');
+      const result = await dismisser.dismissSelected({
+        items,
+        accounts,
+        buildRestCtx: makeBuildRestCtx(req, accessToken),
+        dismissFn: googleAds.dismissRecommendations,
+        devMode: !!config.devMode,
+        userEmail: req.session.userEmail || 'unknown',
+      });
+      res.json(result);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
+  router.post('/api/all-accounts/auto-assets/remove-by-types',
+    requireAuth, requireCleanupFlag, async (req, res, next) => {
+    try {
+      const { types } = req.body || {};
+      if (!Array.isArray(types) || types.length === 0) {
+        return res.status(400).json({ error: 'types is required (non-empty array)' });
+      }
+      const { accessToken, accounts } = await discoverAccountsForSession(req);
+      const remover = require('../services/mcc-auto-asset-remover');
+      const result = await remover.removeByTypes({
+        types,
+        accounts,
+        buildRestCtx: makeBuildRestCtx(req, accessToken),
+        getAssets: googleAds.getAutoCreatedAssets,
+        removeFn: googleAds.mutateRemoveAssets,
+        devMode: !!config.devMode,
+        userEmail: req.session.userEmail || 'unknown',
+      });
+      res.json(result);
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  });
+
   return router;
 }
 
