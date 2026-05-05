@@ -1006,6 +1006,87 @@ async function getAutoCreatedAssets(restCtx) {
   return results;
 }
 
+const MAX_MUTATE_BATCH = 1000;
+
+/**
+ * Bulk-dismiss recommendations for one account. Splits ≤1000 per request.
+ * @param {Object} restCtx
+ * @param {string[]} recResourceNames
+ * @returns {Promise<{ dismissed: number }>}
+ */
+async function dismissRecommendations(restCtx, recResourceNames) {
+  if (!recResourceNames || recResourceNames.length === 0) return { dismissed: 0 };
+  const doMutate = restCtx._mutateFn || mutateViaRest;
+  const customerId = String(restCtx.customerId).replace(/-/g, '');
+  const url = `https://googleads.googleapis.com/v17/customers/${customerId}/recommendations:dismiss`;
+
+  let dismissed = 0;
+  for (const chunk of chunked(recResourceNames, MAX_MUTATE_BATCH)) {
+    const body = { operations: chunk.map(rn => ({ resourceName: rn })) };
+    await doMutate(url, body, restCtx);
+    dismissed += chunk.length;
+  }
+  return { dismissed };
+}
+
+/**
+ * Bulk-remove asset links for one account. Groups by asset-link service
+ * (customerAssets / campaignAssets / adGroupAssets / adGroupAdAssets) and
+ * issues one or more mutate calls per group, ≤1000 ops each.
+ *
+ * @param {Object} restCtx
+ * @param {string[]} resourceNames - asset link resource names
+ * @returns {Promise<{ removed: number }>}
+ */
+async function mutateRemoveAssets(restCtx, resourceNames) {
+  if (!resourceNames || resourceNames.length === 0) return { removed: 0 };
+  const doMutate = restCtx._mutateFn || mutateViaRest;
+  const customerId = String(restCtx.customerId).replace(/-/g, '');
+
+  const grouped = groupAssetLinksByService(resourceNames);
+  let removed = 0;
+  for (const [service, names] of Object.entries(grouped)) {
+    const url = `https://googleads.googleapis.com/v17/customers/${customerId}/${service}:mutate`;
+    for (const chunk of chunked(names, MAX_MUTATE_BATCH)) {
+      const body = { operations: chunk.map(rn => ({ remove: rn })) };
+      await doMutate(url, body, restCtx);
+      removed += chunk.length;
+    }
+  }
+  return { removed };
+}
+
+function groupAssetLinksByService(resourceNames) {
+  const out = {};
+  for (const rn of resourceNames) {
+    const match = /^customers\/[^/]+\/([a-zA-Z]+)\//.exec(rn);
+    if (!match) continue;
+    const segment = match[1];
+    const service = segment === 'adGroupAdAssetViews' ? 'adGroupAdAssets' : segment;
+    if (!out[service]) out[service] = [];
+    out[service].push(rn);
+  }
+  return out;
+}
+
+function chunked(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function mutateViaRest(url, body, restCtx) {
+  const axios = require('axios');
+  return axios.post(url, body, {
+    headers: {
+      Authorization: `Bearer ${restCtx.accessToken}`,
+      'developer-token': restCtx.developerToken,
+      'login-customer-id': String(restCtx.loginCustomerId).replace(/-/g, ''),
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
 function normaliseAssetType(fieldType) {
   switch (fieldType) {
     case 'SITELINK':            return 'SITELINK';
@@ -1515,6 +1596,8 @@ module.exports = {
   getAdCopy,
   getRecommendations,
   getAutoCreatedAssets,
+  dismissRecommendations,
+  mutateRemoveAssets,
   getAdSchedules,
   // Phase 12: Deep Scanner queries
   getCampaignNegatives,
