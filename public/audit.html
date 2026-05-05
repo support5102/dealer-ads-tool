@@ -34,6 +34,69 @@
 <!-- MAIN -->
 <div class="audit-main">
 
+  <!-- ALL ACCOUNTS CLEANUP (feature-flagged) -->
+  <div class="cleanup-section" id="cleanupSection" style="display:none">
+    <button class="cleanup-toggle" id="cleanupToggle" type="button" onclick="toggleCleanupSection()">
+      <span class="cleanup-chevron" id="cleanupChevron">▸</span>
+      <span class="cleanup-title">All Accounts Cleanup</span>
+      <span class="cleanup-hint">Bulk-dismiss recommendations and remove auto-created assets across the entire MCC</span>
+    </button>
+    <div class="cleanup-body" id="cleanupBody" style="display:none">
+      <div class="cleanup-toolbar">
+        <button class="btn-secondary" type="button" onclick="cleanupRefresh()">Refresh</button>
+        <span class="cleanup-status" id="cleanupStatus"></span>
+      </div>
+
+      <div class="cleanup-grid">
+        <!-- Panel A — Recommendations -->
+        <div class="cleanup-panel" id="cleanupRecsPanel">
+          <h3>Recommendations</h3>
+          <div class="cleanup-subpanel">
+            <h4>Quick Clear</h4>
+            <div class="cleanup-list" id="cleanupQuickClearList">
+              <div class="cleanup-empty">Click Refresh to load.</div>
+            </div>
+          </div>
+          <div class="cleanup-subpanel">
+            <h4>Review</h4>
+            <div class="cleanup-list" id="cleanupReviewList">
+              <div class="cleanup-empty">—</div>
+            </div>
+            <div class="cleanup-actions" id="cleanupReviewActions" style="display:none">
+              <button class="btn-primary" type="button" id="cleanupReviewDismissBtn" onclick="cleanupDismissSelected()" disabled>Dismiss 0 selected</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel B — Auto-Created Assets -->
+        <div class="cleanup-panel" id="cleanupAssetsPanel">
+          <h3>Auto-Created Assets</h3>
+          <div class="cleanup-list" id="cleanupAssetTypesList">
+            <div class="cleanup-empty">Click Refresh to load.</div>
+          </div>
+          <div class="cleanup-actions" id="cleanupAssetActions" style="display:none">
+            <button class="btn-danger" type="button" id="cleanupRemoveBtn" onclick="cleanupConfirmRemoveAssets()" disabled>Remove 0 selected</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cleanup-errors" id="cleanupErrors" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Confirm modal for asset removal -->
+  <div class="cleanup-modal-overlay" id="cleanupConfirmModal" style="display:none">
+    <div class="cleanup-modal-card">
+      <h3>Remove auto-created assets?</h3>
+      <p id="cleanupConfirmText"></p>
+      <p class="cleanup-warn">This cannot be undone.</p>
+      <div class="cleanup-modal-actions">
+        <button class="btn-secondary" type="button" onclick="cleanupCloseConfirm()">Cancel</button>
+        <button class="btn-danger" type="button" onclick="cleanupRemoveAssetsConfirmed()">Remove</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CONTROLS -->
   <div class="audit-controls">
     <div class="control-group">
