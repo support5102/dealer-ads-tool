@@ -907,6 +907,126 @@ async function getRecommendations(restCtx) {
 }
 
 /**
+ * Fetches all auto-created assets for an account across customer/campaign/ad_group
+ * asset links plus RSA ad-group-ad asset views (headlines/descriptions). Returns a
+ * flat array of normalised `{ resourceName, type, text, scope }` for the cleanup UI.
+ *
+ * Failures on any of the four queries are non-fatal (warn + return [] for that query).
+ *
+ * @param {Object} restCtx
+ * @returns {Promise<Array<{ resourceName: string, type: string, text: string, scope: string }>>}
+ */
+async function getAutoCreatedAssets(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const customerId = restCtx.customerId;
+
+  const queries = [
+    {
+      scope: 'customer',
+      gaql: `SELECT customer_asset.resource_name,
+                    customer_asset.field_type,
+                    customer_asset.source,
+                    asset.id,
+                    asset.callout_asset.callout_text,
+                    asset.sitelink_asset.link_text,
+                    asset.structured_snippet_asset.header,
+                    asset.text_asset.text
+             FROM customer_asset
+             WHERE customer_asset.source = 'AUTOMATICALLY_CREATED'
+               AND customer_asset.status = 'ENABLED'`,
+      linkField: 'customerAsset',
+    },
+    {
+      scope: 'campaign',
+      gaql: `SELECT campaign_asset.resource_name,
+                    campaign_asset.field_type,
+                    campaign_asset.source,
+                    asset.id,
+                    asset.callout_asset.callout_text,
+                    asset.sitelink_asset.link_text,
+                    asset.structured_snippet_asset.header,
+                    asset.text_asset.text
+             FROM campaign_asset
+             WHERE campaign_asset.source = 'AUTOMATICALLY_CREATED'
+               AND campaign_asset.status = 'ENABLED'`,
+      linkField: 'campaignAsset',
+    },
+    {
+      scope: 'ad_group',
+      gaql: `SELECT ad_group_asset.resource_name,
+                    ad_group_asset.field_type,
+                    ad_group_asset.source,
+                    asset.id,
+                    asset.callout_asset.callout_text,
+                    asset.sitelink_asset.link_text,
+                    asset.structured_snippet_asset.header,
+                    asset.text_asset.text
+             FROM ad_group_asset
+             WHERE ad_group_asset.source = 'AUTOMATICALLY_CREATED'
+               AND ad_group_asset.status = 'ENABLED'`,
+      linkField: 'adGroupAsset',
+    },
+    {
+      scope: 'ad_group_ad',
+      gaql: `SELECT ad_group_ad_asset_view.resource_name,
+                    ad_group_ad_asset_view.field_type,
+                    ad_group_ad_asset_view.automatically_created,
+                    asset.id,
+                    asset.text_asset.text
+             FROM ad_group_ad_asset_view
+             WHERE ad_group_ad_asset_view.automatically_created = TRUE`,
+      linkField: 'adGroupAdAssetView',
+    },
+  ];
+
+  const results = [];
+  for (const q of queries) {
+    let rows;
+    try {
+      rows = await doQuery(restCtx.accessToken, restCtx.developerToken, customerId, q.gaql, restCtx.loginCustomerId);
+    } catch (err) {
+      console.warn(`getAutoCreatedAssets [${q.scope}] failed (non-fatal):`, err.message);
+      continue;
+    }
+    for (const row of rows) {
+      const link = row[q.linkField] || {};
+      const asset = row.asset || {};
+      const fieldType = link.fieldType || link.field_type || '';
+      const type = normaliseAssetType(fieldType);
+      if (!type) continue;
+      const text = extractAssetText(asset, type);
+      results.push({
+        resourceName: link.resourceName || link.resource_name || '',
+        type,
+        text,
+        scope: q.scope,
+      });
+    }
+  }
+  return results;
+}
+
+function normaliseAssetType(fieldType) {
+  switch (fieldType) {
+    case 'SITELINK':            return 'SITELINK';
+    case 'CALLOUT':             return 'CALLOUT';
+    case 'STRUCTURED_SNIPPET':  return 'STRUCTURED_SNIPPET';
+    case 'HEADLINE':            return 'HEADLINE';
+    case 'DESCRIPTION':         return 'DESCRIPTION';
+    default:                    return null;
+  }
+}
+
+function extractAssetText(asset, type) {
+  if (!asset) return '';
+  if (type === 'SITELINK')             return asset.sitelinkAsset?.linkText || asset.sitelink_asset?.link_text || '';
+  if (type === 'CALLOUT')              return asset.calloutAsset?.calloutText || asset.callout_asset?.callout_text || '';
+  if (type === 'STRUCTURED_SNIPPET')   return asset.structuredSnippetAsset?.header || asset.structured_snippet_asset?.header || '';
+  if (type === 'HEADLINE' || type === 'DESCRIPTION') return asset.textAsset?.text || asset.text_asset?.text || '';
+  return '';
+}
+
+/**
  * Fetches ad schedule criteria for all campaigns via REST.
  * Used by audit engine to check schedule consistency across campaigns.
  *
@@ -1394,6 +1514,7 @@ module.exports = {
   getCampaignPerformance,
   getAdCopy,
   getRecommendations,
+  getAutoCreatedAssets,
   getAdSchedules,
   // Phase 12: Deep Scanner queries
   getCampaignNegatives,
