@@ -131,13 +131,22 @@ describe('GET /api/dealers/:dealerName/pending-revert', () => {
 });
 
 describe('GET /api/config/features', () => {
-  test('default config (flag unset) → budgetAdjustByAmountEnabled is false', async () => {
+  test('default config → both flags default to false', async () => {
     const app = createTestApp();
     const agent = await authenticatedAgent(app);
 
     const res = await agent.get('/api/config/features');
     expect(res.status).toBe(200);
     expect(res.body.budgetAdjustByAmountEnabled).toBe(false);
+    expect(res.body.allAccountsCleanupEnabled).toBe(false);
+  });
+
+  test('allAccountsCleanupEnabled=true reflected in response', async () => {
+    const app = createTestApp({ allAccountsCleanupEnabled: true });
+    const agent = await authenticatedAgent(app);
+    const res = await agent.get('/api/config/features');
+    expect(res.status).toBe(200);
+    expect(res.body.allAccountsCleanupEnabled).toBe(true);
   });
 
   test('flag set to true in config → budgetAdjustByAmountEnabled is true', async () => {

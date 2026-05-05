@@ -273,6 +273,7 @@ function createDealersRouter(config) {
   router.get('/api/config/features', requireAuth, (req, res) => {
     res.json({
       budgetAdjustByAmountEnabled: !!(config && config.budgetAdjustByAmountEnabled),
+      allAccountsCleanupEnabled:   !!(config && config.allAccountsCleanupEnabled),
     });
   });
 
