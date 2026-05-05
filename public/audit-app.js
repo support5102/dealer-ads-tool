@@ -607,4 +607,250 @@ async function init() {
   await loadScheduleStatus();
   if (scheduleActive) startStatusPolling();
 }
+
+// ── All Accounts Cleanup ─────────────────────────────────────────────
+
+let cleanupState = {
+  loaded: false,
+  recs: { quickClear: [], review: [], errorsByDealer: [] },
+  assets: { types: {}, errorsByDealer: [] },
+  reviewSelected: new Set(),
+  assetTypesSelected: new Set(),
+};
+
+(async function initCleanupSection() {
+  try {
+    const res = await fetch('/api/config/features', { credentials: 'include' });
+    if (!res.ok) return;
+    const features = await res.json();
+    if (features.allAccountsCleanupEnabled) {
+      document.getElementById('cleanupSection').style.display = '';
+    }
+  } catch (_) { /* leave hidden */ }
+})();
+
+function toggleCleanupSection() {
+  const section = document.getElementById('cleanupSection');
+  const body = document.getElementById('cleanupBody');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  section.classList.toggle('open', !open);
+}
+
+async function cleanupRefresh() {
+  cleanupSetStatus('Loading recommendations + auto-assets…');
+  cleanupRenderEmpty();
+  try {
+    const [recsRes, assetsRes] = await Promise.all([
+      fetch('/api/all-accounts/recommendations', { credentials: 'include' }),
+      fetch('/api/all-accounts/auto-assets', { credentials: 'include' }),
+    ]);
+    cleanupState.recs   = recsRes.ok   ? await recsRes.json()   : { quickClear: [], review: [], errorsByDealer: [] };
+    cleanupState.assets = assetsRes.ok ? await assetsRes.json() : { types: {}, errorsByDealer: [] };
+    cleanupState.loaded = true;
+    cleanupRenderAll();
+    cleanupSetStatus(`Loaded. ${cleanupTotalRecs()} recommendations, ${cleanupTotalAssets()} auto-assets.`);
+  } catch (err) {
+    cleanupSetStatus(`Failed to load: ${err.message}`);
+  }
+}
+
+function cleanupSetStatus(text) {
+  document.getElementById('cleanupStatus').textContent = text;
+}
+
+function cleanupRenderEmpty() {
+  document.getElementById('cleanupQuickClearList').innerHTML = '<div class="cleanup-empty">—</div>';
+  document.getElementById('cleanupReviewList').innerHTML = '<div class="cleanup-empty">—</div>';
+  document.getElementById('cleanupAssetTypesList').innerHTML = '<div class="cleanup-empty">—</div>';
+  document.getElementById('cleanupReviewActions').style.display = 'none';
+  document.getElementById('cleanupAssetActions').style.display = 'none';
+}
+
+function cleanupRenderAll() {
+  cleanupRenderQuickClear();
+  cleanupRenderReview();
+  cleanupRenderAssetTypes();
+  cleanupRenderErrors();
+}
+
+function cleanupTotalRecs() {
+  return (cleanupState.recs.quickClear || []).reduce((s, g) => s + g.count, 0)
+       + (cleanupState.recs.review || []).reduce((s, g) => s + g.count, 0);
+}
+function cleanupTotalAssets() {
+  return Object.values(cleanupState.assets.types || {}).reduce((s, g) => s + g.count, 0);
+}
+
+function cleanupRenderQuickClear() {
+  const el = document.getElementById('cleanupQuickClearList');
+  const rows = (cleanupState.recs.quickClear || []);
+  if (rows.length === 0) { el.innerHTML = '<div class="cleanup-empty">No auto-dismiss recommendations.</div>'; return; }
+  el.innerHTML = rows.map(g => {
+    const dealers = new Set(g.items.map(i => i.customerId)).size;
+    return `
+      <div class="cleanup-row" data-rec-type="${g.type}">
+        <span class="cleanup-row-type">${g.type}</span>
+        <span class="cleanup-row-count">${g.count} across ${dealers} dealers</span>
+        <button class="btn-secondary cleanup-row-action" type="button" onclick="cleanupDismissByType('${g.type}', this)">Clear</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function cleanupRenderReview() {
+  const el = document.getElementById('cleanupReviewList');
+  const rows = (cleanupState.recs.review || []);
+  if (rows.length === 0) { el.innerHTML = '<div class="cleanup-empty">No review recommendations.</div>'; return; }
+  el.innerHTML = rows.map(g => g.items.map(i => `
+    <label class="cleanup-row">
+      <input type="checkbox" data-rev-cust="${i.customerId}" data-rev-rn="${i.resourceName}" onchange="cleanupOnReviewToggle(this)" />
+      <span class="cleanup-row-type">${g.type}</span>
+      <span>${i.dealerName}</span>
+      <span class="cleanup-row-count">${i.resourceName.split('/').pop()}</span>
+    </label>
+  `).join('')).join('');
+  document.getElementById('cleanupReviewActions').style.display = '';
+  cleanupUpdateReviewBtn();
+}
+
+function cleanupOnReviewToggle(input) {
+  const key = `${input.dataset.revCust}::${input.dataset.revRn}`;
+  if (input.checked) cleanupState.reviewSelected.add(key);
+  else cleanupState.reviewSelected.delete(key);
+  cleanupUpdateReviewBtn();
+}
+function cleanupUpdateReviewBtn() {
+  const btn = document.getElementById('cleanupReviewDismissBtn');
+  const n = cleanupState.reviewSelected.size;
+  btn.textContent = `Dismiss ${n} selected`;
+  btn.disabled = n === 0;
+}
+
+function cleanupRenderAssetTypes() {
+  const el = document.getElementById('cleanupAssetTypesList');
+  const types = cleanupState.assets.types || {};
+  const keys = Object.keys(types);
+  if (keys.length === 0) { el.innerHTML = '<div class="cleanup-empty">No auto-created assets.</div>'; return; }
+  el.innerHTML = keys.map(t => `
+    <label class="cleanup-row">
+      <input type="checkbox" data-asset-type="${t}" onchange="cleanupOnAssetTypeToggle(this)" />
+      <span class="cleanup-row-type">${t}</span>
+      <span class="cleanup-row-count">${types[t].count} across ${types[t].dealers} dealers</span>
+    </label>
+  `).join('');
+  document.getElementById('cleanupAssetActions').style.display = '';
+  cleanupUpdateRemoveBtn();
+}
+
+function cleanupOnAssetTypeToggle(input) {
+  if (input.checked) cleanupState.assetTypesSelected.add(input.dataset.assetType);
+  else cleanupState.assetTypesSelected.delete(input.dataset.assetType);
+  cleanupUpdateRemoveBtn();
+}
+function cleanupUpdateRemoveBtn() {
+  const btn = document.getElementById('cleanupRemoveBtn');
+  const types = Array.from(cleanupState.assetTypesSelected);
+  const total = types.reduce((s, t) => s + (cleanupState.assets.types[t]?.count || 0), 0);
+  btn.textContent = `Remove ${total} selected`;
+  btn.disabled = total === 0;
+}
+
+function cleanupRenderErrors() {
+  const errs = [
+    ...(cleanupState.recs.errorsByDealer || []),
+    ...(cleanupState.assets.errorsByDealer || []),
+  ];
+  const el = document.getElementById('cleanupErrors');
+  if (errs.length === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `<h4>Errors (${errs.length})</h4><ul>${errs.map(e => `<li>${e.dealerName}: ${e.error}</li>`).join('')}</ul>`;
+}
+
+async function cleanupDismissByType(type, btn) {
+  btn.disabled = true; btn.textContent = 'Clearing…';
+  try {
+    const res = await fetch('/api/all-accounts/recommendations/dismiss-by-type', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
+    const data = await res.json();
+    if (!res.ok) { btn.textContent = `Failed: ${data.error}`; return; }
+    btn.textContent = data.devModeBlocked
+      ? `DEV — would have dismissed ${data.dismissed || 0}`
+      : `Dismissed ${data.dismissed}`;
+  } catch (err) {
+    btn.textContent = `Network error`;
+  }
+}
+
+async function cleanupDismissSelected() {
+  const btn = document.getElementById('cleanupReviewDismissBtn');
+  btn.disabled = true; btn.textContent = 'Dismissing…';
+  const items = Array.from(cleanupState.reviewSelected).map(key => {
+    const [customerId, resourceName] = key.split('::');
+    return { customerId, resourceName };
+  });
+  try {
+    const res = await fetch('/api/all-accounts/recommendations/dismiss-selected', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await res.json();
+    btn.textContent = data.devModeBlocked
+      ? `DEV — would have dismissed ${items.length}`
+      : `Dismissed ${data.dismissed}`;
+    cleanupState.reviewSelected.clear();
+    setTimeout(cleanupRefresh, 600);
+  } catch (err) {
+    btn.textContent = 'Network error';
+  }
+}
+
+function cleanupConfirmRemoveAssets() {
+  const types = Array.from(cleanupState.assetTypesSelected);
+  const total = types.reduce((s, t) => s + (cleanupState.assets.types[t]?.count || 0), 0);
+  const dealers = new Set(types.flatMap(t => cleanupState.assets.types[t].items.map(i => i.customerId))).size;
+  document.getElementById('cleanupConfirmText').innerHTML =
+    `<strong>${total}</strong> auto-created assets across <strong>${dealers}</strong> dealers will be removed.<br><span class="cleanup-row-count">${types.join(', ')}</span>`;
+  document.getElementById('cleanupConfirmModal').style.display = 'flex';
+}
+function cleanupCloseConfirm() {
+  document.getElementById('cleanupConfirmModal').style.display = 'none';
+}
+
+async function cleanupRemoveAssetsConfirmed() {
+  cleanupCloseConfirm();
+  const btn = document.getElementById('cleanupRemoveBtn');
+  btn.disabled = true; btn.textContent = 'Removing…';
+  const types = Array.from(cleanupState.assetTypesSelected);
+  try {
+    const res = await fetch('/api/all-accounts/auto-assets/remove-by-types', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ types }),
+    });
+    const data = await res.json();
+    btn.textContent = data.devModeBlocked
+      ? `DEV — would have removed ${types.reduce((s, t) => s + (cleanupState.assets.types[t]?.count || 0), 0)}`
+      : `Removed ${data.removed}`;
+    cleanupState.assetTypesSelected.clear();
+    setTimeout(cleanupRefresh, 600);
+  } catch (err) {
+    btn.textContent = 'Network error';
+  }
+}
+
+// Expose for inline onclick handlers
+window.toggleCleanupSection            = toggleCleanupSection;
+window.cleanupRefresh                  = cleanupRefresh;
+window.cleanupDismissByType            = cleanupDismissByType;
+window.cleanupOnReviewToggle           = cleanupOnReviewToggle;
+window.cleanupDismissSelected          = cleanupDismissSelected;
+window.cleanupOnAssetTypeToggle        = cleanupOnAssetTypeToggle;
+window.cleanupConfirmRemoveAssets      = cleanupConfirmRemoveAssets;
+window.cleanupCloseConfirm             = cleanupCloseConfirm;
+window.cleanupRemoveAssetsConfirmed    = cleanupRemoveAssetsConfirmed;
 init();
