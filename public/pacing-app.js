@@ -554,9 +554,18 @@ function renderPacingSummary(pacing) {
 
 function renderRecommendationDetails(rec) {
   if (!rec) return '';
-  const oldBudget = rec.newDailyBudget != null && rec.change != null
-    ? rec.newDailyBudget - rec.change
-    : null;
+  // Prefer the explicit currentDailyBudget field (set by recommender-v2 in both
+  // skipped and not-skipped branches). Fall back to derivation for older payloads.
+  const oldBudget = rec.currentDailyBudget != null
+    ? rec.currentDailyBudget
+    : (rec.newDailyBudget != null && rec.change != null
+        ? rec.newDailyBudget - rec.change
+        : null);
+  // For hold: show current as the recommended too — recommender returns null but
+  // the UX is clearer when both fields show the same value with the hold rationale.
+  const recBudget = rec.newDailyBudget != null
+    ? rec.newDailyBudget
+    : (rec.action === 'hold' ? oldBudget : null);
   const changeSign = rec.change != null ? (rec.change >= 0 ? '+' : '') : '';
   const pctSign = rec.changePct != null ? (rec.changePct >= 0 ? '+' : '') : '';
   const changeDir = rec.direction === 'decrease' ? 'v2-delta-decrease' : rec.direction === 'increase' ? 'v2-delta-increase' : '';
@@ -569,7 +578,7 @@ function renderRecommendationDetails(rec) {
       </div>
       <div class="v2-detail-row">
         <span class="v2-detail-label">Recommended daily budget</span>
-        <span class="v2-detail-value v2-detail-new">$${rec.newDailyBudget != null ? fmt(rec.newDailyBudget) : '--'}/day</span>
+        <span class="v2-detail-value v2-detail-new">$${recBudget != null ? fmt(recBudget) : '--'}/day</span>
       </div>
       <div class="v2-detail-row">
         <span class="v2-detail-label">Change</span>
