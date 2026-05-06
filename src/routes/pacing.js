@@ -414,6 +414,9 @@ function createPacingRouter(config, deps = {}) {
           const siteIdRegistry = require('../services/site-id-registry');
           const savvyInventory = require('../services/savvy-inventory');
           const baselineStore = require('../services/inventory-baseline-store');
+          // Ensure cache is warm — first request after server start would otherwise
+          // hit a null cache and skip inventory entirely.
+          await siteIdRegistry.loadAll();
           const mapping = siteIdRegistry.siteIdFor(goal.dealerName);
           if (mapping && mapping.siteId) {
             const newVinCount = await savvyInventory.getNewVinCount(mapping.siteId);

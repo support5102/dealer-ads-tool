@@ -48,6 +48,12 @@ function createApp(config) {
   // ── Database initialization (non-blocking) ──
   database.initialize()
     .then(() => dealerGroupsStore.seedDefaults())
+    .then(() => {
+      // Seed dealer→site_id mappings for the Savvy Incentive API. Idempotent —
+      // does nothing if rows already exist.
+      const siteIdRegistry = require('./services/site-id-registry');
+      return siteIdRegistry.seedDefaults();
+    })
     .catch(err => {
       console.warn('Database initialization skipped:', err.message);
     });

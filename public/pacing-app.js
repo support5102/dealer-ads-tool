@@ -187,12 +187,22 @@ function renderDashboard(data) {
   }
   renderImpressionShare(data.impressionShareSummary, data.changeDate);
   renderCampaignIS(data.campaignIS, data.changeDate);
-  // renderInventory(data.inventory); // Temporarily hidden — inventory count is inaccurate for PMax
+  renderInventory(data.inventory);
 }
 
 function renderHeader(data) {
-  const color = data.statusColor || 'gray';
-  const statusLabel = formatStatus(data.status);
+  // V2 response doesn't include top-level status/statusColor — derive from pacing.pacePercent.
+  // V2 pacePercent is absolute (107.8 = 107.8% of curve target); thresholds match renderMetrics.
+  const isV2 = data.source === 'pacing_engine_v2';
+  let status = data.status;
+  let color = data.statusColor || 'gray';
+  if (isV2 && data.pacing && data.pacing.pacePercent != null) {
+    const pVal = data.pacing.pacePercent;
+    if (pVal > 105)      { status = 'over';    color = 'red'; }
+    else if (pVal < 95)  { status = 'under';   color = 'yellow'; }
+    else                 { status = 'on_pace'; color = 'green'; }
+  }
+  const statusLabel = formatStatus(status);
   document.getElementById('dashHeader').innerHTML = `
     <div>
       <div class="dash-dealer">${esc(data.dealerName)}</div>
@@ -818,31 +828,77 @@ function renderInventory(inv) {
     return;
   }
 
+  // V2 shape: { newVinCount, baselineRolling90Day, tier, usedCount?, source? }
+  // V1 shape: { count, modifier, reason }
+  const isV2 = inv.newVinCount != null || inv.tier != null;
+
+  let tierColor = 'var(--text3)';
+  let tierLabel = inv.tier || '';
+  if (inv.tier === 'healthy')        { tierColor = '#4ade80'; tierLabel = 'Healthy'; }
+  else if (inv.tier === 'low')       { tierColor = '#fbbf24'; tierLabel = 'Low'; }
+  else if (inv.tier === 'very_low')  { tierColor = '#fb923c'; tierLabel = 'Very Low'; }
+  else if (inv.tier === 'critical')  { tierColor = '#ef4444'; tierLabel = 'Critical'; }
+
   let modColor = 'var(--text3)';
   if (inv.modifier > 1) modColor = '#4ade80';
   else if (inv.modifier < 1) modColor = '#fb923c';
+
+  const v2Body = `
+    <div class="is-row">
+      <span class="is-label">New Vehicles on Lot</span>
+      <span class="is-value">${inv.newVinCount != null ? esc(String(inv.newVinCount)) : '--'}</span>
+    </div>
+    ${inv.usedCount != null ? `
+      <div class="is-row">
+        <span class="is-label">Used Vehicles on Lot</span>
+        <span class="is-value">${esc(String(inv.usedCount))}</span>
+      </div>
+    ` : ''}
+    ${inv.baselineRolling90Day != null ? `
+      <div class="is-row">
+        <span class="is-label">90-day Baseline (new)</span>
+        <span class="is-value">${inv.baselineRolling90Day.toFixed(0)}</span>
+      </div>
+    ` : ''}
+    ${inv.tier ? `
+      <div class="is-row">
+        <span class="is-label">Inventory Tier</span>
+        <span class="is-value" style="color:${tierColor}">${esc(tierLabel)}</span>
+      </div>
+    ` : ''}
+    ${inv.source ? `
+      <div class="is-row">
+        <span class="is-label">Source</span>
+        <span style="color:var(--text2);font-size:12px">${esc(inv.source)}</span>
+      </div>
+    ` : ''}
+  `;
+
+  const v1Body = `
+    <div class="is-row">
+      <span class="is-label">New Vehicles on Lot</span>
+      <span class="is-value">${inv.count != null ? esc(String(inv.count)) : '--'}</span>
+    </div>
+    ${inv.modifier != null ? `
+      <div class="is-row">
+        <span class="is-label">Inventory Modifier</span>
+        <span class="is-value" style="color:${modColor}">${inv.modifier.toFixed(2)}x</span>
+      </div>
+    ` : ''}
+    ${inv.reason ? `
+      <div class="is-row">
+        <span class="is-label">Impact</span>
+        <span style="color:var(--text2);font-size:12px">${esc(inv.reason)}</span>
+      </div>
+    ` : ''}
+  `;
 
   section.innerHTML = `
     <div class="dash-section">
       <div class="dash-section-header">
         <div class="dash-section-title">Inventory</div>
       </div>
-      <div class="is-row">
-        <span class="is-label">New Vehicles on Lot</span>
-        <span class="is-value">${inv.count != null ? esc(String(inv.count)) : '--'}</span>
-      </div>
-      ${inv.modifier != null ? `
-        <div class="is-row">
-          <span class="is-label">Inventory Modifier</span>
-          <span class="is-value" style="color:${modColor}">${inv.modifier.toFixed(2)}x</span>
-        </div>
-      ` : ''}
-      ${inv.reason ? `
-        <div class="is-row">
-          <span class="is-label">Impact</span>
-          <span style="color:var(--text2);font-size:12px">${esc(inv.reason)}</span>
-        </div>
-      ` : ''}
+      ${isV2 ? v2Body : v1Body}
     </div>
   `;
 }
