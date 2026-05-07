@@ -28,6 +28,15 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const CONCURRENCY_LIMIT = 20;
 const REQUEST_TIMEOUT_MS = 10000; // 10 seconds per request
 
+// ── Circuit breaker — when Savvy API is broadly down, stop hammering it ──
+// If a batch of per-VIN requests has ≥80% failure rate, open the circuit for
+// 5 minutes. While open, fetchNewVins returns empty immediately without making
+// any HTTP calls. Prevents the pacing overview from hanging for minutes when
+// the upstream API is degraded.
+const CIRCUIT_FAILURE_RATIO = 0.8;
+const CIRCUIT_OPEN_MS = 5 * 60 * 1000; // 5 minutes
+let circuitOpenUntil = 0;
+
 // ── Cache: siteId → { count, vins, fetchedAt } ────────────────────────────
 const cache = new Map();
 
@@ -77,6 +86,11 @@ async function fetchNewVins(siteId, { _fetchFn } = {}) {
     return { count: cached.count, vins: cached.vins };
   }
 
+  // ── Circuit-breaker check — return empty fast if API is currently degraded ──
+  if (Date.now() < circuitOpenUntil) {
+    return { count: 0, vins: [] };
+  }
+
   // ── Fetch VIN list ──
   let allVins;
   try {
@@ -87,6 +101,10 @@ async function fetchNewVins(siteId, { _fetchFn } = {}) {
     }
   } catch (err) {
     console.warn('[savvy-inventory] GetAllVinsBySiteId/%d failed: %s', siteId, err.message);
+    // Top-level VIN list failure also opens the circuit — if Savvy can't even
+    // give us a list, no point trying per-VIN calls for the next 5 minutes.
+    circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+    console.warn('[savvy-inventory] circuit OPEN for %d minutes after VIN-list failure', CIRCUIT_OPEN_MS / 60000);
     return { count: 0, vins: [] };
   }
 
@@ -101,6 +119,7 @@ async function fetchNewVins(siteId, { _fetchFn } = {}) {
   const chunks = chunkArray(allVins, CONCURRENCY_LIMIT);
 
   for (const chunk of chunks) {
+    let batchFailures = 0;
     const results = await Promise.all(
       chunk.map(async (vin) => {
         try {
@@ -108,6 +127,7 @@ async function fetchNewVins(siteId, { _fetchFn } = {}) {
           return detail && detail.status === 'NEW' ? vin : null;
         } catch (err) {
           // One bad VIN should not kill the whole count
+          batchFailures += 1;
           console.warn('[savvy-inventory] GetVehicleOffersAndIncentives/%s failed: %s', vin, err.message);
           return null;
         }
@@ -115,6 +135,16 @@ async function fetchNewVins(siteId, { _fetchFn } = {}) {
     );
     for (const vin of results) {
       if (vin !== null) newVins.push(vin);
+    }
+
+    // Circuit-breaker check: if this batch was mostly failures, the upstream
+    // API is degraded. Open the circuit for 5 minutes and abort this dealer's
+    // remaining batches — partial inventory is better than a 60-second hang.
+    if (batchFailures / chunk.length >= CIRCUIT_FAILURE_RATIO) {
+      circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+      console.warn('[savvy-inventory] circuit OPEN for %d min after batch failure rate %d/%d',
+        CIRCUIT_OPEN_MS / 60000, batchFailures, chunk.length);
+      break;
     }
   }
 
@@ -156,6 +186,7 @@ async function getNewVinsList(siteId, { _fetchFn } = {}) {
  */
 function _resetCacheForTesting() {
   cache.clear();
+  circuitOpenUntil = 0;
 }
 
 /**
