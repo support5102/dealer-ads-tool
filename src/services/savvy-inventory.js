@@ -80,6 +80,14 @@ function chunkArray(arr, size) {
 async function fetchNewVins(siteId, { _fetchFn } = {}) {
   const fetch = _fetchFn || defaultFetch;
 
+  // ── Hard kill switch — bypass all Savvy API calls when env flag is set ──
+  // Set SAVVY_INVENTORY_DISABLED=true on Cloud Run when the Savvy Incentive API
+  // is down/degraded. Returns empty immediately with no HTTP calls. Flip back to
+  // unset (or false) once Savvy is healthy again.
+  if (process.env.SAVVY_INVENTORY_DISABLED === 'true') {
+    return { count: 0, vins: [] };
+  }
+
   // ── Cache check ──
   const cached = cache.get(siteId);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
