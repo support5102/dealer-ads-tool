@@ -1,7 +1,7 @@
 # Dealer Ads Tool V3 - Project State
 
-**Last Updated:** 2026-05-04
-**Current Phase:** Budget Adjust-by-Amount (feat/budget-adjust-by-amount, off feat/db-goals) — CODE COMPLETE, ready for dev deploy. Pacing Engine v2 shipped 2026-04-20.
+**Last Updated:** 2026-05-11
+**Current Phase:** Post-ship stabilization on feat/all-accounts-cleanup — All Accounts Cleanup feature SHIPPED to prod 2026-05-05; subsequent week was fix-it-as-it-breaks for prod issues (Neon pool, Savvy API outage, change_event query). Pacing Engine v2 shipped 2026-04-20.
 
 ---
 
@@ -32,7 +32,9 @@
 | 20 | Pacing Engine v2 | ✅ SHIPPED | Damped daily controller — merged to main + deployed 2026-04-20 (revision dealer-ads-tool-00069-sql). PR #2. |
 | 21 | Pacing Recommender v2 | 🟡 CODE COMPLETE | Accurate recommender w/ inventory (Savvy API) + IS targets + diagnostics + R8 change-detection alerts on branch `feat/pacing-recs-v2` — 7 commits (Phases 1-7), 202 new tests, pending merge + deploy |
 | 22 | DB-Backed Dealer Goals | 🟡 CODE COMPLETE | Replaces Google Sheets with Postgres-backed admin UI (feat/db-goals). Mandatory note + audit for every budget change. 5 phases, ~6 commits. Pending migration + cutover. |
-| 23 | Budget Adjust-by-Amount | 🟡 CODE COMPLETE | Two-tab budget-edit modal: Set-total (existing) + Adjust-by-amount (new). 4 scopes — day forward (prorated), day whole-month (rebases), rest-of-month (auto-revert ticket on day 1 of next month), month (permanent). Daily Freshdesk revert-reminder runner. Branch `feat/budget-adjust-by-amount` (off feat/db-goals), 11 commits, 67 new tests, no regressions. Two flags default OFF. Pending dev smoke + prod flip. |
+| 23 | Budget Adjust-by-Amount | ✅ SHIPPED | Two-tab budget-edit modal: Set-total (existing) + Adjust-by-amount (new). 4 scopes — day forward (prorated), day whole-month (rebases), rest-of-month (auto-revert ticket on day 1 of next month), month (permanent). Daily Freshdesk revert-reminder runner. Branch `feat/budget-adjust-by-amount` (off feat/db-goals), shipped to prod 2026-05-04 (rev 00078-wtp). |
+| 24 | All-Accounts Cleanup | ✅ SHIPPED | Audit-page section for MCC-wide cleanup: bulk-dismiss recommendations (Quick Clear + Review) and remove auto-created assets (sitelinks/callouts/headlines/etc) across all dealers. DEV_MODE-aware. Branch `feat/all-accounts-cleanup` (off feat/budget-adjust-by-amount), 11 commits + post-ship fixes, ~50 new tests. Shipped to prod 2026-05-05 (rev 00081-jcn). |
+| 24.1 | Post-ship stabilization | ✅ COMPLETE | Five prod fixes during week of 2026-05-05: (a) Neon pool stale connections → swapped prod to `-pooler` URL; (b) Days-Since-Change "Never" bug → query scoped to current month + `BETWEEN` filter so Google accepts it (was rejected as infinite-range); (c) Savvy Incentive API outage hanging pacing overview → added circuit breaker + `SAVVY_INVENTORY_DISABLED` env kill-switch. Each fix deployed individually. |
 
 ---
 

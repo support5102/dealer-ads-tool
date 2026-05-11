@@ -18,12 +18,12 @@ Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from 
 
 ## Live Deployment
 
-| Environment | URL |
-|-------------|-----|
-| **Production** | Railway (TBD after V3 deploy) |
-| **Local** | http://localhost:3000 |
-| **Repository** | https://github.com/support5102/dealer-ads-tool (branch: V3) |
-| **V2 Reference** | https://github.com/support5102/dealer-ads-tool/tree/V2 |
+| Environment | URL | Service |
+|-------------|-----|---------|
+| **Production** | https://ads.savvydealer.com | Cloud Run `dealer-ads-tool` |
+| **Dev** | https://dealer-ads-tool-dev-840281790428.us-east1.run.app | Cloud Run `dealer-ads-tool-dev` (DEV_MODE=true, blocks Google Ads mutations) |
+| **Local** | http://localhost:3000 | |
+| **Repository** | https://github.com/support5102/dealer-ads-tool | branch: `V3` (trunk), active feature: `feat/all-accounts-cleanup` |
 
 ---
 
@@ -31,13 +31,13 @@ Connects to Google Ads MCC accounts to manage multiple dealer sub-accounts from 
 
 | Aspect | Value |
 |--------|-------|
-| **Phase** | 20: Pacing Engine v2 — IN PROGRESS (branch `feat/pacing-engine-v2`) |
-| **Progress** | 7 of 14 tasks complete (13 commits on branch, tree clean) |
-| **Last Session** | 2026-04-20 - CLEAN. Tasks 6.1 committed; 5.1/4.2/4.1/3.1 review-feedback fixes landed |
-| **Immediate Next** | Task 6.2 — hover tooltip on Pacing column |
-| **Resume Pointer** | Say "Resume pacing engine v2" — memory auto-loads continuation doc at `C:/Users/bprev/.claude/docs/2026-04-17-pacing-engine-v2-continuation.md` |
-| **Live URL** | https://dealer-ads-tool-840281790428.us-east1.run.app |
-| **Live Version** | V3 on Google Cloud Run (NOT yet the pacing-v2 branch) |
+| **Phase** | 24: All-Accounts Cleanup — SHIPPED. Phase 24.1 (post-ship stabilization) complete. |
+| **Active Branch** | `feat/all-accounts-cleanup` (off `feat/budget-adjust-by-amount`, off `feat/db-goals`) |
+| **Last Session** | 2026-05-11 — five post-ship fixes deployed during a week of prod stabilization (Neon pool, Days-Since-Change, Savvy outage circuit-breaker + kill switch, change_event BETWEEN query) |
+| **Live Prod Revision** | `dealer-ads-tool-00088-qbm` at https://ads.savvydealer.com |
+| **Live Dev Revision** | `dealer-ads-tool-dev-00024-npm` |
+| **Feature Flags in Prod (env)** | `BUDGET_ADJUST_BY_AMOUNT_ENABLED=true`, `BUDGET_REVERT_REMINDERS_ENABLED=true`, `ALL_ACCOUNTS_CLEANUP_ENABLED=true`, `USE_DB_GOALS=true`, `PACING_ENGINE_V2_ENABLED=true`, `SAVVY_INVENTORY_DISABLED=true` ← **revert when Savvy API recovers** |
+| **Immediate Next** | (a) verify Savvy Incentive API is healthy, then remove `SAVVY_INVENTORY_DISABLED` env var; (b) confirm Days-Since-Change populates correctly after the `BETWEEN` fix; (c) decide on next feature (sGTM cert monitor + Savvy health monitor was sketched) |
 
 ---
 
@@ -81,8 +81,10 @@ npm run test:coverage       # With coverage report
 # Local Server
 npm start
 
-# Deploy to Railway
-git push origin V3          # Railway auto-deploys from branch
+# Deploy to Cloud Run (NOT Railway anymore — moved to Google Cloud Run)
+# From the active worktree:
+gcloud run deploy dealer-ads-tool-dev --source=. --region=us-east1 --quiet   # dev
+gcloud run deploy dealer-ads-tool     --source=. --region=us-east1 --quiet   # prod (live!)
 ```
 
 ---
@@ -110,7 +112,7 @@ git push origin V3          # Railway auto-deploys from branch
 - **Testing:** Jest
 - **AI Integration:** Anthropic Claude API (task parsing)
 - **Ads API:** google-ads-api npm package
-- **Deployment:** Railway (Nixpacks)
+- **Deployment:** Google Cloud Run (project `railway-ads-tool`, region `us-east1`); Postgres on Neon (pooler URL on both dev and prod)
 
 ---
 
