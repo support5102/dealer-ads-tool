@@ -1350,18 +1350,22 @@ async function getLastBudgetChange(restCtx) {
     // Scope the search to the current calendar month — "Days Since Change" resets on
     // the 1st of each month. On day 30/31 of a 31-day month, start-of-month would be
     // exactly 30 days ago and Google Ads rejects with START_DATE_TOO_OLD, so clamp to
-    // 28 days ago in that edge case.
+    // 28 days ago in that edge case. Google also rejects queries with only a lower
+    // bound on change_date_time (treats `>=` as "infinite range"), so the query uses
+    // an explicit BETWEEN with both ends.
     const currentDate = new Date();
     const startOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), 1));
     const twentyEightDaysAgo = new Date(currentDate.getTime() - 28 * 24 * 60 * 60 * 1000);
     const startDate = (startOfMonth.getTime() > twentyEightDaysAgo.getTime() ? startOfMonth : twentyEightDaysAgo)
       .toISOString().slice(0, 10);
+    // endDate = tomorrow (UTC), so the BETWEEN inclusive upper bound covers all of today.
+    const endDate = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
       `SELECT change_event.change_date_time
        FROM change_event
-       WHERE change_event.change_date_time >= '${startDate}'
+       WHERE change_event.change_date_time BETWEEN '${startDate}' AND '${endDate}'
          AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
        ORDER BY change_event.change_date_time DESC
        LIMIT 5`,
