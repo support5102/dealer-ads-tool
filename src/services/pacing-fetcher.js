@@ -165,17 +165,20 @@ function computeSinceLastChange({ dailySpend, changeDate, monthlyBudget, curveId
     return { daysSinceLastChange, pacingSinceLastChange: null };
   }
 
+  // Expected spend at the post-change daily rate × the actual days elapsed since
+  // the change. This is month-agnostic: a change on May 27 with 4 days of June
+  // spend data computes correctly, whereas the previous curve-based math returned
+  // 0 because it tried to use within-month day numbers (changeDayOfMonth=27,
+  // todayOfMonth-1=0 → max=27, both cumulative-target lookups landed on the same
+  // point on the curve, so expectedSinceChange came out as 0).
   const year = today.getUTCFullYear();
   const month = today.getUTCMonth() + 1;
   const totalDays = daysInMonth(year, month);
-  const todayOfMonth = today.getUTCDate();
-
-  const changeDayOfMonth = changeDt.getUTCDate();
-  const throughYesterday = Math.max(changeDayOfMonth, todayOfMonth - 1);
-
-  const cumAtChange = cumulativeTarget(curveId, changeDayOfMonth, totalDays);
-  const cumThroughYesterday = cumulativeTarget(curveId, throughYesterday, totalDays);
-  const expectedSinceChange = monthlyBudget * (cumThroughYesterday - cumAtChange);
+  const dailyRate = monthlyBudget / totalDays;
+  const expectedSinceChange = dailyRate * postChange.length;
+  // curveId intentionally unused — uniform daily rate is simpler and cross-month
+  // accurate. (Pacing curves only model within-month spend distribution.)
+  void curveId;
 
   if (expectedSinceChange <= 0) {
     return { daysSinceLastChange, pacingSinceLastChange: null };
