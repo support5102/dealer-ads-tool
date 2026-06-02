@@ -85,15 +85,18 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
   // "Completed days" pacing: the pacing math only compares against fully-elapsed
   // days. Today's in-progress spend is excluded from the comparison so the
   // numerator and denominator are apples-to-apples (both "through end of
-  // yesterday"). The display still shows the real current MTD; only the pacing
-  // %, expected spend, and required rate use the yesterday-normalised values.
+  // yesterday"). Brian's request: "make it cap at 11:59pm so it has a full day
+  // of data before counting it as a day passed." Eastern Time is used as the
+  // day boundary so the midnight tick aligns with most dealers' business day.
   //
-  // Brian's request: "make it cap at 11:59pm so it has a full day of data
-  // before counting it as a day passed." Eastern Time is used as the day
-  // boundary so the midnight tick aligns with most dealers' business day.
+  // Today's spend comes from campaignSpend's per-day/per-campaign rows (which
+  // include today) — getDailySpendLast14Days explicitly excludes today, so it
+  // can't be the source.
   const now = new Date();
   const et = nowInEastern(now);
-  const todaySpend = (dailySpend || []).find(d => d.date === et.todayStr)?.spend || 0;
+  const todaySpend = campaignSpend
+    .filter(c => c.date === et.todayStr)
+    .reduce((sum, c) => sum + c.spend, 0);
   const mtdSpendThruYesterday = Math.max(mtdSpend - todaySpend, 0);
 
   const pacing = calculatePacing({
