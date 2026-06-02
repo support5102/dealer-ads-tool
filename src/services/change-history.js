@@ -123,6 +123,46 @@ async function getHistory(limit = 100, accountId = null) {
 }
 
 /**
+ * Returns the YYYY-MM-DD of the most recent budget change for a dealer,
+ * across two sources:
+ *   1. dealer_budget_changes — every Set-total + Adjust-by-amount modal save
+ *   2. change_history rows with budget-related actions (update_budget,
+ *      increase_budget, decrease_budget) from the automated runners
+ *      (pacing-engine, IS optimizer).
+ *
+ * Excludes failed and DEV_MODE-blocked entries so dev test runs don't
+ * pollute prod's "Days Since Change" column.
+ *
+ * @param {string} dealerName
+ * @returns {Promise<string|null>}  'YYYY-MM-DD' or null if no changes found
+ */
+async function getLastBudgetChangeForDealer(dealerName) {
+  const pool = db.getPool();
+  if (!pool || !dealerName) return null;
+
+  try {
+    const res = await pool.query(
+      `SELECT MAX(ts) AS last_change FROM (
+         SELECT changed_at AS ts FROM dealer_budget_changes WHERE dealer_name = $1
+         UNION ALL
+         SELECT timestamp AS ts FROM change_history
+          WHERE dealer_name = $1
+            AND action ILIKE '%budget%'
+            AND success = TRUE
+            AND (details->>'devModeBlocked' IS NULL OR details->>'devModeBlocked' = 'false')
+       ) t`,
+      [dealerName]
+    );
+    const lastChange = res.rows[0]?.last_change;
+    if (!lastChange) return null;
+    return new Date(lastChange).toISOString().slice(0, 10);
+  } catch (err) {
+    console.warn('[change-history] getLastBudgetChangeForDealer failed:', err.message);
+    return null;
+  }
+}
+
+/**
  * Returns total number of entries.
  */
 async function size() {
@@ -152,6 +192,7 @@ async function clear() {
 module.exports = {
   addEntry,
   getHistory,
+  getLastBudgetChangeForDealer,
   size,
   clear,
 };

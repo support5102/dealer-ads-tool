@@ -10,6 +10,7 @@
  */
 
 const googleAds = require('./google-ads');
+const changeHistory = require('./change-history');
 const { calculatePacing, calculateSevenDayTrend, calculateProjection, daysInMonth } = require('./pacing-calculator');
 const { cumulativeTarget } = require('./pacing-curve');
 const config = (() => {
@@ -35,11 +36,17 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     loginCustomerId,
   };
 
-  const [campaignSpend, dailySpend, lastChange] = await Promise.all([
+  const [campaignSpend, dailySpend, changeDateLocal] = await Promise.all([
     googleAds.getMonthSpend(restCtx),
     googleAds.getDailySpendLast14Days(restCtx),
-    googleAds.getLastBudgetChange(restCtx).catch(() => ({ changeDate: null })),
+    // Source-of-truth for "last budget change" is the local DB, not Google Ads'
+    // change_event API. The local DB captures every tool-driven change (modal
+    // saves into dealer_budget_changes, plus automated runner updates into
+    // change_history) with no 30-day retention limit, no rate constraints,
+    // and no spurious Google-side auto-events polluting the result.
+    changeHistory.getLastBudgetChangeForDealer(account.name).catch(() => null),
   ]);
+  const lastChange = { changeDate: changeDateLocal };
 
   const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
   // TODO(8.2): align timezone handling with computeSinceLastChange (which uses UTC).
