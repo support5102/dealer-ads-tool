@@ -105,11 +105,10 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     currentInventory: null,
     baselineInventory: null,
   });
-  // Overlay real-current values onto the response so the dashboard's MTD-spend
-  // and remaining-budget columns show what the dealer has actually spent (and
-  // has left), even though pacing% itself is computed against yesterday.
-  pacing.spendToDate = Math.round(mtdSpend * 100) / 100;
-  pacing.remainingBudget = Math.round(Math.max(goal.monthlyBudget - mtdSpend, 0) * 100) / 100;
+  // Entire pacing row reflects "through end of yesterday" — MTD Spend,
+  // Remaining Budget, Pacing %, Daily Adj. all line up against the same closed-
+  // out window. Today's in-progress spend doesn't show in any column until
+  // midnight ET, when yesterday's totals are confirmed and the row ticks over.
 
   const trend = calculateSevenDayTrend(dailySpend);
   const projection = calculateProjection({
