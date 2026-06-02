@@ -18,32 +18,31 @@ const config = (() => {
 })();
 
 /**
- * Returns the current date+time in America/New_York (Eastern) as an
- * object: { year, month (1-12), fractionalDay }.
+ * Returns the current date in America/New_York (Eastern).
  *
- * fractionalDay is "elapsed days into the current month" — at noon on day 2
- * of June ET it returns 1.5 (full day 1 + half of day 2). Used by the pacing
- * calculator to compute target spend "through right now" instead of "through
- * end of today," which prevents the visible spend-vs-target jumps at midnight.
+ * `daysCompleted` is the count of FULLY-elapsed days this month — at any time
+ * on day-2 it returns 1 (only day-1 has fully completed). Only ticks up at
+ * midnight ET when the previous day officially closes out. The pacing math
+ * uses this so the target stays steady all day instead of jumping every 24h.
+ *
+ * `todayStr` is the ET-local YYYY-MM-DD string for "today", used to identify
+ * and subtract today's in-progress spend from MTD for an apples-to-apples
+ * comparison against "expected spend through end of yesterday."
  */
 function nowInEastern(now) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-    hour12: false,
   }).formatToParts(now).reduce((acc, p) => {
     if (p.type !== 'literal') acc[p.type] = parseInt(p.value, 10);
     return acc;
   }, {});
-  // `hour: '2-digit', hour12: false` returns "24" at midnight in some Node
-  // versions instead of "00" — normalise to 0.
-  if (parts.hour === 24) parts.hour = 0;
-  const fractionOfDay = (parts.hour + parts.minute / 60) / 24;
   return {
     year: parts.year,
     month: parts.month,
-    fractionalDay: (parts.day - 1) + fractionOfDay,
+    dayOfMonth: parts.day,
+    daysCompleted: parts.day - 1,
+    todayStr: `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`,
   };
 }
 
@@ -83,33 +82,44 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
   const lastChange = { changeDate: dates[0] || null };
 
   const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
-  // Compute the fractional "current day of month" in Eastern Time so the pacing
-  // target reflects the elapsed time of the current dealer-business-day instead
-  // of jumping by 24h at UTC midnight (8pm Eastern). Most of our dealers are East
-  // Coast — this gets within ±1-2 hours for Central/Mountain dealers, which is
-  // small enough that pacing decisions stay actionable. If we need true per-dealer
-  // tz later, we can fetch customer.time_zone from Google Ads and pass it through.
+  // "Completed days" pacing: the pacing math only compares against fully-elapsed
+  // days. Today's in-progress spend is excluded from the comparison so the
+  // numerator and denominator are apples-to-apples (both "through end of
+  // yesterday"). The display still shows the real current MTD; only the pacing
+  // %, expected spend, and required rate use the yesterday-normalised values.
+  //
+  // Brian's request: "make it cap at 11:59pm so it has a full day of data
+  // before counting it as a day passed." Eastern Time is used as the day
+  // boundary so the midnight tick aligns with most dealers' business day.
   const now = new Date();
   const et = nowInEastern(now);
+  const todaySpend = (dailySpend || []).find(d => d.date === et.todayStr)?.spend || 0;
+  const mtdSpendThruYesterday = Math.max(mtdSpend - todaySpend, 0);
+
   const pacing = calculatePacing({
     monthlyBudget: goal.monthlyBudget,
-    spendToDate: mtdSpend,
+    spendToDate: mtdSpendThruYesterday,
     year: et.year,
     month: et.month,
-    currentDay: et.fractionalDay,
+    currentDay: et.daysCompleted,
     currentInventory: null,
     baselineInventory: null,
   });
+  // Overlay real-current values onto the response so the dashboard's MTD-spend
+  // and remaining-budget columns show what the dealer has actually spent (and
+  // has left), even though pacing% itself is computed against yesterday.
+  pacing.spendToDate = Math.round(mtdSpend * 100) / 100;
+  pacing.remainingBudget = Math.round(Math.max(goal.monthlyBudget - mtdSpend, 0) * 100) / 100;
 
   const trend = calculateSevenDayTrend(dailySpend);
   const projection = calculateProjection({
     monthlyBudget: goal.monthlyBudget,
-    mtdSpend,
+    mtdSpend: mtdSpendThruYesterday,
     dailySpend,
     changeDate: lastChange.changeDate,
     year: et.year,
     month: et.month,
-    currentDay: et.fractionalDay,
+    currentDay: et.daysCompleted,
   });
 
   const { groupFor } = require('./dealer-groups-store');
