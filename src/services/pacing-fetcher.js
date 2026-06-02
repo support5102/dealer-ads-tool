@@ -169,7 +169,10 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     customerId: account.id,
     dealerName: account.name,
     monthlyBudget: goal.monthlyBudget,
-    mtdSpend: Math.round(mtdSpend * 100) / 100,
+    // Dashboard reads `mtdSpend` for the MTD Spend column — must be the
+    // through-end-of-yesterday value so the whole row honors the completed-days
+    // rule (today's in-progress spend stays hidden until midnight ET).
+    mtdSpend: Math.round(mtdSpendThruYesterday * 100) / 100,
     pacePercent: pacing.pacePercent,
     status: pacing.paceStatus,
     dailyAdjustment: Math.round((pacing.requiredDailyRate - pacing.dailyAvgSpend) * 100) / 100,
