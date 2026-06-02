@@ -64,7 +64,16 @@ function weightedExpectedSpend(monthlyBudget, dayWeights, throughDay) {
   const totalWeight = dayWeights.reduce((sum, w) => sum + w, 0);
   if (totalWeight === 0) return 0;
 
-  const elapsedWeight = dayWeights.slice(0, throughDay).reduce((sum, w) => sum + w, 0);
+  // Fractional `throughDay` supported — full days complete + partial weight
+  // of the day currently in progress. throughDay=1.5 at noon on day-2 of the
+  // month gives day-1's full weight plus half of day-2's weight, so pacing
+  // reflects "right now" instead of jumping by 24h at midnight every night.
+  const fullDays = Math.floor(throughDay);
+  const fractionOfCurrent = throughDay - fullDays;
+  let elapsedWeight = dayWeights.slice(0, fullDays).reduce((sum, w) => sum + w, 0);
+  if (fractionOfCurrent > 0 && fullDays < dayWeights.length) {
+    elapsedWeight += dayWeights[fullDays] * fractionOfCurrent;
+  }
   return monthlyBudget * (elapsedWeight / totalWeight);
 }
 
@@ -167,7 +176,12 @@ function calculatePacing(params) {
   } = params;
 
   const totalDays = daysInMonth(year, month);
+  // `currentDay` may be fractional — e.g. 2.375 = noon-ish on day 2. All downstream
+  // math handles fractional values; the slice operations use the integer floor and
+  // add the partial-weight tail separately.
   const daysElapsed = Math.min(currentDay, totalDays);
+  const daysElapsedFull = Math.floor(daysElapsed);
+  const fractionOfCurrent = daysElapsed - daysElapsedFull;
   const daysRemaining = Math.max(totalDays - daysElapsed, 0);
 
   // Inventory adjustment
@@ -177,7 +191,7 @@ function calculatePacing(params) {
   // Day weights for the month
   const monthWeights = getMonthDayWeights(year, month, dayWeights);
 
-  // Expected spend (weighted) through current day
+  // Expected spend (weighted) through this exact moment
   const expectedSpend = weightedExpectedSpend(effectiveBudget, monthWeights, daysElapsed);
 
   // Pacing variance
@@ -187,20 +201,35 @@ function calculatePacing(params) {
 
   const status = getPacingStatus(variancePercent);
 
-  // Remaining budget and required rate
+  // Remaining budget and required rate.
+  // The current day is partially complete — give the "remaining" calc the leftover
+  // fraction of today's weight as its first element so requiredDailyRate doesn't
+  // discount the rest of today.
   const remainingBudget = Math.max(effectiveBudget - spendToDate, 0);
-  const remainingWeights = monthWeights.slice(daysElapsed);
+  const remainingWeights = monthWeights.slice(daysElapsedFull + 1).slice();
+  if (fractionOfCurrent > 0 && daysElapsedFull < monthWeights.length) {
+    remainingWeights.unshift(monthWeights[daysElapsedFull] * (1 - fractionOfCurrent));
+  } else if (fractionOfCurrent === 0) {
+    // Edge case: at exact midnight day boundary, the "current" day hasn't started
+    // accumulating. Include it fully.
+    remainingWeights.unshift(monthWeights[daysElapsedFull] || 0);
+  }
   const requiredRate = requiredDailyRate(remainingBudget, remainingWeights);
 
-  // Actual daily average
+  // Actual daily average (over elapsed days, including the partial current day)
   const dailyAvgSpend = daysElapsed > 0 ? spendToDate / daysElapsed : 0;
 
   // Ideal daily rate (flat, for reference)
   const idealDailyRate = totalDays > 0 ? effectiveBudget / totalDays : 0;
 
   // Projected month-end spend — uses weighted projection:
-  // spend-per-unit-weight so far, applied to the full month's weight total
-  const elapsedWeight = monthWeights.slice(0, daysElapsed).reduce((s, w) => s + w, 0);
+  // spend-per-unit-weight so far, applied to the full month's weight total.
+  // Match the fractional elapsed-weight calc used in weightedExpectedSpend so the
+  // projection is consistent with the pacing variance.
+  let elapsedWeight = monthWeights.slice(0, daysElapsedFull).reduce((s, w) => s + w, 0);
+  if (fractionOfCurrent > 0 && daysElapsedFull < monthWeights.length) {
+    elapsedWeight += monthWeights[daysElapsedFull] * fractionOfCurrent;
+  }
   const totalWeight = monthWeights.reduce((s, w) => s + w, 0);
   const projectedSpend = (elapsedWeight > 0 && totalWeight > 0)
     ? spendToDate * (totalWeight / elapsedWeight)

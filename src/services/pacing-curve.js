@@ -64,12 +64,20 @@ function cumulativeTarget(curveId, throughDay, daysInMonth) {
     throw new Error(`Unknown curve "${curveId}". Known: ${Object.keys(PACING_CURVES).join(', ')}`);
   }
 
+  // Fractional `throughDay` supported — partial day at the end contributes its
+  // proportional share of that day's weight. E.g. throughDay=1.5 = full day-1
+  // weight + half of day-2's weight. Lets pacing math reflect "right now" mid-day
+  // instead of jumping by a whole day's target every 24 hours.
   let totalWeight = 0;
   let elapsedWeight = 0;
   for (let d = 1; d <= daysInMonth; d++) {
     const w = curve(d, daysInMonth);
     totalWeight += w;
-    if (d <= throughDay) elapsedWeight += w;
+    if (d <= throughDay) {
+      elapsedWeight += w;                                // full day elapsed
+    } else if (d - 1 < throughDay) {
+      elapsedWeight += w * (throughDay - (d - 1));       // partial day
+    }
   }
 
   return totalWeight === 0 ? 0 : elapsedWeight / totalWeight;

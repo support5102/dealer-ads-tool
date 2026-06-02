@@ -18,6 +18,36 @@ const config = (() => {
 })();
 
 /**
+ * Returns the current date+time in America/New_York (Eastern) as an
+ * object: { year, month (1-12), fractionalDay }.
+ *
+ * fractionalDay is "elapsed days into the current month" — at noon on day 2
+ * of June ET it returns 1.5 (full day 1 + half of day 2). Used by the pacing
+ * calculator to compute target spend "through right now" instead of "through
+ * end of today," which prevents the visible spend-vs-target jumps at midnight.
+ */
+function nowInEastern(now) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = parseInt(p.value, 10);
+    return acc;
+  }, {});
+  // `hour: '2-digit', hour12: false` returns "24" at midnight in some Node
+  // versions instead of "00" — normalise to 0.
+  if (parts.hour === 24) parts.hour = 0;
+  const fractionOfDay = (parts.hour + parts.minute / 60) / 24;
+  return {
+    year: parts.year,
+    month: parts.month,
+    fractionalDay: (parts.day - 1) + fractionOfDay,
+  };
+}
+
+/**
  * Fetches spend data from Google Ads and computes pacing metrics for one account.
  *
  * @param {Object} params
@@ -53,15 +83,20 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
   const lastChange = { changeDate: dates[0] || null };
 
   const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
-  // TODO(8.2): align timezone handling with computeSinceLastChange (which uses UTC).
-  // Existing calls below use local time; may disagree by ±1 day around midnight ET.
+  // Compute the fractional "current day of month" in Eastern Time so the pacing
+  // target reflects the elapsed time of the current dealer-business-day instead
+  // of jumping by 24h at UTC midnight (8pm Eastern). Most of our dealers are East
+  // Coast — this gets within ±1-2 hours for Central/Mountain dealers, which is
+  // small enough that pacing decisions stay actionable. If we need true per-dealer
+  // tz later, we can fetch customer.time_zone from Google Ads and pass it through.
   const now = new Date();
+  const et = nowInEastern(now);
   const pacing = calculatePacing({
     monthlyBudget: goal.monthlyBudget,
     spendToDate: mtdSpend,
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-    currentDay: now.getDate(),
+    year: et.year,
+    month: et.month,
+    currentDay: et.fractionalDay,
     currentInventory: null,
     baselineInventory: null,
   });
@@ -72,9 +107,9 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     mtdSpend,
     dailySpend,
     changeDate: lastChange.changeDate,
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-    currentDay: now.getDate(),
+    year: et.year,
+    month: et.month,
+    currentDay: et.fractionalDay,
   });
 
   const { groupFor } = require('./dealer-groups-store');
