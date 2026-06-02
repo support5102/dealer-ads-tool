@@ -65,9 +65,14 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     loginCustomerId,
   };
 
-  const [campaignSpend, dailySpend, changeDateLocal, changeDateGoogle] = await Promise.all([
+  const [campaignSpend, dailySpend, todaySpend, changeDateLocal, changeDateGoogle] = await Promise.all([
     googleAds.getMonthSpend(restCtx),
     googleAds.getDailySpendLast14Days(restCtx),
+    // Today's spend (customer-local TZ via Google's `DURING TODAY`). Separate
+    // dedicated query — getMonthSpend's returned rows don't carry a usable
+    // date field on every row, so we can't compute today's spend by filtering
+    // its results.
+    googleAds.getTodaySpend(restCtx).catch(() => 0),
     // Source A: local DB — every tool-driven budget change (modal saves into
     // dealer_budget_changes + runner updates into change_history).
     changeHistory.getLastBudgetChangeForDealer(account.name).catch(() => null),
@@ -94,9 +99,6 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
   // can't be the source.
   const now = new Date();
   const et = nowInEastern(now);
-  const todaySpend = campaignSpend
-    .filter(c => c.date === et.todayStr)
-    .reduce((sum, c) => sum + c.spend, 0);
   const mtdSpendThruYesterday = Math.max(mtdSpend - todaySpend, 0);
 
   const pacing = calculatePacing({

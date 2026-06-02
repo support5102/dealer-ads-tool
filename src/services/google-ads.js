@@ -1410,6 +1410,35 @@ async function getDailySpendBreakdown(restCtx) {
 }
 
 /**
+ * Fetches total spend for today (customer's local time) only.
+ * Used by the pacing fetcher to subtract today's in-progress spend from the
+ * MTD total so the "completed days only" pacing math gets an apples-to-apples
+ * spendToDate matching the through-end-of-yesterday expected spend.
+ *
+ * @param {Object} restCtx - REST context
+ * @returns {Promise<number>} Today's total spend across all campaigns
+ */
+async function getTodaySpend(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT metrics.cost_micros
+       FROM campaign
+       WHERE segments.date DURING TODAY AND campaign.status != 'REMOVED'`,
+      restCtx.loginCustomerId
+    );
+    return rows.reduce(
+      (sum, row) => sum + ((row.metrics?.costMicros ?? 0) / 1_000_000),
+      0
+    );
+  } catch (err) {
+    console.warn('getTodaySpend failed (non-fatal):', err.message);
+    return 0;
+  }
+}
+
+/**
  * Fetches per-day total spend for the last 14 calendar days (crosses month boundaries).
  * Used by the all-accounts pacing overview for 7-day trend calculation.
  *
@@ -1602,6 +1631,7 @@ module.exports = {
   getLastBudgetChange,
   getDailySpendBreakdown,
   getDailySpendLast14Days,
+  getTodaySpend,
   // Pacing: geo expansion
   getCampaignProximityTargets,
   getGeographicPerformance,
