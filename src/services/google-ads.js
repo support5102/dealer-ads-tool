@@ -1358,7 +1358,10 @@ async function getLastBudgetChange(restCtx) {
       .toISOString().slice(0, 10);
     // endDate = tomorrow (UTC), so the BETWEEN inclusive upper bound covers all of today.
     const endDate = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    // Fetch recent budget changes (up to 5 in case the most recent is < 24h old)
+    // Fetch only the most recent budget change. No 24h filter — for the
+    // "Days Since Change" column we want the actual most recent change of
+    // any age. The downstream pacing-since-last-change math handles the
+    // < 1 day case naturally (0 expected spend means no percentage shown).
     const rows = await doQuery(
       restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
       `SELECT change_event.change_date_time
@@ -1366,27 +1369,16 @@ async function getLastBudgetChange(restCtx) {
        WHERE change_event.change_date_time BETWEEN '${startDate}' AND '${endDate}'
          AND change_event.change_resource_type = 'CAMPAIGN_BUDGET'
        ORDER BY change_event.change_date_time DESC
-       LIMIT 5`,
+       LIMIT 1`,
       restCtx.loginCustomerId
     );
     if (rows.length === 0) return { changeDate: null };
 
-    const now = Date.now();
-    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
-    // Find the most recent change that is at least 24 hours old.
-    // Changes < 24h old don't have enough spend data to compute a meaningful daily avg.
-    for (const row of rows) {
-      const dt = row.changeEvent?.changeDateTime;
-      if (!dt) continue;
-      const changeTime = new Date(dt.replace(' ', 'T') + 'Z').getTime();
-      if (now - changeTime >= TWENTY_FOUR_HOURS) {
-        return { changeDate: dt.split(' ')[0] };
-      }
-    }
-
-    // All changes are < 24h old — don't use any
-    return { changeDate: null };
+    const dt = rows[0].changeEvent?.changeDateTime;
+    if (!dt) return { changeDate: null };
+    // change_date_time is returned in the customer's local time zone — splitting
+    // on the space already gives us the local-calendar-date of the change.
+    return { changeDate: dt.split(' ')[0] };
   } catch (err) {
     console.warn('getLastBudgetChange failed (non-fatal):', err.message);
     return { changeDate: null };

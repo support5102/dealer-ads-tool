@@ -36,17 +36,21 @@ async function fetchAccountPacing({ account, goal, accessToken, developerToken, 
     loginCustomerId,
   };
 
-  const [campaignSpend, dailySpend, changeDateLocal] = await Promise.all([
+  const [campaignSpend, dailySpend, changeDateLocal, changeDateGoogle] = await Promise.all([
     googleAds.getMonthSpend(restCtx),
     googleAds.getDailySpendLast14Days(restCtx),
-    // Source-of-truth for "last budget change" is the local DB, not Google Ads'
-    // change_event API. The local DB captures every tool-driven change (modal
-    // saves into dealer_budget_changes, plus automated runner updates into
-    // change_history) with no 30-day retention limit, no rate constraints,
-    // and no spurious Google-side auto-events polluting the result.
+    // Source A: local DB — every tool-driven budget change (modal saves into
+    // dealer_budget_changes + runner updates into change_history).
     changeHistory.getLastBudgetChangeForDealer(account.name).catch(() => null),
+    // Source B: Google Ads change_event API — every change made directly in the
+    // Google Ads UI, by Google reps, by Editor, by other vendors. Up to 28 days
+    // back (Google's 30-day retention limit). Returns customer-local-TZ date.
+    googleAds.getLastBudgetChange(restCtx).then(r => r.changeDate).catch(() => null),
   ]);
-  const lastChange = { changeDate: changeDateLocal };
+  // Take whichever change happened most recently. Sorting YYYY-MM-DD strings
+  // works lexicographically — same as date order.
+  const dates = [changeDateLocal, changeDateGoogle].filter(Boolean).sort().reverse();
+  const lastChange = { changeDate: dates[0] || null };
 
   const mtdSpend = campaignSpend.reduce((sum, c) => sum + c.spend, 0);
   // TODO(8.2): align timezone handling with computeSinceLastChange (which uses UTC).
