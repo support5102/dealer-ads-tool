@@ -17,6 +17,7 @@ const {
   createSession, handleMessage, detectInputType,
 } = require('../services/command-center-engine');
 const { applyChange } = require('../services/change-executor');
+const googleAds = require('../services/google-ads');
 const { createClient } = require('../services/google-ads');
 const { logChange } = require('../services/change-history');
 
@@ -46,13 +47,41 @@ function createCommandCenterRouter(config = {}) {
       const apiKey = (config.claude && config.claude.apiKey) || process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured' });
 
-      // Skip account structure loading for now — it's not needed for most tasks
-      // and avoids potential errors in the Google Ads API call chain
+      // Load the account structure for the selected customer so Claude knows
+      // which campaigns + ad groups actually exist. Cached on the session so we
+      // don't refetch on every message in the same conversation. Without this,
+      // Claude has no campaign list and asks the user to enumerate every
+      // campaign/ad-group by hand for any 'all campaigns' or 'all models' ask.
+      let accountStructure = session.accountStructure;
+      const cacheKey = customerId ? String(customerId).replace(/-/g, '') : null;
+      if (cacheKey && session._structureCustomerId !== cacheKey) {
+        try {
+          const mccId = req.session.mccId || (config.googleAds && config.googleAds.mccId);
+          if (req.session.tokens && req.session.tokens.refresh_token) {
+            const accessToken = await googleAds.refreshAccessToken(
+              config.googleAds, req.session.tokens.refresh_token
+            );
+            req.session.tokens.access_token = accessToken;
+            const restCtx = {
+              accessToken,
+              developerToken: config.googleAds && config.googleAds.developerToken,
+              customerId: cacheKey,
+              loginCustomerId: mccId,
+            };
+            accountStructure = await googleAds.getAccountStructure(restCtx);
+            session._structureCustomerId = cacheKey;
+            session.accountStructure = accountStructure;
+          }
+        } catch (structErr) {
+          console.warn('[CC] account structure load failed (continuing without it):', structErr.message);
+        }
+      }
+
       const result = await handleMessage(
         session,
         message.trim(),
         { apiKey, model: (config.claude && config.claude.model) || 'claude-sonnet-4-20250514' },
-        { customerId }
+        { customerId, accountStructure }
       );
 
       res.json(result);
