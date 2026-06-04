@@ -197,8 +197,16 @@ The user is pasting a Freshdesk ticket. Parse the ticket to understand:
 - What changes are being requested?
 - Generate a structured plan of Google Ads changes
 
+When the ticket says "all models", "all campaigns", "all new campaigns",
+"every model", or similar broad language, you MUST enumerate every matching
+campaign from the account structure below — do NOT sample, do NOT pick a
+representative subset, do NOT pick only the most-popular models. List the
+change for EVERY campaign that matches the scope. If a ticket asks for 17
+negatives across all new-model campaigns and there are 10 new-model
+campaigns, the plan has 170 changes, not 30.
+
 If the ticket is ambiguous, ask clarifying questions before generating the plan.
-${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + JSON.stringify(context.accountStructure, null, 2).slice(0, 10000) : ''}
+${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + summariseAccountStructure(context.accountStructure) : ''}
 `;
   }
 
@@ -219,7 +227,7 @@ The user wants you to audit the current account. Analyze the structure and check
 - Brand campaign with OEM make keywords (should be dealer name ONLY)
 
 Present findings as actionable items the user can approve for fixing.
-${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + JSON.stringify(context.accountStructure, null, 2).slice(0, 10000) : ''}
+${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + summariseAccountStructure(context.accountStructure) : ''}
 `;
   }
 
@@ -235,8 +243,69 @@ dismiss_recommendation, pause_ad, enable_ad, update_rsa.
 
 When user says "create X", generate the full structure (campaigns, ad groups, keywords, ads)
 and show it in detail for approval before executing.
-${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + JSON.stringify(context.accountStructure, null, 2).slice(0, 10000) : ''}
+
+When the user's task says "all models", "all campaigns", "every campaign",
+or similar broad scope, enumerate every matching campaign from the account
+structure below — do NOT sample or pick a subset.
+${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + summariseAccountStructure(context.accountStructure) : ''}
 `;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Account structure summariser
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Compact, token-efficient representation of an account's campaigns + ad groups.
+ *
+ * Full JSON.stringify of an account-structure object (50 campaigns × 16 ad
+ * groups × keywords × ads × extensions) blows past 30-50 KB and used to be
+ * truncated at 10 KB, silently hiding ~80% of campaigns from Claude. That's
+ * why "add negatives to all models" plans only covered the first 3-4
+ * campaigns — the rest didn't make it into the system prompt.
+ *
+ * This summary keeps every campaign and every ad-group name (the part Claude
+ * actually needs to enumerate "all models") but drops keyword bodies, ad
+ * copy, and extension content. For a 50-campaign account it's ~3-5 KB, so
+ * a 60 KB hard cap on the result is more than enough headroom for the full
+ * MCC structure.
+ */
+function summariseAccountStructure(structure) {
+  if (!structure) return '';
+  const lines = [];
+  const customerName = structure.customerName || structure.name || '';
+  const customerId = structure.customerId || structure.id || '';
+  if (customerName || customerId) {
+    lines.push(`Account: ${customerName}${customerId ? ` (${customerId})` : ''}`);
+  }
+  const campaigns = Array.isArray(structure.campaigns) ? structure.campaigns : [];
+  lines.push(`Total campaigns: ${campaigns.length}`);
+  lines.push('');
+  for (const c of campaigns) {
+    const status = c.status ? ` [${c.status}]` : '';
+    const channel = c.advertisingChannelType || c.channelType || '';
+    const budget = c.budgetAmount != null ? ` $${c.budgetAmount}/day` : '';
+    lines.push(`Campaign: ${c.name || c.campaignName || '(unnamed)'}${status}${channel ? ` (${channel})` : ''}${budget}`);
+    const adGroups = Array.isArray(c.adGroups) ? c.adGroups : [];
+    if (adGroups.length === 0) {
+      lines.push(`  (no ad groups)`);
+    } else {
+      for (const ag of adGroups) {
+        const agStatus = ag.status ? ` [${ag.status}]` : '';
+        const kwCount = Array.isArray(ag.keywords) ? ag.keywords.length : 0;
+        lines.push(`  Ad group: ${ag.name || ag.adGroupName || '(unnamed)'}${agStatus}${kwCount ? ` — ${kwCount} keywords` : ''}`);
+      }
+    }
+    lines.push('');
+  }
+  const sharedSets = Array.isArray(structure.sharedSets) ? structure.sharedSets : [];
+  if (sharedSets.length) {
+    lines.push('Shared negative lists:');
+    for (const s of sharedSets) {
+      lines.push(`  - ${s.name || s.setName || '(unnamed)'}${s.count != null ? ` (${s.count} items)` : ''}`);
+    }
+  }
+  return lines.join('\n').slice(0, 60_000);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -254,7 +323,11 @@ ${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + JSON.stringify
 async function callClaude(systemPrompt, messages, config, tools) {
   const body = {
     model: config.model || 'claude-sonnet-4-20250514',
-    max_tokens: config.maxTokens || 4096,
+    // 16384 (≈64 KB JSON output) covers plans up to ~400 changes — enough
+    // for an "add 17 negatives × 25 model campaigns" Bob-Weaver-style plan
+    // (425 changes). Previous 4096 default truncated mid-plan, which is why
+    // ticket #295249's output cut off mid-Ram-1500.
+    max_tokens: config.maxTokens || 16384,
     system: systemPrompt,
     messages,
   };
