@@ -206,6 +206,11 @@ function createCommandCenterRouter(config = {}) {
 
       const { blankAdsRow, buildAdsCSV } = require('../../public/csv-utils');
       const rows = [];
+      // Dedup tracker for campaign-level negative keywords — a Claude plan may
+      // emit one row per (campaign, ad-group, keyword) combo; we collapse all
+      // ad-group rows for the same (campaign, keyword, matchType) into one
+      // campaign-level CSV row.
+      const negDedupKeys = new Set();
       const seenCampaigns = new Set();
       const seenAdGroups = new Set();
 
@@ -288,12 +293,21 @@ function createCommandCenterRouter(config = {}) {
           rows.push(r);
 
         } else if (c.type === 'add_negative') {
-          const r = blankAdsRow();
-          r['Campaign'] = c.campaignName;
-          r['Ad Group'] = c.adGroupName;
-          r['Keyword'] = c.keyword;
-          r['Criterion Type'] = c.matchType || 'Negative Phrase';
-          rows.push(r);
+          // Negative keywords are CAMPAIGN-LEVEL by default — leave Ad Group
+          // empty so Google Ads Editor applies the negative to every ad group
+          // in the campaign automatically. Even if Claude emits a per-ad-group
+          // adGroupName, we ignore it here and emit one row per (campaign,
+          // keyword, matchType). Dedup is handled by the negDedupKeys Set
+          // below so a 16-ad-group Claude plan collapses to 1 CSV row.
+          const dedupKey = `${c.campaignName}|${c.keyword}|${c.matchType || 'Negative Phrase'}`;
+          if (!negDedupKeys.has(dedupKey)) {
+            negDedupKeys.add(dedupKey);
+            const r = blankAdsRow();
+            r['Campaign'] = c.campaignName;
+            r['Keyword'] = c.keyword;
+            r['Criterion Type'] = c.matchType || 'Negative Phrase';
+            rows.push(r);
+          }
 
         } else if (c.type === 'create_rsa') {
           const r = blankAdsRow();
