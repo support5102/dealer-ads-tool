@@ -339,7 +339,10 @@ async function callClaude(systemPrompt, messages, config, tools) {
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
     },
-    timeout: 120000,
+    // 4 minutes — Claude Sonnet generates output at ~75 tokens/sec, so a full
+    // 16384-token plan takes ~3.5 minutes worst-case. Stay under Cloud Run's
+    // default 5-minute request timeout so we don't trade one timeout for another.
+    timeout: 240000,
   });
 
   const content = resp.data.content || [];
