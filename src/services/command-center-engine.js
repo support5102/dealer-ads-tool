@@ -205,6 +205,16 @@ change for EVERY campaign that matches the scope. If a ticket asks for 17
 negatives across all new-model campaigns and there are 10 new-model
 campaigns, the plan has 170 changes, not 30.
 
+NEGATIVE KEYWORDS ARE CAMPAIGN-LEVEL BY DEFAULT. When generating
+add_negative_keyword changes, OMIT the adGroupName field — emit exactly
+one change row per (campaignName, keyword, matchType) combination. The
+executor adds negatives at the campaign level which applies to every ad
+group in that campaign automatically. Adding the same negative per ad
+group is redundant and produces duplicate-looking rows in the plan UI.
+Only set adGroupName for negatives when the user explicitly asks for
+ad-group-specific traffic sculpting (e.g., "negative 'lease' on the
+sale-themed ad groups only").
+
 If the ticket is ambiguous, ask clarifying questions before generating the plan.
 ${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + summariseAccountStructure(context.accountStructure) : ''}
 `;
