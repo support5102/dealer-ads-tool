@@ -25,6 +25,7 @@ const { createBuilderRouter }    = require('./routes/builder');
 const { createSchedulerRouter } = require('./routes/scheduler');
 const { createAuditRouter }           = require('./routes/audit');
 const { createOptimizationRouter }    = require('./routes/optimization');
+const { createCpcOptimizerRouter }    = require('./routes/cpc-optimizer');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { createCommandCenterRouter }    = require('./routes/command-center');
@@ -131,6 +132,7 @@ function createApp(config) {
   app.use(createSchedulerRouter());
   app.use(createAuditRouter(config));
   app.use(createOptimizationRouter(config));
+  app.use(createCpcOptimizerRouter(config));
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
   app.use('/api/cc', createCommandCenterRouter(config));
