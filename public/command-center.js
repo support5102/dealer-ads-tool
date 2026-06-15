@@ -212,7 +212,11 @@ function addPlanCard(message, plan) {
   var html = '<h4>Plan Ready</h4>';
   html += '<div class="cc-plan-summary">' + escHtml(message).replace(/\n/g, '<br>') + '</div>';
 
-  var changeList = (plan && plan.changes) ? plan.changes : (Array.isArray(plan) ? plan : []);
+  var rawChanges = (plan && plan.changes) ? plan.changes : (Array.isArray(plan) ? plan : []);
+  // Defensive: server should always return an array, but a malformed response
+  // (or a regression in Claude's output format) could produce a string here.
+  // Coerce non-arrays to [] so the renderer can't crash on .forEach.
+  var changeList = Array.isArray(rawChanges) ? rawChanges : [];
   if (changeList.length) {
     html += '<div class="cc-plan-changes">';
     changeList.forEach(function(c) {

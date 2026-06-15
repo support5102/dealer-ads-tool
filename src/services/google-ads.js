@@ -157,7 +157,9 @@ async function getAccountStructure(restCtx) {
 
   const campaigns = await doQuery(accessToken, developerToken, customerId,
     `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-            campaign.bidding_strategy_type, campaign_budget.amount_micros
+            campaign.bidding_strategy_type,
+            campaign_budget.resource_name, campaign_budget.name,
+            campaign_budget.amount_micros, campaign_budget.explicitly_shared
      FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name`,
     loginCustomerId);
 
@@ -217,6 +219,9 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
     const c = row.campaign;
     const budget = row.campaignBudget || row.campaign_budget;
     const budgetMicros = budget ? (get(budget, 'amountMicros', 'amount_micros')) : undefined;
+    const budgetName = budget ? get(budget, 'name', 'name') : undefined;
+    const budgetResource = budget ? get(budget, 'resourceName', 'resource_name') : undefined;
+    const budgetShared = budget ? get(budget, 'explicitlyShared', 'explicitly_shared') : undefined;
     campMap[c.name] = {
       id:        String(c.id),
       name:      c.name,
@@ -224,6 +229,11 @@ function buildStructureTree(campaigns, adGroups, keywords, locations) {
       type:      String(get(c, 'advertisingChannelType', 'advertising_channel_type')),
       bidding:   String(get(c, 'biddingStrategyType', 'bidding_strategy_type')),
       budget:    budgetMicros != null ? (budgetMicros / 1_000_000).toFixed(2) : '?',
+      // New fields — used by the Command Center summariser so Claude can
+      // reason about shared vs standalone budgets when reallocating.
+      budgetName,
+      budgetResource,
+      budgetShared: !!budgetShared,
       adGroups:  [],
       locations: [],
     };
@@ -669,7 +679,9 @@ async function getCampaignPerformance(restCtx) {
             campaign.manual_cpc.enhanced_cpc_enabled,
             metrics.clicks, metrics.impressions, metrics.conversions,
             metrics.conversions_value, metrics.cost_micros, metrics.ctr,
-            metrics.average_cpc, metrics.search_impression_share
+            metrics.average_cpc, metrics.search_impression_share,
+            metrics.search_rank_lost_impression_share,
+            metrics.search_budget_lost_impression_share
      FROM campaign
      WHERE segments.date DURING LAST_7_DAYS
        AND campaign.status != 'REMOVED'`,
@@ -694,6 +706,14 @@ async function getCampaignPerformance(restCtx) {
       ctr: m.ctr ?? 0,
       averageCpc: (m.averageCpc ?? m.average_cpc ?? 0) / 1_000_000,
       searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
+      // The two signals the CPC Optimizer page hinges on:
+      //   rank-lost-IS  → bid is too low (raise CPC)
+      //   budget-lost-IS → daily budget is too low (different lever)
+      // Both are fractions 0..1; null when undefined (often for non-Search campaigns).
+      searchRankLostImpressionShare:
+        m.searchRankLostImpressionShare ?? m.search_rank_lost_impression_share ?? null,
+      searchBudgetLostImpressionShare:
+        m.searchBudgetLostImpressionShare ?? m.search_budget_lost_impression_share ?? null,
     };
   });
 }

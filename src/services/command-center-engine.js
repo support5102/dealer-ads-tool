@@ -151,8 +151,20 @@ ADD A KEYWORD (one entry per keyword per match type):
 {"type":"add_keyword","campaignName":"Dealer - Campaign Name","adGroupName":"SD: Ad Group Name","keyword":"keyword text","matchType":"Exact"}
 {"type":"add_keyword","campaignName":"Dealer - Campaign Name","adGroupName":"SD: Ad Group Name","keyword":"keyword text","matchType":"Phrase"}
 
-ADD A NEGATIVE KEYWORD:
-{"type":"add_negative","campaignName":"Dealer - Campaign Name","adGroupName":"SD: Ad Group Name","keyword":"negative term","matchType":"Negative Phrase"}
+ADD A NEGATIVE KEYWORD (campaign-level — adGroupName is NEVER used here):
+  PREFERRED — wildcard matcher (server expands against account structure):
+    {"type":"add_negative_keyword","campaignsMatching":{"contains":" - New - "},"keyword":"2010","matchType":"Negative Phrase"}
+    {"type":"add_negative_keyword","campaignsMatching":"all","keyword":"wrangler","matchType":"Negative Exact"}
+    {"type":"add_negative_keyword","campaignsMatching":{"contains":"Jeep"},"keyword":"...","matchType":"..."}
+    {"type":"add_negative_keyword","campaignsMatching":{"contains":" - New - ","notContains":"Brand"},"keyword":"...","matchType":"..."}
+
+  EXPLICIT LIST (when targets don't share a substring pattern):
+    {"type":"add_negative_keyword","campaignNames":["Camp A","Camp B","Camp C"],"keyword":"...","matchType":"..."}
+
+  SINGLE CAMPAIGN ONLY (rarely correct — almost every negative-keyword request is bulk):
+    {"type":"add_negative_keyword","campaignName":"Camp A","keyword":"...","matchType":"..."}
+
+For ANY negative keyword that should hit more than one campaign, use 'campaignsMatching' (preferred) or 'campaignNames' (explicit list). NEVER emit multiple separate change rows that differ only in campaignName — that is always a bug. The matcher form lets you cover 47 new-model campaigns in ONE row.
 
 CREATE AN RSA AD:
 {"type":"create_rsa","campaignName":"Dealer - Campaign Name","adGroupName":"SD: Ad Group Name","headlines":["H1","H2","H3","H4","H5","H6","H7","H8","H9","H10","H11","H12","H13","H14","H15"],"descriptions":["D1","D2","D3","D4"],"finalUrl":"https://example.com","path1":"Path1","path2":"Path2"}
@@ -165,6 +177,28 @@ SET LOCATION:
 PAUSE/ENABLE:
 {"type":"pause_campaign","campaignName":"Campaign Name"}
 {"type":"enable_campaign","campaignName":"Campaign Name"}
+
+UPDATE A CAMPAIGN BUDGET (new daily amount in dollars; engine resolves the budget resource from campaignName):
+{"type":"update_budget","campaignName":"Campaign Name","details":{"newBudget":24}}
+
+  CRITICAL: when the account structure shows a SHARED budget covering multiple campaigns, updating ANY one campaign's budget mutates the shared resource for ALL of them. Emit ONLY ONE update_budget row per shared budget — use any one of its member campaigns. Do NOT emit one row per campaign sharing a budget; that double-writes the same resource.
+
+  For STANDALONE budgets, emit one update_budget row per campaign with the desired per-campaign amount.
+
+  Examples — given account structure showing "Ram Combined Budget" shared by Ram 1500 + Ram 2500 at $32/day:
+    Correct: ONE row {"type":"update_budget","campaignName":"Bob Weaver Auto - New - Ram - 1500","details":{"newBudget":32}}  // updates shared budget to $32 — covers both Ram campaigns
+    Wrong:   TWO rows updating Ram 1500 to $16 and Ram 2500 to $16  // last write wins; budget ends at $16 not $32
+
+  Given two standalone budgets for Grand Cherokee ($24) and Wrangler ($24):
+    Correct: TWO rows, each with its own newBudget value.
+
+CREATE A NEW SHARED BUDGET (and assign campaigns to it):
+{"type":"create_shared_budget","details":{"budgetName":"CDJR Combined","dailyAmount":64,"campaignNames":["Camp A","Camp B"]}}
+
+ASSIGN AN EXISTING SHARED BUDGET TO A CAMPAIGN:
+{"type":"assign_campaign_budget","campaignName":"Camp Name","details":{"budgetName":"Existing Shared Budget Name"}}
+
+NEVER reference budget names that don't appear in the SHARED BUDGETS section of the account structure. If the user asks to "modify existing" and no matching shared budget exists in the structure, the budgets are standalone — emit per-campaign update_budget rows.
 
 You MUST use these exact type values. Do NOT invent new types like "campaign_creation" or "ad_group_creation". Use the exact types above.
 Common things to verify: website platform, dealer group membership, stock levels,
@@ -214,6 +248,92 @@ group is redundant and produces duplicate-looking rows in the plan UI.
 Only set adGroupName for negatives when the user explicitly asks for
 ad-group-specific traffic sculpting (e.g., "negative 'lease' on the
 sale-themed ad groups only").
+
+COUNT CHANGES AT THE CAMPAIGN LEVEL when estimating or describing scope
+to the user. NEVER multiply by ad-group count when describing how many
+negative-keyword changes a request will produce. Correct math: 44
+campaigns × 15 keywords = 660 changes. WRONG math: 44 campaigns × 16
+ad groups × 15 keywords = 10,560 changes. The number of ad groups
+inside a campaign is irrelevant to the change count — the negative is
+applied once per campaign. If you find yourself describing a number in
+the thousands or tens of thousands for a negative-keyword request,
+stop and recompute at the campaign level — it is almost certainly
+wrong. Just emit the plan; don't ask the user to choose between
+"complete list" and "sample" — there is no sample mode.
+
+USE THE WILDCARD MATCHER for bulk negative-keyword changes. The
+preferred form is 'campaignsMatching', which the server expands
+against the live account structure — you never have to enumerate
+campaign names by hand:
+
+  // All new-model campaigns (matches " - New - " substring):
+  { "type": "add_negative_keyword",
+    "campaignsMatching": { "contains": " - New - " },
+    "keyword": "2010", "matchType": "Negative Phrase" }
+
+  // Every campaign in the account:
+  { "type": "add_negative_keyword",
+    "campaignsMatching": "all",
+    "keyword": "wrangler", "matchType": "Negative Exact" }
+
+  // All Jeep campaigns only:
+  { "type": "add_negative_keyword",
+    "campaignsMatching": { "contains": "Jeep" },
+    "keyword": "...", "matchType": "..." }
+
+  // All new-model campaigns EXCEPT brand:
+  { "type": "add_negative_keyword",
+    "campaignsMatching": { "contains": " - New - ", "notContains": "Brand" },
+    "keyword": "...", "matchType": "..." }
+
+Substring matching is case-insensitive. 'contains' can be a string
+or array (AND semantics — all substrings must appear). 'notContains'
+works the same way for exclusions.
+
+USE 'campaignsMatching' WHENEVER THE REQUEST IS "ACROSS ALL X
+CAMPAIGNS." It's vastly more reliable than enumerating campaign
+names and the server stays correct as campaigns are added/removed.
+Look at the account structure section to confirm which substring
+will match your intent, then emit ONE row per (keyword, matchType)
+combination using the matcher.
+
+For explicit fan-out (when you need to target a specific custom
+subset), use 'campaignNames' as an array of names instead — but
+prefer 'campaignsMatching' for any "all of type X" request.
+
+  // ONE row that covers 44 campaigns:
+  { "type": "add_negative_keyword",
+    "campaignNames": ["Bob Weaver Auto - New - Chevrolet - Blazer",
+                      "Bob Weaver Auto - New - Chevrolet - Equinox",
+                      ... 42 more ...],
+    "keyword": "2010", "matchType": "Negative Phrase" }
+
+  // Same thing the WRONG way (44 separate rows, blows the token budget):
+  { "type": "add_negative_keyword",
+    "campaignName": "Bob Weaver Auto - New - Chevrolet - Blazer",
+    "keyword": "2010", "matchType": "Negative Phrase" },
+  { "type": "add_negative_keyword",
+    "campaignName": "Bob Weaver Auto - New - Chevrolet - Equinox",
+    "keyword": "2010", "matchType": "Negative Phrase" }, ...
+
+For 15 year-negatives across 44 campaigns, emit 15 fan-out rows (one
+per year, each listing all 44 campaigns). For a single keyword across
+all 55 campaigns in the account, emit 1 fan-out row. The summary you
+describe to the user should still cite the materialised row count
+(e.g. "660 negative-keyword additions across 44 campaigns"), but the
+JSON you EMIT must use the fan-out form.
+
+SELF-CHECK BEFORE EMITTING: after writing your changes array, scan it
+for any negative-keyword change where 'campaignName' (singular) is
+set. For each one, ask: "does this same keyword apply to other
+campaigns in this ticket too?" If yes, you MUST consolidate them into
+ONE fan-out row with 'campaignNames' listing every target campaign.
+If your scope description says "across all 44 new-model campaigns"
+but your changes array only references one model campaign for that
+keyword, the plan is INCOMPLETE — fix it before returning. The
+fan-out array must literally contain every campaign name you said
+the change applies to. Never use one campaign as a "representative
+example" — list them all explicitly.
 
 If the ticket is ambiguous, ask clarifying questions before generating the plan.
 ${context.accountStructure ? '\n## CURRENT ACCOUNT STRUCTURE\n' + summariseAccountStructure(context.accountStructure) : ''}
@@ -291,11 +411,40 @@ function summariseAccountStructure(structure) {
   const campaigns = Array.isArray(structure.campaigns) ? structure.campaigns : [];
   lines.push(`Total campaigns: ${campaigns.length}`);
   lines.push('');
+
+  // Group campaigns by shared budget so Claude can see who shares what.
+  // explicitlyShared budgets matter for reallocation: updating ONE campaign's
+  // budget mutates the shared resource for ALL campaigns on it.
+  const sharedBudgets = new Map(); // resource -> { name, amount, members[] }
+  for (const c of campaigns) {
+    if (c.budgetShared && c.budgetResource) {
+      const key = c.budgetResource;
+      if (!sharedBudgets.has(key)) {
+        sharedBudgets.set(key, {
+          name: c.budgetName || '(unnamed)',
+          amount: c.budget,
+          members: [],
+        });
+      }
+      sharedBudgets.get(key).members.push(c.name);
+    }
+  }
+  if (sharedBudgets.size) {
+    lines.push('SHARED BUDGETS (campaigns listed under each share the same budget — updating one updates them all):');
+    for (const b of sharedBudgets.values()) {
+      lines.push(`  - "${b.name}" $${b.amount}/day → ${b.members.join(', ')}`);
+    }
+    lines.push('');
+  }
+
   for (const c of campaigns) {
     const status = c.status ? ` [${c.status}]` : '';
-    const channel = c.advertisingChannelType || c.channelType || '';
-    const budget = c.budgetAmount != null ? ` $${c.budgetAmount}/day` : '';
-    lines.push(`Campaign: ${c.name || c.campaignName || '(unnamed)'}${status}${channel ? ` (${channel})` : ''}${budget}`);
+    const channel = c.advertisingChannelType || c.channelType || c.type || '';
+    const budgetAmount = (c.budget != null && c.budget !== '?') ? ` $${c.budget}/day` : '';
+    const budgetIdent = c.budgetShared
+      ? ` (shared budget: "${c.budgetName || '?'}")`
+      : (c.budgetName ? ` (standalone budget: "${c.budgetName}")` : '');
+    lines.push(`Campaign: ${c.name || c.campaignName || '(unnamed)'}${status}${channel ? ` (${channel})` : ''}${budgetAmount}${budgetIdent}`);
     const adGroups = Array.isArray(c.adGroups) ? c.adGroups : [];
     if (adGroups.length === 0) {
       lines.push(`  (no ad groups)`);
@@ -319,6 +468,157 @@ function summariseAccountStructure(structure) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Conversation history sanitisation
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Strips the verbose 'changes' array from a prior assistant turn so Claude
+ * doesn't pattern-match on its format when generating the next plan.
+ *
+ * Why this matters: Claude very aggressively copies the structural format
+ * of prior turns. If history shows 660 rows of per-row {campaignName, keyword},
+ * the next plan reproduces that format even when the system prompt says
+ * "use campaignsMatching." Stripping the array out of history breaks the
+ * mimicry while preserving narrative continuity for follow-ups.
+ *
+ * Returns the original content unchanged if no JSON plan is detected.
+ */
+function sanitizeAssistantForHistory(content) {
+  // Detect the JSON block (Claude usually responds with prose + a ```json block,
+  // or a bare JSON object). Try both.
+  const codeBlockMatch = content.match(/```json\s*([\s\S]*?)```/);
+  const rawJsonMatch = !codeBlockMatch ? content.match(/(\{[\s\S]*\})/) : null;
+  const jsonStr = codeBlockMatch ? codeBlockMatch[1] : (rawJsonMatch ? rawJsonMatch[1] : null);
+  if (!jsonStr) return content;
+
+  let parsed;
+  try { parsed = JSON.parse(jsonStr); } catch { return content; }
+  if (!parsed || !parsed.plan || !Array.isArray(parsed.plan.changes)) return content;
+
+  const count = parsed.plan.changes.length;
+  // CRITICAL: must remain an empty ARRAY, not a string. Claude pattern-matches
+  // the shape of prior turns; if 'changes' is a string in history it emits a
+  // string in its next response, which crashes the UI (changeList.forEach is
+  // not a function). Empty array keeps the type contract intact.
+  parsed.plan.changes = [];
+  parsed.plan._historyNote =
+    `[${count} change rows from this prior turn elided from history. ` +
+    `Generate fresh changes per the system-prompt schema; do not try to ` +
+    `reproduce the prior plan structure verbatim.]`;
+  const sanitizedJson = JSON.stringify(parsed, null, 2);
+
+  if (codeBlockMatch) {
+    return content.replace(codeBlockMatch[0], '```json\n' + sanitizedJson + '\n```');
+  }
+  return content.replace(rawJsonMatch[0], sanitizedJson);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Plan normalisation
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Collapses ad-group-scoped negative-keyword rows into campaign-level entries.
+ * For every (campaignName, keyword, matchType) tuple in the plan we keep ONE
+ * change row with adGroupName stripped. Other change types pass through
+ * unchanged.
+ *
+ * Run on every plan returned from Claude before storing on the session, so
+ * the UI count, the Apply loop, and the CSV exporter all see the same clean
+ * list. Without this a Bob-Weaver-CDJR-style ticket can balloon into
+ * thousands of duplicate criteria when Claude emits one row per ad group.
+ */
+/**
+ * Expands a `campaignsMatching` selector into a list of campaign names.
+ * Matcher forms:
+ *   - "all" (string) — every campaign in the account
+ *   - { contains: "X" } — name contains substring X (case-insensitive)
+ *   - { contains: ["X","Y"] } — name contains ALL of X and Y (AND semantics)
+ *   - { notContains: "Z" } — excludes names containing Z
+ *   - combined: { contains: " - New - ", notContains: "Brand" }
+ *
+ * Used so Claude can target "all new-model campaigns" without enumerating
+ * all 47 names — which it consistently fails to do reliably. The server
+ * resolves the matcher against the live account structure so it stays
+ * correct as campaigns are added/removed.
+ */
+function expandCampaignMatcher(matcher, accountStructure) {
+  if (!accountStructure || !Array.isArray(accountStructure.campaigns)) return [];
+  const all = accountStructure.campaigns.map(c => c.name).filter(Boolean);
+
+  if (typeof matcher === 'string') {
+    return matcher.toLowerCase() === 'all' ? all : [];
+  }
+  if (!matcher || typeof matcher !== 'object') return [];
+
+  const toArr = v => (v == null ? [] : (Array.isArray(v) ? v : [v]));
+  const contains = toArr(matcher.contains).map(s => String(s).toLowerCase());
+  const notContains = toArr(matcher.notContains).map(s => String(s).toLowerCase());
+
+  return all.filter(name => {
+    const lower = name.toLowerCase();
+    for (const s of contains) if (!lower.includes(s)) return false;
+    for (const s of notContains) if (lower.includes(s)) return false;
+    return true;
+  });
+}
+
+function normalisePlanChanges(changes, accountStructure) {
+  const NEGATIVE_TYPES = new Set(['add_negative_keyword', 'add_negative']);
+  const seenNegatives = new Set();
+  const result = [];
+  for (const c of changes) {
+    if (NEGATIVE_TYPES.has(c.type)) {
+      const matchType =
+        (c.matchType || (c.details && c.details.matchType) || 'Negative Phrase').trim();
+      const keyword =
+        (c.keyword || (c.details && c.details.keyword) || '').trim();
+
+      // Resolve campaign list. Priority:
+      //   1. campaignsMatching (wildcard, expanded against account structure)
+      //   2. campaignNames / campaigns array (explicit fan-out)
+      //   3. campaignName (single string)
+      // (1) is the preferred form for bulk negatives; Claude has repeatedly
+      // failed to reliably enumerate 40+ campaign names by hand even with
+      // explicit prompt instruction. The server-side matcher is deterministic.
+      let campaignList;
+      if (c.campaignsMatching) {
+        campaignList = expandCampaignMatcher(c.campaignsMatching, accountStructure);
+        if (campaignList.length === 0 && c.campaignName) {
+          campaignList = [c.campaignName];
+        }
+      } else if (Array.isArray(c.campaignNames) || Array.isArray(c.campaigns)) {
+        const fanOut = c.campaignNames || c.campaigns;
+        campaignList = fanOut.filter(Boolean).map(s => String(s).trim()).filter(Boolean);
+      } else {
+        campaignList = c.campaignName ? [String(c.campaignName)] : [];
+      }
+
+      for (const campaignName of campaignList) {
+        if (!campaignName) continue;
+        const key = `${campaignName}|${keyword}|${matchType}`;
+        if (seenNegatives.has(key)) continue;
+        seenNegatives.add(key);
+        const normalised = {
+          ...c,
+          campaignName,
+          adGroupName: undefined,
+          campaignNames: undefined,
+          campaigns: undefined,
+          campaignsMatching: undefined,
+        };
+        if (!normalised.keyword) normalised.keyword = keyword;
+        if (!normalised.matchType) normalised.matchType = matchType;
+        result.push(normalised);
+      }
+    } else {
+      result.push(c);
+    }
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Claude API caller
 // ─────────────────────────────────────────────────────────────
 
@@ -333,11 +633,13 @@ function summariseAccountStructure(structure) {
 async function callClaude(systemPrompt, messages, config, tools) {
   const body = {
     model: config.model || 'claude-sonnet-4-20250514',
-    // 16384 (≈64 KB JSON output) covers plans up to ~400 changes — enough
-    // for an "add 17 negatives × 25 model campaigns" Bob-Weaver-style plan
-    // (425 changes). Previous 4096 default truncated mid-plan, which is why
-    // ticket #295249's output cut off mid-Ram-1500.
-    max_tokens: config.maxTokens || 16384,
+    // 32768 covers the largest realistic plan. With the campaignNames fan-out
+    // form, even a 715-row plan only needs ~3-4k tokens of source rows + a
+    // narrative summary. The previous 16384 cap was hit when Claude wrote
+    // some negative-keyword changes in per-row form instead of fan-out form,
+    // truncating the latter half of new-model campaigns in ticket #295249.
+    // Headroom prevents that even if Claude regresses on fan-out compliance.
+    max_tokens: config.maxTokens || 32768,
     system: systemPrompt,
     messages,
   };
@@ -447,6 +749,40 @@ function processResponse(rawResponse, session) {
       };
     }
 
+    // Normalise the plan before storing — dedupe ad-group-level negative rows
+    // into campaign-level entries so the UI, Apply path, and CSV exporter all
+    // see the same, clean list. Source of truth for negative-keyword scope is
+    // 'campaign-level by default' per the SavvyDealer strategy; the executor
+    // already applies via campaignCriteria so ad-group rows would create
+    // duplicate criteria and noisy plan rows.
+    // Defensive coercion: if Claude returned 'changes' as something other than
+    // an array (e.g. a string description), normalise to an empty array so the
+    // UI doesn't crash on changeList.forEach. The plan body's narrative text
+    // is preserved so the user can see what Claude attempted.
+    if (parsed.plan && parsed.plan.changes != null && !Array.isArray(parsed.plan.changes)) {
+      console.warn('[CC plan] Claude returned non-array changes — coercing to []. Type was:',
+        typeof parsed.plan.changes);
+      parsed.plan.changes = [];
+    }
+    if (parsed.plan && Array.isArray(parsed.plan.changes)) {
+      // Diagnostic logging — debug why bulk-negative plans regress to per-row form.
+      const negChanges = parsed.plan.changes.filter(c => c.type === 'add_negative_keyword' || c.type === 'add_negative');
+      const matcherForms = negChanges.filter(c => c.campaignsMatching).length;
+      const arrayForms = negChanges.filter(c => Array.isArray(c.campaignNames) || Array.isArray(c.campaigns)).length;
+      const singleForms = negChanges.filter(c => !c.campaignsMatching && !Array.isArray(c.campaignNames) && !Array.isArray(c.campaigns)).length;
+      const structPresent = !!(session.accountStructure && Array.isArray(session.accountStructure.campaigns));
+      const structCount = structPresent ? session.accountStructure.campaigns.length : 0;
+      console.log(`[CC plan] raw negatives: ${negChanges.length} total | matcher=${matcherForms} array=${arrayForms} single=${singleForms} | structure: ${structPresent ? structCount + ' campaigns' : 'MISSING'}`);
+      if (negChanges.length > 0 && negChanges.length < 50) {
+        console.log('[CC plan] negative rows:', JSON.stringify(negChanges.map(c => ({
+          type: c.type, kw: c.keyword, mt: c.matchType,
+          cm: c.campaignsMatching, names: c.campaignNames, name: c.campaignName,
+        })), null, 0));
+      }
+
+      parsed.plan.changes = normalisePlanChanges(parsed.plan.changes, session.accountStructure);
+      console.log(`[CC plan] after normalise: ${parsed.plan.changes.length} total changes`);
+    }
     session.pendingPlan = parsed.plan;
     return {
       type: 'plan',
@@ -515,9 +851,20 @@ async function handleMessage(session, userMessage, config, context = {}) {
   // Claude can extract dealer info from its training knowledge when given a URL
   const tools = undefined;
 
-  // Call Claude — keep only the last few messages to avoid context issues
-  // Trim conversation to last 10 messages to prevent tool_use/tool_result mismatch
-  const trimmedMessages = session.messages.slice(-10);
+  // Call Claude — keep only the last few messages to avoid context issues.
+  // Trim conversation to last 10 messages to prevent tool_use/tool_result mismatch.
+  //
+  // CRITICAL: strip the heavy 'changes' arrays from prior assistant turns before
+  // sending them back to Claude. When the history contains big per-row plans
+  // from earlier prompts, Claude pattern-matches that format and emits per-row
+  // even after we tell it to use 'campaignsMatching'. The narrative + status
+  // is enough context for follow-ups; the structural details are stored
+  // separately in session.pendingPlan. Session.messages stays raw on the
+  // server for debugging; only the wire copy to Claude is sanitised.
+  const trimmedMessages = session.messages.slice(-10).map(m => {
+    if (m.role !== 'assistant' || typeof m.content !== 'string') return m;
+    return { role: 'assistant', content: sanitizeAssistantForHistory(m.content) };
+  });
 
   let rawResponse;
   try {
