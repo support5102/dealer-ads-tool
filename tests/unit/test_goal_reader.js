@@ -4,8 +4,8 @@
  *
  * Tier 2 (unit): uses google-sheets-fake, no real API calls.
  *
- * Column layout matches PPC Spend Pace sheet:
- * A: Account (dealer name) | B: Cost (USD) | C: Total Budget | D: Baseline Inventory
+ * Column layout matches PPC Control sheet:
+ * A: Account | B: Monthly Budget | C: New Budget | D: Used Budget | E: Misc | F: Pacing Mode | G: Pacing Curve
  */
 
 const { readGoals, parseRow, parseNumber, cleanCustomerId, VALID_PACING_MODES } = require('../../src/services/goal-reader');
@@ -111,24 +111,28 @@ describe('cleanCustomerId', () => {
 });
 
 // ===========================================================================
-// parseRow (layout: A=Name, B=Cost, C=Budget, D=Baseline Inventory)
+// parseRow (layout: A=Name, B=Budget, C=New, D=Used, E=Misc, F=Mode, G=Curve)
 // ===========================================================================
 
 describe('parseRow', () => {
   test('parses complete row into DealerGoal', () => {
-    const goal = parseRow(['Honda of Springfield', '$12,000.00', '$15,000.00', '', 'Push F-150 hard', 'honda-springfield']);
+    const goal = parseRow(['Honda of Springfield', '$15,000.00', '$9,000.00', '$6,000.00', 'Push F-150 hard', 'auto_apply', 'alanJay9505']);
 
     expect(goal).toEqual({
       dealerName: 'Honda of Springfield',
       monthlyBudget: 15000,
       baselineInventory: null,
       dealerNotes: 'Push F-150 hard',
-      freshdeskTag: 'honda-springfield',
+      freshdeskTag: null,
+      newBudget: 9000,
+      usedBudget: 6000,
+      pacingMode: 'auto_apply',
+      pacingCurveId: 'alanJay9505',
     });
   });
 
   test('parses budget with $ and commas', () => {
-    const goal = parseRow(['Honda', '$8,500', '$15,000']);
+    const goal = parseRow(['Honda', '$15,000']);
     expect(goal.monthlyBudget).toBe(15000);
   });
 
@@ -136,20 +140,20 @@ describe('parseRow', () => {
     expect(parseRow(['', '$12,000', '$15,000'])).toBeNull();
   });
 
-  test('returns null for row missing budget (column C)', () => {
-    expect(parseRow(['Honda', '$12,000'])).toBeNull();
+  test('returns null for row missing budget (column B)', () => {
+    expect(parseRow(['Honda'])).toBeNull();
   });
 
   test('returns null for row with zero budget', () => {
-    expect(parseRow(['Honda', '$12,000', '0'])).toBeNull();
+    expect(parseRow(['Honda', '0'])).toBeNull();
   });
 
   test('returns null for row with negative budget', () => {
-    expect(parseRow(['Honda', '$12,000', '-500'])).toBeNull();
+    expect(parseRow(['Honda', '-500'])).toBeNull();
   });
 
   test('returns null for row with non-numeric budget', () => {
-    expect(parseRow(['Honda', '$12,000', 'abc'])).toBeNull();
+    expect(parseRow(['Honda', 'abc'])).toBeNull();
   });
 
   test('returns null for null input', () => {
@@ -173,16 +177,16 @@ describe('parseRow', () => {
     expect(goal.dealerName).toBe('Honda of Springfield');
   });
 
-  test('ignores extra columns beyond expected three', () => {
-    const goal = parseRow(['Honda', '$12,000', '$15,000', '91%', '16', '31']);
+  test('ignores unknown columns beyond column G', () => {
+    const goal = parseRow(['Honda', '$15,000', '$9,000', '$6,000', 'misc', 'one_click', 'linear', 'EXTRA', 'IGNORED']);
     expect(goal).not.toBeNull();
     expect(goal.monthlyBudget).toBe(15000);
   });
 
-  test('cost column (B) does not affect parsing', () => {
-    const goal = parseRow(['Honda', 'not-a-number', '$5,000']);
-    expect(goal).not.toBeNull();
-    expect(goal.monthlyBudget).toBe(5000);
+  test('captures new and used budgets from columns C and D', () => {
+    const goal = parseRow(['Honda', '$15,000', '$9,000', '$6,000']);
+    expect(goal.newBudget).toBe(9000);
+    expect(goal.usedBudget).toBe(6000);
   });
 });
 
@@ -223,7 +227,7 @@ describe('readGoals', () => {
     expect(capturedParams.range).toBe('CustomRange!A1:Z');
   });
 
-  test('uses default range PPC Spend Pace!A2:F when not specified', async () => {
+  test('uses default range PPC Control!A2:G when not specified', async () => {
     let capturedParams;
     const client = {
       spreadsheets: {
@@ -237,7 +241,7 @@ describe('readGoals', () => {
     };
 
     await readGoals(client, 'my-sheet-id');
-    expect(capturedParams.range).toBe('PPC Spend Pace!A2:F');
+    expect(capturedParams.range).toBe('PPC Control!A2:G');
   });
 
   test('skips invalid rows and returns only valid goals', async () => {
@@ -331,8 +335,8 @@ describe('readGoals', () => {
 
   test('duplicate dealer names are both returned (no deduplication)', async () => {
     const dupeRows = [
-      ['Honda of Springfield', '$12,000', '$15,000'],
-      ['Honda of Springfield', '$10,000', '$12,000'],
+      ['Honda of Springfield', '$15,000', '$9,000'],
+      ['Honda of Springfield', '$12,000', '$8,000'],
     ];
     const client = createFakeSheetsClient(dupeRows);
     const goals = await readGoals(client, 'test-id');

@@ -433,7 +433,7 @@ async function getImpressionShare(restCtx, sinceDate) {
   }
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-    `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share
+    `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
      FROM campaign
      WHERE ${dateFilter} AND campaign.status = 'ENABLED'`,
     restCtx.loginCustomerId
@@ -444,6 +444,7 @@ async function getImpressionShare(restCtx, sinceDate) {
     campaignName: row.campaign.name,
     impressionShare: row.metrics?.searchImpressionShare ?? null,
     budgetLostShare: row.metrics?.searchBudgetLostImpressionShare ?? null,
+    rankLostShare: row.metrics?.searchRankLostImpressionShare ?? null,
   }));
 }
 
@@ -669,7 +670,9 @@ async function getCampaignPerformance(restCtx) {
             campaign.manual_cpc.enhanced_cpc_enabled,
             metrics.clicks, metrics.impressions, metrics.conversions,
             metrics.conversions_value, metrics.cost_micros, metrics.ctr,
-            metrics.average_cpc, metrics.search_impression_share
+            metrics.average_cpc, metrics.search_impression_share,
+            metrics.search_budget_lost_impression_share,
+            metrics.search_rank_lost_impression_share
      FROM campaign
      WHERE segments.date DURING LAST_7_DAYS
        AND campaign.status != 'REMOVED'`,
@@ -694,6 +697,8 @@ async function getCampaignPerformance(restCtx) {
       ctr: m.ctr ?? 0,
       averageCpc: (m.averageCpc ?? m.average_cpc ?? 0) / 1_000_000,
       searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
+      searchBudgetLostShare: m.searchBudgetLostImpressionShare ?? m.search_budget_lost_impression_share ?? null,
+      searchRankLostShare: m.searchRankLostImpressionShare ?? m.search_rank_lost_impression_share ?? null,
     };
   });
 }
