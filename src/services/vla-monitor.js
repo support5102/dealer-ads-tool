@@ -12,10 +12,13 @@
  * extends an existing one.
  *
  * Alert kinds:
- *   FEED_OUTAGE       — ≥90% of products disapproved (catastrophic, top priority)
- *   NEW_DISAPPROVALS  — disapproval signature changed since last seen
- *   SPEND_DROP        — today's spend < 40% of trailing 13-day median AND drop ≥ $20
- *   CLICK_DROP        — today's clicks < 40% of trailing 13-day median AND drop ≥ 5
+ *   FEED_OUTAGE          — ≥90% of products disapproved (catastrophic, top priority)
+ *   NEW_DISAPPROVALS     — disapproval signature changed since last seen
+ *   ASSET_GROUP_POLICY   — a PMax asset group is policy-flagged (DISAPPROVED / SITE_SUSPENDED / etc).
+ *                          Catches the vehicle-PMax cases that shopping_product
+ *                          can't see today.
+ *   SPEND_DROP           — today's spend < 40% of trailing 13-day median AND drop ≥ $20
+ *   CLICK_DROP           — today's clicks < 40% of trailing 13-day median AND drop ≥ 5
  */
 
 const crypto = require('crypto');
@@ -70,9 +73,42 @@ function detectAlerts(snapshot) {
   const issues = Array.isArray(snapshot.productIssues) ? snapshot.productIssues : [];
   const productTotal = Number(snapshot.productTotal || 0);
   const vlaCampaigns = Array.isArray(snapshot.vlaCampaigns) ? snapshot.vlaCampaigns : [];
+  const assetGroupPolicy = Array.isArray(snapshot.assetGroupPolicy) ? snapshot.assetGroupPolicy : [];
 
   // Short-circuit: if there are no VLA campaigns at all, we have nothing to monitor.
   if (vlaCampaigns.length === 0) return alerts;
+
+  // ── ASSET_GROUP_POLICY ──────────────────────────────────────────────
+  // PMax asset groups expose policy_summary even when shopping_product is
+  // empty (true for most vehicle-PMax accounts). Any approval status other
+  // than APPROVED / UNSPECIFIED is actionable. Collapse all flagged groups
+  // for this account into ONE alert so a 6-asset-group outage doesn't open
+  // 6 tickets.
+  const flaggedGroups = assetGroupPolicy.filter(ag => {
+    const s = String(ag.approvalStatus || '').toUpperCase();
+    return s && s !== 'APPROVED' && s !== 'UNSPECIFIED' && s !== 'UNKNOWN';
+  });
+  if (flaggedGroups.length > 0) {
+    const summaryParts = flaggedGroups.map(ag => `${ag.campaignName} / ${ag.name}: ${ag.approvalStatus}`);
+    const sigKey = flaggedGroups.map(ag => `${ag.assetGroupId}:${ag.approvalStatus}`).sort().join(',');
+    alerts.push({
+      alert_kind: 'ASSET_GROUP_POLICY',
+      severity: flaggedGroups.some(ag => /DISAPPROVED|SUSPENDED/i.test(ag.approvalStatus)) ? 'critical' : 'warning',
+      signature: shortHash(sigKey),
+      message: `${flaggedGroups.length} VLA asset group(s) policy-flagged.`,
+      payload: {
+        count: flaggedGroups.length,
+        groups: flaggedGroups.map(ag => ({
+          campaign: ag.campaignName,
+          assetGroup: ag.name,
+          approvalStatus: ag.approvalStatus,
+          reviewStatus: ag.reviewStatus,
+          topics: ag.policyTopics,
+        })),
+        summary: summaryParts.slice(0, 10),
+      },
+    });
+  }
 
   // ── FEED_OUTAGE ─────────────────────────────────────────────────────
   // Collapse ALL per-product disapprovals into one alert when the ratio is

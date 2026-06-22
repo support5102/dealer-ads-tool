@@ -57,6 +57,54 @@ function createVlaHealthRouter(config) {
     } catch (err) { next(err); }
   });
 
+  // Debug — runs the snapshot fetch + detection for ONE dealer and returns
+  // the raw data so we can verify the filter is catching real VLA campaigns
+  // (and that detection thresholds aren't too strict). Doesn't persist or
+  // ticket. Useful when /run-now returns 0 tickets and you can't tell whether
+  // that's "clean state" or "filter is broken."
+  // Usage: GET /api/vla-health/debug?customerId=1234567890
+  router.get('/api/vla-health/debug', requireAuth, async (req, res, next) => {
+    try {
+      const customerId = String(req.query.customerId || '').replace(/-/g, '');
+      if (!/^\d{7,10}$/.test(customerId)) {
+        return res.status(400).json({ error: 'customerId query param required (10-digit Google Ads customer ID)' });
+      }
+      const googleAds = require('../services/google-ads');
+      const vlaMonitor = require('../services/vla-monitor');
+      const vlaRunner = require('../services/vla-monitor-runner');
+
+      const refreshToken = config.googleAdsBgRefreshToken || (req.session.tokens && req.session.tokens.refresh_token);
+      if (!refreshToken) return res.status(401).json({ error: 'No refresh token (set GOOGLE_ADS_BG_REFRESH_TOKEN or log in)' });
+
+      const accessToken = await googleAds.refreshAccessToken(config.googleAds, refreshToken);
+      const restCtx = vlaRunner.buildRestCtxForAccount(config, accessToken, {
+        customerId, managingMccId: req.session.mccId || config.googleAds.mccId,
+      });
+
+      const snapshot = await vlaRunner.fetchSnapshot(restCtx);
+      const alerts = vlaMonitor.detectAlerts(snapshot);
+
+      res.json({
+        customerId,
+        snapshot: {
+          vlaCampaignCount: snapshot.vlaCampaigns.length,
+          vlaCampaigns: snapshot.vlaCampaigns,
+          productTotal: snapshot.productTotal,
+          productIssuesCount: snapshot.productIssues.length,
+          productIssuesSample: snapshot.productIssues.slice(0, 5),
+          dailyMetricsCount: snapshot.dailyMetrics.length,
+          dailyMetrics: snapshot.dailyMetrics,
+          assetGroupPolicyCount: (snapshot.assetGroupPolicy || []).length,
+          assetGroupPolicy: snapshot.assetGroupPolicy || [],
+        },
+        detectedAlerts: alerts,
+        thresholds: vlaMonitor.THRESHOLDS,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // One-shot admin route — returns the LOGGED-IN USER's refresh token so they
   // can paste it as the GOOGLE_ADS_BG_REFRESH_TOKEN env var on Cloud Run.
   // We require auth so this only works for someone with an active session,

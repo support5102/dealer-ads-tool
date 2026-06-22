@@ -1646,17 +1646,26 @@ async function getVlaCampaigns(restCtx) {
        AND campaign.advertising_channel_type IN ('PERFORMANCE_MAX','SHOPPING','LOCAL')`,
     restCtx.loginCustomerId
   );
+  // Two qualifying paths:
+  //   1) Merchant Center linked (canonical Shopping / PMax-with-Merchant feed)
+  //   2) Name pattern match — catches vehicle PMax that uses a Google Business
+  //      Profile feed instead of Merchant Center (Bob Weaver, Banner Ford, etc).
+  //      Without this fallback, those campaigns are invisible to the monitor.
+  const NAME_PATTERN = /\b(vla|vehicle|vehicles|inventory|pmax)\b/i;
   return rows
     .map(row => {
       const c = row.campaign || {};
       const shop = c.shoppingSetting || c.shopping_setting || {};
       const merchantId = shop.merchantId ?? shop.merchant_id ?? null;
-      if (merchantId == null) return null;
+      const name = c.name ?? '';
+      const matchedByName = NAME_PATTERN.test(name);
+      if (merchantId == null && !matchedByName) return null;
       return {
         campaignId: String(c.id ?? ''),
-        name: c.name ?? '',
+        name,
         channelType: String(c.advertisingChannelType ?? c.advertising_channel_type ?? ''),
-        merchantId: String(merchantId),
+        merchantId: merchantId != null ? String(merchantId) : null,
+        matchedByName: merchantId == null,
       };
     })
     .filter(Boolean);
@@ -1729,6 +1738,96 @@ async function getProductTotal(restCtx) {
   } catch (_) {
     return 0;
   }
+}
+
+/**
+ * Asset-group-level policy issues on PMax campaigns. The `shopping_product`
+ * resource is often empty for vehicle PMax, but `asset_group.policy_summary`
+ * is exposed and reliable — it tells us when Google has flagged the asset
+ * group itself with a policy violation. Filtered to enabled asset groups
+ * whose approval status is anything other than APPROVED / UNSPECIFIED.
+ *
+ * @returns {Promise<Object[]>} [{ assetGroupId, name, campaignId, approvalStatus, reviewStatus, policyTopics[] }]
+ */
+async function getAssetGroupPolicy(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  let rows;
+  try {
+    rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT asset_group.id, asset_group.name, asset_group.status,
+              asset_group.policy_summary.approval_status,
+              asset_group.policy_summary.review_status,
+              asset_group.policy_summary.policy_topic_entries,
+              campaign.id, campaign.name
+       FROM asset_group
+       WHERE asset_group.status != 'REMOVED'`,
+      restCtx.loginCustomerId
+    );
+  } catch (err) {
+    console.warn(`[vla] getAssetGroupPolicy skipped for ${restCtx.customerId}: ${err.message}`);
+    return [];
+  }
+  return (rows || []).map(row => {
+    const ag = row.assetGroup || row.asset_group || {};
+    const ps = ag.policySummary || ag.policy_summary || {};
+    const topics = Array.isArray(ps.policyTopicEntries) ? ps.policyTopicEntries
+                 : Array.isArray(ps.policy_topic_entries) ? ps.policy_topic_entries
+                 : [];
+    return {
+      assetGroupId: String(ag.id ?? ''),
+      name: ag.name ?? '',
+      status: String(ag.status ?? ''),
+      campaignId: String(row.campaign?.id ?? ''),
+      campaignName: row.campaign?.name ?? '',
+      approvalStatus: String(ps.approvalStatus ?? ps.approval_status ?? ''),
+      reviewStatus: String(ps.reviewStatus ?? ps.review_status ?? ''),
+      policyTopics: topics.map(t => ({
+        topic: String(t.topic ?? ''),
+        type: String(t.type ?? ''),
+      })),
+    };
+  });
+}
+
+/**
+ * Per-listing-group product counts on PMax/Shopping campaigns via
+ * `asset_group_product_group_view`. This resource exposes WHICH listing-group
+ * partitions are receiving impressions and how many. It doesn't give us
+ * disapproval reasons directly, but a sudden drop to zero on a partition
+ * that previously served IS a signal that the underlying products went
+ * offline (feed broken, disapproved, etc).
+ *
+ * @returns {Promise<Object[]>} [{ assetGroupId, listingGroupId, impressions, clicks }]
+ */
+async function getAssetGroupProductMetrics(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  let rows;
+  try {
+    rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT asset_group_product_group_view.resource_name,
+              asset_group_product_group_view.asset_group,
+              metrics.impressions, metrics.clicks
+       FROM asset_group_product_group_view
+       WHERE segments.date DURING LAST_14_DAYS
+       LIMIT 2000`,
+      restCtx.loginCustomerId
+    );
+  } catch (err) {
+    console.warn(`[vla] getAssetGroupProductMetrics skipped for ${restCtx.customerId}: ${err.message}`);
+    return [];
+  }
+  return (rows || []).map(row => {
+    const v = row.assetGroupProductGroupView || row.asset_group_product_group_view || {};
+    const m = row.metrics || {};
+    return {
+      resourceName: String(v.resourceName ?? v.resource_name ?? ''),
+      assetGroupResource: String(v.assetGroup ?? v.asset_group ?? ''),
+      impressions: Number(m.impressions ?? 0),
+      clicks: Number(m.clicks ?? 0),
+    };
+  });
 }
 
 /**
@@ -1814,4 +1913,6 @@ module.exports = {
   getProductIssues,
   getProductTotal,
   getVlaDailyMetrics14Days,
+  getAssetGroupPolicy,
+  getAssetGroupProductMetrics,
 };

@@ -51,10 +51,15 @@ function buildRestCtxForAccount(config, mccAccessToken, account) {
  * Fetches one dealer's VLA snapshot in parallel.
  */
 async function fetchSnapshot(restCtx) {
-  const [vlaCampaigns, productIssues, productTotal] = await Promise.all([
+  // shopping_product is often empty for vehicle PMax (Google API limitation),
+  // so we ALSO pull asset_group.policy_summary which IS exposed reliably for
+  // PMax — catches "your PMax asset group is policy-flagged" cases that
+  // shopping_product can't see.
+  const [vlaCampaigns, productIssues, productTotal, assetGroupPolicy] = await Promise.all([
     googleAds.getVlaCampaigns(restCtx).catch(() => []),
     googleAds.getProductIssues(restCtx).catch(() => []),
     googleAds.getProductTotal(restCtx).catch(() => 0),
+    googleAds.getAssetGroupPolicy(restCtx).catch(() => []),
   ]);
 
   let dailyMetrics = [];
@@ -63,7 +68,11 @@ async function fetchSnapshot(restCtx) {
     dailyMetrics = await googleAds.getVlaDailyMetrics14Days(restCtx, campaignIds).catch(() => []);
   }
 
-  return { vlaCampaigns, productIssues, productTotal, dailyMetrics };
+  // Filter asset-group policy to only those tied to a VLA campaign.
+  const vlaCampaignIds = new Set(vlaCampaigns.map(c => c.campaignId));
+  const vlaAssetGroupPolicy = assetGroupPolicy.filter(ag => vlaCampaignIds.has(ag.campaignId));
+
+  return { vlaCampaigns, productIssues, productTotal, dailyMetrics, assetGroupPolicy: vlaAssetGroupPolicy };
 }
 
 /**
