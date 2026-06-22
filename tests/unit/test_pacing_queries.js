@@ -184,8 +184,8 @@ describe('getSharedBudgets', () => {
 
 describe('getImpressionShare', () => {
   const defaultRows = [
-    { campaign: { id: '100', name: 'Honda Civic - Search' }, metrics: { searchImpressionShare: 0.85, searchBudgetLostImpressionShare: 0.10 } },
-    { campaign: { id: '200', name: 'Toyota Trucks' }, metrics: { searchImpressionShare: 0.62, searchBudgetLostImpressionShare: 0.25 } },
+    { campaign: { id: '100', name: 'Honda Civic - Search' }, metrics: { searchImpressionShare: 0.85, searchBudgetLostImpressionShare: 0.10, searchRankLostImpressionShare: 0.05 } },
+    { campaign: { id: '200', name: 'Toyota Trucks' }, metrics: { searchImpressionShare: 0.62, searchBudgetLostImpressionShare: 0.25, searchRankLostImpressionShare: 0.13 } },
   ];
 
   test('returns impression share metrics per campaign', async () => {
@@ -197,12 +197,14 @@ describe('getImpressionShare', () => {
       campaignName: 'Honda Civic - Search',
       impressionShare: 0.85,
       budgetLostShare: 0.10,
+      rankLostShare: 0.05,
     });
     expect(results[1]).toEqual({
       campaignId: '200',
       campaignName: 'Toyota Trucks',
       impressionShare: 0.62,
       budgetLostShare: 0.25,
+      rankLostShare: 0.13,
     });
   });
 

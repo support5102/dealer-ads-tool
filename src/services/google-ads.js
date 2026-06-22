@@ -443,7 +443,7 @@ async function getImpressionShare(restCtx, sinceDate) {
   }
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-    `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share
+    `SELECT campaign.id, campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
      FROM campaign
      WHERE ${dateFilter} AND campaign.status = 'ENABLED'`,
     restCtx.loginCustomerId
@@ -454,6 +454,7 @@ async function getImpressionShare(restCtx, sinceDate) {
     campaignName: row.campaign.name,
     impressionShare: row.metrics?.searchImpressionShare ?? null,
     budgetLostShare: row.metrics?.searchBudgetLostImpressionShare ?? null,
+    rankLostShare: row.metrics?.searchRankLostImpressionShare ?? null,
   }));
 }
 
@@ -680,8 +681,8 @@ async function getCampaignPerformance(restCtx) {
             metrics.clicks, metrics.impressions, metrics.conversions,
             metrics.conversions_value, metrics.cost_micros, metrics.ctr,
             metrics.average_cpc, metrics.search_impression_share,
-            metrics.search_rank_lost_impression_share,
-            metrics.search_budget_lost_impression_share
+            metrics.search_budget_lost_impression_share,
+            metrics.search_rank_lost_impression_share
      FROM campaign
      WHERE segments.date DURING LAST_7_DAYS
        AND campaign.status != 'REMOVED'`,
@@ -706,14 +707,13 @@ async function getCampaignPerformance(restCtx) {
       ctr: m.ctr ?? 0,
       averageCpc: (m.averageCpc ?? m.average_cpc ?? 0) / 1_000_000,
       searchImpressionShare: m.searchImpressionShare ?? m.search_impression_share ?? null,
-      // The two signals the CPC Optimizer page hinges on:
-      //   rank-lost-IS  → bid is too low (raise CPC)
-      //   budget-lost-IS → daily budget is too low (different lever)
-      // Both are fractions 0..1; null when undefined (often for non-Search campaigns).
-      searchRankLostImpressionShare:
-        m.searchRankLostImpressionShare ?? m.search_rank_lost_impression_share ?? null,
-      searchBudgetLostImpressionShare:
-        m.searchBudgetLostImpressionShare ?? m.search_budget_lost_impression_share ?? null,
+      // The two lost-IS signals — fractions 0..1, null when undefined (typically
+      // non-Search campaigns). Used by the audit engine's budget/rank split
+      // checks AND by the CPC Optimizer page.
+      //   - rank-lost-IS  → bid is too low (raise CPC)
+      //   - budget-lost-IS → daily budget is too low (different lever)
+      searchBudgetLostShare: m.searchBudgetLostImpressionShare ?? m.search_budget_lost_impression_share ?? null,
+      searchRankLostShare:   m.searchRankLostImpressionShare ?? m.search_rank_lost_impression_share ?? null,
     };
   });
 }

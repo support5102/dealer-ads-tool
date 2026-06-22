@@ -5,3 +5,5 @@ coverage/
 .DS_Store
 Thumbs.db
 .claude/
+.deploy-dev-env.yaml
+.worktrees/

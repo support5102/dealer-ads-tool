@@ -91,10 +91,10 @@ async function scanCpcOptimizer({ accessToken, developerToken, mccId, accounts, 
  * percentages, and the flag/opportunity-score fields the UI consumes.
  */
 function annotateCampaign(perf, acct) {
-  const rankLostPct = perf.searchRankLostImpressionShare != null
-    ? perf.searchRankLostImpressionShare * 100 : null;
-  const budgetLostPct = perf.searchBudgetLostImpressionShare != null
-    ? perf.searchBudgetLostImpressionShare * 100 : null;
+  const rankLostPct = perf.searchRankLostShare != null
+    ? perf.searchRankLostShare * 100 : null;
+  const budgetLostPct = perf.searchBudgetLostShare != null
+    ? perf.searchBudgetLostShare * 100 : null;
   const searchISPct = perf.searchImpressionShare != null
     ? perf.searchImpressionShare * 100 : null;
 

@@ -17,6 +17,8 @@ const {
   checkZeroSpendCampaigns,
   checkNamingConventions,
   checkLowImpressionShare,
+  checkZeroConversionCampaigns,
+  checkHighCpa,
   runAudit,
   SEVERITY,
 } = require('../../src/services/audit-engine');
@@ -452,20 +454,48 @@ describe('checkLowImpressionShare', () => {
     expect(checkLowImpressionShare(campaigns)).toEqual([]);
   });
 
-  test('flags campaigns below 75% IS as warning', () => {
-    const campaigns = [makeCampaign({ searchImpressionShare: 0.60, impressions: 500 })];
+  test('flags budget-limited campaign (budget loss dominates) in the budget category', () => {
+    const campaigns = [makeCampaign({
+      searchImpressionShare: 0.60, impressions: 500,
+      searchBudgetLostShare: 0.30, searchRankLostShare: 0.10,
+    })];
     const results = checkLowImpressionShare(campaigns);
     expect(results).toHaveLength(1);
     expect(results[0].severity).toBe(SEVERITY.WARNING);
-    expect(results[0].checkId).toBe('low_impression_share_warning');
+    expect(results[0].checkId).toBe('low_impression_share_budget_warning');
+    expect(results[0].category).toBe('budget');
+    expect(results[0].message).toMatch(/budget/i);
+  });
+
+  test('flags rank-limited campaign (rank loss dominates) in the bidding category', () => {
+    const campaigns = [makeCampaign({
+      searchImpressionShare: 0.55, impressions: 500,
+      searchBudgetLostShare: 0.05, searchRankLostShare: 0.40,
+    })];
+    const results = checkLowImpressionShare(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('low_impression_share_rank_warning');
+    expect(results[0].category).toBe('bidding');
+    // Rank-limited guidance must steer away from simply raising budget.
+    expect(results[0].message).toMatch(/rank|bid|quality/i);
   });
 
   test('flags campaigns below 50% IS as critical', () => {
-    const campaigns = [makeCampaign({ searchImpressionShare: 0.35, impressions: 500 })];
+    const campaigns = [makeCampaign({
+      searchImpressionShare: 0.35, impressions: 500,
+      searchBudgetLostShare: 0.50, searchRankLostShare: 0.15,
+    })];
     const results = checkLowImpressionShare(campaigns);
     expect(results).toHaveLength(1);
     expect(results[0].severity).toBe(SEVERITY.CRITICAL);
-    expect(results[0].checkId).toBe('low_impression_share_critical');
+    expect(results[0].checkId).toBe('low_impression_share_budget_critical');
+  });
+
+  test('falls back to "unknown" cause when lost-share data is unavailable', () => {
+    const campaigns = [makeCampaign({ searchImpressionShare: 0.60, impressions: 500 })];
+    const results = checkLowImpressionShare(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('low_impression_share_unknown_warning');
   });
 
   test('ignores campaigns with null impression share', () => {
@@ -485,13 +515,83 @@ describe('checkLowImpressionShare', () => {
 
   test('separates critical and warning findings', () => {
     const campaigns = [
-      makeCampaign({ campaignId: '1', searchImpressionShare: 0.40, impressions: 500 }), // critical
-      makeCampaign({ campaignId: '2', searchImpressionShare: 0.65, impressions: 500, campaignName: 'Campaign B' }), // warning
+      makeCampaign({ campaignId: '1', searchImpressionShare: 0.40, impressions: 500, searchBudgetLostShare: 0.45, searchRankLostShare: 0.10 }), // budget critical
+      makeCampaign({ campaignId: '2', searchImpressionShare: 0.65, impressions: 500, campaignName: 'Campaign B', searchBudgetLostShare: 0.30, searchRankLostShare: 0.05 }), // budget warning
     ];
     const results = checkLowImpressionShare(campaigns);
     expect(results).toHaveLength(2);
-    expect(results.find(r => r.checkId === 'low_impression_share_critical')).toBeDefined();
-    expect(results.find(r => r.checkId === 'low_impression_share_warning')).toBeDefined();
+    expect(results.find(r => r.checkId === 'low_impression_share_budget_critical')).toBeDefined();
+    expect(results.find(r => r.checkId === 'low_impression_share_budget_warning')).toBeDefined();
+  });
+});
+
+describe('checkZeroConversionCampaigns', () => {
+  test('passes when campaigns have conversions', () => {
+    const campaigns = [makeCampaign({ conversions: 5, cost: 200 })];
+    expect(checkZeroConversionCampaigns(campaigns)).toEqual([]);
+  });
+
+  test('flags an enabled Search campaign with spend but zero conversions (warning)', () => {
+    const campaigns = [makeCampaign({ conversions: 0, cost: 120, channelType: 'SEARCH' })];
+    const results = checkZeroConversionCampaigns(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('zero_conversions_warning');
+    expect(results[0].severity).toBe(SEVERITY.WARNING);
+    expect(results[0].category).toBe('conversions');
+  });
+
+  test('escalates to critical at high spend with zero conversions', () => {
+    const campaigns = [makeCampaign({ conversions: 0, cost: 400, channelType: 'SEARCH' })];
+    const results = checkZeroConversionCampaigns(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('zero_conversions_critical');
+    expect(results[0].severity).toBe(SEVERITY.CRITICAL);
+  });
+
+  test('ignores campaigns below the minimum spend floor', () => {
+    const campaigns = [makeCampaign({ conversions: 0, cost: 20, channelType: 'SEARCH' })];
+    expect(checkZeroConversionCampaigns(campaigns)).toEqual([]);
+  });
+
+  test('ignores paused campaigns', () => {
+    const campaigns = [makeCampaign({ status: 'PAUSED', conversions: 0, cost: 500 })];
+    expect(checkZeroConversionCampaigns(campaigns)).toEqual([]);
+  });
+
+  test('includes PMax campaigns', () => {
+    const campaigns = [makeCampaign({ channelType: 'PERFORMANCE_MAX', conversions: 0, cost: 300 })];
+    const results = checkZeroConversionCampaigns(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('zero_conversions_critical');
+  });
+});
+
+describe('checkHighCpa', () => {
+  test('passes when CPA is below the threshold', () => {
+    // 200 / 5 = $40 CPA
+    const campaigns = [makeCampaign({ cost: 200, conversions: 5 })];
+    expect(checkHighCpa(campaigns)).toEqual([]);
+  });
+
+  test('flags a campaign with CPA above the threshold', () => {
+    // 800 / 2 = $400 CPA
+    const campaigns = [makeCampaign({ cost: 800, conversions: 2 })];
+    const results = checkHighCpa(campaigns);
+    expect(results).toHaveLength(1);
+    expect(results[0].checkId).toBe('high_cpa');
+    expect(results[0].severity).toBe(SEVERITY.WARNING);
+    expect(results[0].category).toBe('conversions');
+    expect(results[0].details.campaigns[0].cpa).toBe('$400');
+  });
+
+  test('ignores campaigns with zero conversions (handled by the zero-conversion check)', () => {
+    const campaigns = [makeCampaign({ cost: 800, conversions: 0 })];
+    expect(checkHighCpa(campaigns)).toEqual([]);
+  });
+
+  test('ignores paused campaigns', () => {
+    const campaigns = [makeCampaign({ status: 'PAUSED', cost: 800, conversions: 2 })];
+    expect(checkHighCpa(campaigns)).toEqual([]);
   });
 });
 
@@ -537,7 +637,7 @@ describe('runAudit', () => {
     expect(result.summary).toHaveProperty('warning');
     expect(result.summary).toHaveProperty('info');
     expect(result.checksRun).toBeInstanceOf(Array);
-    expect(result.checksRun.length).toBe(20);
+    expect(result.checksRun.length).toBe(22);
   });
 
   test('fetches all data in parallel', async () => {

@@ -9,7 +9,7 @@
 | **Machine Mode** | SINGLE |
 | **Test Command** | `npm test` |
 | **Local Port** | 3000 |
-| **Deployment** | Railway (auto-deploy from V3 branch) |
+| **Deployment** | Google Cloud Run (`gcloud run deploy --source=. --region=us-east1`); DB on Neon Postgres |
 
 ---
 
@@ -329,7 +329,8 @@ async function applyChange(client, change, dryRun) {
 |---------|---------|--------|
 | Google Ads API (v19) | Campaign/ad group/keyword management | OAuth 2.0 + Developer Token |
 | Anthropic Claude API | Parse Freshdesk tasks into structured changes | API Key |
-| Railway | Hosting + deployment | Git push to V3 branch |
+| Google Cloud Run | App hosting — `dealer-ads-tool` (prod) + `dealer-ads-tool-dev` | `gcloud run deploy` |
+| Neon | Postgres database (use the `-pooler` URL) | `DATABASE_URL` env var |
 
 ### Change Types Reference
 
@@ -352,41 +353,59 @@ These are the 10 change types the tool can execute against Google Ads:
 
 ## Deployment Architecture
 
+> Migrated off Railway to Google Cloud Run. The GCP project is still named
+> `railway-ads-tool` (name carried over from the migration) — that is NOT a sign
+> it runs on Railway. Deploys are manual via `gcloud run deploy`, not git push.
+
 ### Overview
 
 | Environment | Purpose | URL | Command |
 |-------------|---------|-----|---------|
 | **Local** | Development + testing | http://localhost:3000 | `npm run dev` |
-| **Production** | Live service | Railway URL | `git push origin V3` |
+| **Dev** | Cloud Run staging service | (Cloud Run dev URL) | `gcloud run deploy dealer-ads-tool-dev --source=. --region=us-east1` |
+| **Production** | Live service | https://ads.savvydealer.com | `gcloud run deploy dealer-ads-tool --source=. --region=us-east1` |
 
-### Railway Configuration
+### Google Cloud Run Configuration
 
 | Setting | Value |
 |---------|-------|
-| **Platform** | Railway |
-| **Build** | Nixpacks (auto-detect Node.js) |
-| **Start Command** | `npm start` |
-| **Health Check** | `/health` |
-| **Branch** | V3 |
+| **Platform** | Google Cloud Run |
+| **GCP Project** | `railway-ads-tool` (legacy name from the Railway → Cloud Run migration) |
+| **Region** | `us-east1` |
+| **Services** | `dealer-ads-tool` (prod), `dealer-ads-tool-dev` (dev) |
+| **Custom Domain** | `ads.savvydealer.com` |
+| **Build** | Source deploy (`--source=.`) using the repo `Dockerfile` |
+| **Container Port** | 8080 (see `Dockerfile`) |
+
+### Database (Neon Postgres)
+
+| Setting | Value |
+|---------|-------|
+| **Platform** | Neon (serverless Postgres) |
+| **Connection** | Use the `-pooler` connection string via `DATABASE_URL` |
+| **Prod endpoint** | `ep-snowy-tooth` |
+| **Dev endpoint** | `ep-dawn-cell` |
 
 ### Environment Variables
 
 | Variable | Local Value | Production Value | Purpose |
 |----------|-------------|------------------|---------|
-| `PORT` | 3000 | Set by Railway | Server port |
-| `APP_URL` | http://localhost:3000 | https://[app].up.railway.app | OAuth callback base |
-| `SESSION_SECRET` | (from .env) | (Railway Variables tab) | Session encryption |
+| `PORT` | 3000 | 8080 (set by Cloud Run; see Dockerfile) | Server port |
+| `APP_URL` | http://localhost:3000 | https://ads.savvydealer.com | OAuth callback base |
+| `SESSION_SECRET` | (from .env) | (Cloud Run env var / Secret Manager) | Session encryption |
+| `DATABASE_URL` | (from .env) | Neon `-pooler` URL | Postgres connection |
 | `NODE_ENV` | development | production | Environment mode |
 
 ### Pre-Deployment Checklist
 
-Before pushing to V3 branch:
+Before `gcloud run deploy`:
 
 - [ ] All tests pass (`npm test`)
 - [ ] Changes committed
 - [ ] Local server starts and works (`npm run dev`)
-- [ ] Environment variables configured in Railway dashboard
+- [ ] Env vars / secrets set on the Cloud Run service
 - [ ] No secrets in code (all in env vars)
+- [ ] Deploy to `dealer-ads-tool-dev` first, verify, then prod
 
 ---
 

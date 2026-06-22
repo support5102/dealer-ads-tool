@@ -104,6 +104,11 @@ describe('buildStructureTree', () => {
         type: 'DISPLAY',
         bidding: 'TARGET_CPA',
         budget: '?',
+        // New fields the Command Center summariser uses to reason about
+        // shared budgets — see google-ads.js buildStructureTree.
+        budgetName: undefined,
+        budgetResource: undefined,
+        budgetShared: false,
         adGroups: [],
         locations: [],
       });

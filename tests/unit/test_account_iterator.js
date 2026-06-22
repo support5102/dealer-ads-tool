@@ -28,8 +28,8 @@ describe('discoverAccounts', () => {
     const queryFn = async () => fakeChildRows;
     const accounts = await discoverAccounts(fakeConfig, 'fake-token', '999', queryFn);
     expect(accounts).toHaveLength(2);
-    expect(accounts[0]).toEqual({ customerId: '111', name: 'Dealer A', currency: 'USD', isManager: false });
-    expect(accounts[1]).toEqual({ customerId: '222', name: 'Dealer B', currency: 'USD', isManager: false });
+    expect(accounts[0]).toEqual({ customerId: '111', name: 'Dealer A', currency: 'USD', isManager: false, managingMccId: '999' });
+    expect(accounts[1]).toEqual({ customerId: '222', name: 'Dealer B', currency: 'USD', isManager: false, managingMccId: '999' });
   });
 
   test('filters out MCC self-reference', async () => {

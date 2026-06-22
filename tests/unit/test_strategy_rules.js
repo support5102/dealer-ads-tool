@@ -131,7 +131,8 @@ describe('getCompetingMakes', () => {
   });
 
   test('returns ALL_KNOWN_MAKES for unrecognized make', () => {
-    expect(getCompetingMakes('lincoln')).toEqual(ALL_KNOWN_MAKES);
+    // 'lincoln' is now a known make; use a make absent from ALL_KNOWN_MAKES.
+    expect(getCompetingMakes('tesla')).toEqual(ALL_KNOWN_MAKES);
   });
 
   test('returns ALL_KNOWN_MAKES for null input', () => {

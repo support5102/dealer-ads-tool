@@ -420,7 +420,7 @@ describe('applyChange — add_keyword', () => {
     }]);
   });
 
-  test('add_keyword defaults match type to BROAD when not specified', async () => {
+  test('add_keyword defaults match type to PHRASE when not specified', async () => {
     const change = {
       type: 'add_keyword',
       campaignName: 'Honda Civic - Search',
@@ -430,8 +430,9 @@ describe('applyChange — add_keyword', () => {
 
     const result = await applyChange(client, change, false);
 
-    expect(result).toContain('[BROAD]');
-    expect(client.mutations[0].data[0].keyword.match_type).toBe('BROAD');
+    // Strategy policy forbids BROAD; an unspecified match type defaults to PHRASE.
+    expect(result).toContain('[PHRASE]');
+    expect(client.mutations[0].data[0].keyword.match_type).toBe('PHRASE');
   });
 
   test('add_keyword includes cpc_bid_micros when cpcBid is provided', async () => {
@@ -454,7 +455,7 @@ describe('applyChange — add_keyword', () => {
       type: 'add_keyword',
       campaignName: 'Honda Civic - Search',
       adGroupName: 'Civic Sedans',
-      details: { keyword: 'civic reviews', matchType: 'BROAD' },
+      details: { keyword: 'civic reviews', matchType: 'PHRASE' },
     };
 
     await applyChange(client, change, false);
@@ -490,12 +491,12 @@ describe('applyChange — add_negative_keyword', () => {
     const change = {
       type: 'add_negative_keyword',
       campaignName: 'Honda Civic - Search',
-      details: { keyword: 'free', matchType: 'BROAD' },
+      details: { keyword: 'free', matchType: 'PHRASE' },
     };
 
     const result = await applyChange(client, change, false);
 
-    expect(result).toBe('Added negative keyword [BROAD] "free" to Honda Civic - Search');
+    expect(result).toBe('Added negative keyword [PHRASE] "free" to Honda Civic - Search');
     expect(client.mutations).toHaveLength(1);
     expect(client.mutations[0].type).toBe('campaignCriteria.create');
     expect(client.mutations[0].data).toEqual([{
@@ -503,7 +504,7 @@ describe('applyChange — add_negative_keyword', () => {
       negative: true,
       keyword: {
         text: 'free',
-        match_type: 'BROAD',
+        match_type: 'PHRASE',
       },
     }]);
   });

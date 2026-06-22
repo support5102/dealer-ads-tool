@@ -47,8 +47,8 @@ describe('gaqlEscape', () => {
 // VALID_MATCH_TYPES
 // ─────────────────────────────────────────────────────────────
 describe('VALID_MATCH_TYPES', () => {
-  test('contains EXACT, PHRASE, BROAD', () => {
-    expect(VALID_MATCH_TYPES).toEqual(['EXACT', 'PHRASE', 'BROAD']);
+  test('contains EXACT and PHRASE only (BROAD forbidden by strategy)', () => {
+    expect(VALID_MATCH_TYPES).toEqual(['EXACT', 'PHRASE']);
   });
 });
 
