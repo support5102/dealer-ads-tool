@@ -26,6 +26,7 @@ const { createSchedulerRouter } = require('./routes/scheduler');
 const { createAuditRouter }           = require('./routes/audit');
 const { createOptimizationRouter }    = require('./routes/optimization');
 const { createCpcOptimizerRouter }    = require('./routes/cpc-optimizer');
+const { createVlaHealthRouter }       = require('./routes/vla-health');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { createCommandCenterRouter }    = require('./routes/command-center');
@@ -133,6 +134,7 @@ function createApp(config) {
   app.use(createAuditRouter(config));
   app.use(createOptimizationRouter(config));
   app.use(createCpcOptimizerRouter(config));
+  app.use(createVlaHealthRouter(config));
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
   app.use('/api/cc', createCommandCenterRouter(config));
@@ -254,6 +256,39 @@ if (require.main === module) {
       { runImmediately: false }
     );
     console.log('[change-alerts] scheduler registered (stub runner)');
+  }
+
+  // VLA Monitor — daily 9 AM ET scan for VLA campaign issues (feature-flagged).
+  // Uses setTimeout self-rescheduling (not scheduler.registerJob's setInterval)
+  // because we need wall-clock alignment to 9 AM Eastern and DST handling —
+  // same pattern as spend-sync's msUntilNext8amEastern.
+  if (config.vlaMonitorEnabled) {
+    const vlaRunner = require('./services/vla-monitor-runner');
+
+    function msUntilNext9amEastern() {
+      const now = new Date();
+      const eastern = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const easternHour = eastern.getHours();
+      const easternMin = eastern.getMinutes();
+      let target = new Date(eastern);
+      target.setHours(9, 0, 0, 0);
+      if (easternHour > 9 || (easternHour === 9 && easternMin >= 0)) {
+        target.setDate(target.getDate() + 1);
+      }
+      return Math.max(target.getTime() - eastern.getTime(), 60_000);
+    }
+
+    function scheduleVlaRun() {
+      const delay = msUntilNext9amEastern();
+      console.log(`[vla-monitor] next run in ${Math.round(delay / 60000)} min`);
+      setTimeout(async () => {
+        try { await vlaRunner.run({ config }); }
+        catch (err) { console.error('[vla-monitor] run error:', err.message); }
+        finally { scheduleVlaRun(); }
+      }, delay);
+    }
+    scheduleVlaRun();
+    console.log('[vla-monitor] scheduler registered (9 AM ET)');
   }
 
   // Budget revert reminders — daily (feature-flagged independently)

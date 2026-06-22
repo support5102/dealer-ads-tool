@@ -680,7 +680,7 @@ function createPacingRouter(config, deps = {}) {
           console.log(`[pacing-apply] Updating ${rec.target}: ${rec.resourceName} → $${rec.recommendedDailyBudget}/day (${newAmountMicros} micros)`);
 
           // Use REST API directly — the google-ads-api library hangs on mutations
-          const mutateUrl = `https://googleads.googleapis.com/v20/customers/${cleanCustomerId}/campaignBudgets:mutate`;
+          const mutateUrl = `https://googleads.googleapis.com/v22/customers/${cleanCustomerId}/campaignBudgets:mutate`;
           await axios.post(mutateUrl, {
             operations: [{
               update: {

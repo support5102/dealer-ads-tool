@@ -52,7 +52,7 @@ function createClient(config, refreshToken, customerId, loginCustomerId) {
  */
 async function listAccessibleCustomers(accessToken, developerToken) {
   const resp = await axios.get(
-    'https://googleads.googleapis.com/v20/customers:listAccessibleCustomers',
+    'https://googleads.googleapis.com/v22/customers:listAccessibleCustomers',
     {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -88,7 +88,7 @@ async function queryViaRest(accessToken, developerToken, customerId, query, logi
   let resp;
   try {
     resp = await axios.post(
-      `https://googleads.googleapis.com/v20/customers/${cleanCustomerId}/googleAds:searchStream`,
+      `https://googleads.googleapis.com/v22/customers/${cleanCustomerId}/googleAds:searchStream`,
       { query },
       { headers, timeout: 20000 }
     );
@@ -1038,7 +1038,7 @@ async function dismissRecommendations(restCtx, recResourceNames) {
   if (!recResourceNames || recResourceNames.length === 0) return { dismissed: 0 };
   const doMutate = restCtx._mutateFn || mutateViaRest;
   const customerId = String(restCtx.customerId).replace(/-/g, '');
-  const url = `https://googleads.googleapis.com/v17/customers/${customerId}/recommendations:dismiss`;
+  const url = `https://googleads.googleapis.com/v22/customers/${customerId}/recommendations:dismiss`;
 
   let dismissed = 0;
   for (const chunk of chunked(recResourceNames, MAX_MUTATE_BATCH)) {
@@ -1066,7 +1066,7 @@ async function mutateRemoveAssets(restCtx, resourceNames) {
   const grouped = groupAssetLinksByService(resourceNames);
   let removed = 0;
   for (const [service, names] of Object.entries(grouped)) {
-    const url = `https://googleads.googleapis.com/v17/customers/${customerId}/${service}:mutate`;
+    const url = `https://googleads.googleapis.com/v22/customers/${customerId}/${service}:mutate`;
     for (const chunk of chunked(names, MAX_MUTATE_BATCH)) {
       const body = { operations: chunk.map(rn => ({ remove: rn })) };
       await doMutate(url, body, restCtx);
@@ -1619,6 +1619,154 @@ async function getCampaignLocations(restCtx, campaignId) {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// VLA Monitor helpers (used by services/vla-monitor-runner.js)
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Lists enabled VLA (Vehicle Listing Ads) campaigns on the account.
+ *
+ * Canonical filter: channel ∈ {PERFORMANCE_MAX, SHOPPING, LOCAL} AND
+ * shopping_setting.merchant_id IS NOT NULL. This catches both the modern
+ * PMax-with-vehicle-feed pattern and the legacy Shopping/LOCAL inventory
+ * campaigns. We DON'T name-match on "VLA" alone — half our PMax campaigns
+ * don't have that string in their names.
+ *
+ * @param {Object} restCtx - { accessToken, developerToken, customerId, loginCustomerId }
+ * @returns {Promise<Object[]>} [{ campaignId, name, channelType, merchantId }]
+ */
+async function getVlaCampaigns(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT campaign.id, campaign.name, campaign.advertising_channel_type,
+            campaign.shopping_setting.merchant_id
+     FROM campaign
+     WHERE campaign.status = 'ENABLED'
+       AND campaign.advertising_channel_type IN ('PERFORMANCE_MAX','SHOPPING','LOCAL')`,
+    restCtx.loginCustomerId
+  );
+  return rows
+    .map(row => {
+      const c = row.campaign || {};
+      const shop = c.shoppingSetting || c.shopping_setting || {};
+      const merchantId = shop.merchantId ?? shop.merchant_id ?? null;
+      if (merchantId == null) return null;
+      return {
+        campaignId: String(c.id ?? ''),
+        name: c.name ?? '',
+        channelType: String(c.advertisingChannelType ?? c.advertising_channel_type ?? ''),
+        merchantId: String(merchantId),
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Lists currently disapproved / limited-eligibility products on the account.
+ * Source-of-truth for "rejected products" — `shopping_product.status` lives
+ * inside the Ads API surface, so no Merchant Center auth scope is needed.
+ *
+ * Returns up to 5000 rows; if an account legitimately has more than 5k
+ * disapproved products, that IS the alert (feed-level outage).
+ *
+ * @returns {Promise<Object[]>} [{ itemId, status, issuesCount, severityMax, feedLabel, channel }]
+ */
+async function getProductIssues(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  let rows;
+  try {
+    rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id, shopping_product.status,
+              shopping_product.issues, shopping_product.feed_label,
+              shopping_product.channel
+       FROM shopping_product
+       WHERE shopping_product.status IN ('NOT_ELIGIBLE','ELIGIBLE_LIMITED')
+       LIMIT 5000`,
+      restCtx.loginCustomerId
+    );
+  } catch (err) {
+    // shopping_product unsupported / empty / disabled — treat as no issues
+    // rather than failing the whole VLA scan for this dealer.
+    console.warn(`[vla] getProductIssues skipped for ${restCtx.customerId}: ${err.message}`);
+    return [];
+  }
+  return (rows || []).map(row => {
+    const p = row.shoppingProduct || row.shopping_product || {};
+    const issues = Array.isArray(p.issues) ? p.issues : [];
+    const severities = issues.map(i => String(i.severity || '').toUpperCase());
+    return {
+      itemId: String(p.itemId ?? p.item_id ?? ''),
+      status: String(p.status || ''),
+      issuesCount: issues.length,
+      severityMax: severities.includes('ERROR') ? 'ERROR'
+                 : severities.includes('DEMOTED') ? 'DEMOTED'
+                 : severities.includes('WARNING') ? 'WARNING'
+                 : 'NONE',
+      feedLabel: String(p.feedLabel ?? p.feed_label ?? ''),
+      channel: String(p.channel || ''),
+    };
+  });
+}
+
+/**
+ * Total shopping-product count for the account (denominator for the
+ * "feed outage" ratio check). Counts every product the account knows about,
+ * not just disapproved ones.
+ *
+ * @returns {Promise<number>} Best-effort total product count; 0 on error.
+ */
+async function getProductTotal(restCtx) {
+  const doQuery = restCtx._queryFn || queryViaRest;
+  try {
+    const rows = await doQuery(
+      restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+      `SELECT shopping_product.item_id FROM shopping_product LIMIT 10000`,
+      restCtx.loginCustomerId
+    );
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+/**
+ * Last-14-day daily spend + click breakdown for VLA-only campaigns.
+ * Used to detect day-over-day spend / click collapse vs the trailing median.
+ *
+ * @param {string[]} campaignIds - Restrict to these VLA campaigns
+ * @returns {Promise<Object[]>} Sorted ascending by date: [{date, spend, clicks, impressions}]
+ */
+async function getVlaDailyMetrics14Days(restCtx, campaignIds) {
+  if (!Array.isArray(campaignIds) || campaignIds.length === 0) return [];
+  const idList = campaignIds.map(id => `'${String(id).replace(/'/g, '')}'`).join(',');
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions
+     FROM campaign
+     WHERE campaign.id IN (${idList})
+       AND segments.date DURING LAST_14_DAYS`,
+    restCtx.loginCustomerId
+  );
+  // Aggregate to per-day totals across the VLA campaign set
+  const byDate = new Map();
+  for (const row of rows) {
+    const date = row.segments?.date || '';
+    if (!date) continue;
+    const m = row.metrics || {};
+    const cur = byDate.get(date) || { date, spend: 0, clicks: 0, impressions: 0 };
+    cur.spend += (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000;
+    cur.clicks += Number(m.clicks ?? 0);
+    cur.impressions += Number(m.impressions ?? 0);
+    byDate.set(date, cur);
+  }
+  return Array.from(byDate.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(d => ({ ...d, spend: Math.round(d.spend * 100) / 100 }));
+}
+
 module.exports = {
   createClient,
   listAccessibleCustomers,
@@ -1661,4 +1809,9 @@ module.exports = {
   getSearchTermReport,
   // R6: diagnostic location count
   getCampaignLocations,
+  // VLA Monitor
+  getVlaCampaigns,
+  getProductIssues,
+  getProductTotal,
+  getVlaDailyMetrics14Days,
 };

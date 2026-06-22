@@ -122,6 +122,30 @@ async function initialize() {
       )
     `);
 
+    // VLA Monitor — one row per (dealer, alert_kind) tracking the lifecycle of a
+    // continuous condition (not a discrete event). `signature` is a stable hash
+    // of the underlying state (e.g. the set of disapproved product IDs); when it
+    // changes the ticket gets a re-notify in the body, not a new ticket.
+    // `cleared_days` counts consecutive days the condition has NOT been detected;
+    // at 2 the alert auto-resolves and the ticket is closed.
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS vla_alert_state (
+        dealer_name TEXT NOT NULL,
+        alert_kind TEXT NOT NULL,
+        signature TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'warning',
+        status TEXT NOT NULL DEFAULT 'open',
+        consecutive_days INTEGER NOT NULL DEFAULT 1,
+        cleared_days INTEGER NOT NULL DEFAULT 0,
+        freshdesk_ticket_id TEXT,
+        payload JSONB,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at   TIMESTAMPTZ,
+        PRIMARY KEY (dealer_name, alert_kind)
+      )
+    `);
+
     try {
       await p.query(`
         CREATE TABLE IF NOT EXISTS dealer_goals (
