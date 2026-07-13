@@ -391,19 +391,40 @@ async function updateMonthlyBudget(dealerName, newBudget, note, changedBy, optio
 async function deleteGoal(dealerName) {
   const pool = db.getPool();
   if (pool) {
+    // pending_budget_reverts.applied_change_id FKs into dealer_budget_changes, and
+    // dealer_budget_changes.linked_revert_id FKs back into pending_budget_reverts —
+    // so reverts must go first (with the back-reference nulled), then history, then
+    // the goal, all atomically. Without this, any dealer with a pending revert 500s
+    // on delete with FK 23503 (prod bug, 2026-07-13).
+    const client = await pool.connect();
     try {
-      // Delete history first (no FK cascade defined — manual delete)
-      await pool.query('DELETE FROM dealer_budget_changes WHERE dealer_name = $1', [dealerName]);
-      await pool.query('DELETE FROM dealer_goals WHERE dealer_name = $1', [dealerName]);
+      await client.query('BEGIN');
+      await client.query(
+        'UPDATE dealer_budget_changes SET linked_revert_id = NULL WHERE dealer_name = $1',
+        [dealerName]);
+      await client.query('DELETE FROM pending_budget_reverts WHERE dealer_name = $1', [dealerName]);
+      await client.query('DELETE FROM dealer_budget_changes WHERE dealer_name = $1', [dealerName]);
+      await client.query('DELETE FROM dealer_goals WHERE dealer_name = $1', [dealerName]);
+      await client.query('COMMIT');
       cache = null;
       return;
     } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* connection may be gone */ }
       console.error('[dealer-goals-store] deleteGoal DB error:', err.message);
       throw err;
+    } finally {
+      client.release();
     }
   }
 
-  // In-memory fallback
+  // In-memory fallback — same order for parity: reverts, then history, then goal.
+  const revertsToRemove = inMemoryReverts
+    .map((r, i) => r.dealerName === dealerName ? i : -1)
+    .filter(i => i !== -1)
+    .reverse();
+  for (const idx of revertsToRemove) {
+    inMemoryReverts.splice(idx, 1);
+  }
   inMemoryGoals.delete(dealerName);
   // Remove all history entries for this dealer
   const toRemove = inMemoryChanges
