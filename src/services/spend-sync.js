@@ -152,6 +152,7 @@ async function runSpendSync() {
 
     // 3. Fetch month-to-date spend for each account (batched to avoid rate limits)
     const spendByName = new Map();
+    const spendRows = []; // original-case rows for spend-history capture
     const BATCH_SIZE = 6;
 
     for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
@@ -175,6 +176,7 @@ async function runSpendSync() {
         if (r.status === 'fulfilled') {
           const key = r.value.name.trim().toLowerCase();
           spendByName.set(key, r.value.spend);
+          spendRows.push({ dealerName: r.value.name, totalSpend: r.value.spend });
         }
       }
 
@@ -185,6 +187,14 @@ async function runSpendSync() {
     }
 
     console.log(`[spend-sync] Fetched spend for ${spendByName.size} accounts.`);
+
+    // Persist monthly spend history (fire-and-forget, non-fatal).
+    try {
+      const spendHistory = require('./dealer-spend-history-store');
+      await spendHistory.recordManyForCurrentMonth(spendRows, 'spend-sync');
+    } catch (err) {
+      console.error('[spend-sync] spend history capture failed:', err.message);
+    }
 
     // 4. Write to Google Sheets
     const updated = await writeSpendToSheet(accessToken, syncState.spreadsheetId, spendByName);
