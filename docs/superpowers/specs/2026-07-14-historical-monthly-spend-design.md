@@ -45,7 +45,9 @@ first day of the month.
 Why this converges to the correct month-end total: Google Ads MTD spend grows through the
 month and **resets to 0 on the 1st**. So the July row is repeatedly overwritten with July's
 growing total, and the last upsert while the calendar still reads July leaves the final
-July figure in place. When August starts, a new `(dealer, 2026-08-01)` row begins.
+July figure in place (the period boundary is computed in UTC, so the finalized figure can
+under-count the final calendar day's timezone-offset tail — a known minor caveat, tracked
+as a follow-up). When August starts, a new `(dealer, 2026-08-01)` row begins.
 
 Capture opportunities (both fire-and-forget, never block or fail the request):
 
