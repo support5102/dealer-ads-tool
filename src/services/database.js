@@ -277,8 +277,28 @@ async function initialize() {
       console.error('Database initialization error (dealer_goals.daily_budget):', err.message);
     }
 
+    try {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS dealer_monthly_spend (
+          dealer_name    TEXT NOT NULL,
+          period         DATE NOT NULL,
+          total_spend    NUMERIC(12,2) NOT NULL,
+          monthly_budget NUMERIC(10,2),
+          source         TEXT,
+          updated_at     TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (dealer_name, period)
+        )
+      `);
+      await p.query(`
+        CREATE INDEX IF NOT EXISTS idx_dealer_monthly_spend_dealer
+          ON dealer_monthly_spend (dealer_name, period DESC)
+      `);
+    } catch (err) {
+      console.error('Database initialization error (dealer_monthly_spend):', err.message);
+    }
+
     initialized = true;
-    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup, dealer_goals, dealer_budget_changes, pending_budget_reverts tables ready');
+    console.log('Database initialized: change_history, dealer_groups, dealer_group_members, dealer_site_mappings, dealer_inventory_baseline, dealer_inventory_samples, change_alert_dedup, dealer_goals, dealer_budget_changes, pending_budget_reverts, dealer_monthly_spend tables ready');
   } catch (err) {
     console.error('Database initialization failed:', err.message);
   }
