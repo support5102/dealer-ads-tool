@@ -909,3 +909,22 @@
   color: var(--text-muted);
 }
 .preview-row strong { color: var(--text); font-weight: 600; }
+
+/* ── Monthly spend history (pacing-overview row expand) ── */
+.overview-table th.expand-col,
+.overview-table td.expand-col { width: 28px; text-align: center; padding-left: 4px; padding-right: 0; }
+.expand-btn {
+  background: none; border: none; cursor: pointer; color: var(--text3);
+  font-size: 12px; line-height: 1; padding: 2px 4px;
+}
+.expand-btn:hover { color: var(--text1); }
+.expand-btn.open { color: var(--accent, #3b82f6); }
+.sh-detail-row > td { background: var(--bg2, rgba(255,255,255,0.02)); padding: 0; }
+.sh-panel { padding: 10px 16px 12px 40px; }
+.sh-list { display: flex; flex-direction: column; gap: 6px; }
+.sh-entry { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.sh-month { min-width: 72px; color: var(--text2); font-variant-numeric: tabular-nums; }
+.sh-sep { color: var(--text3); }
+.sh-spend { color: var(--text1); font-variant-numeric: tabular-nums; }
+.sh-updated { color: var(--text3); font-size: 11px; margin-left: auto; }
+.sh-empty { font-size: 13px; color: var(--text3); padding: 2px 0; }
