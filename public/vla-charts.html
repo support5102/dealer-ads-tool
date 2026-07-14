@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VLA Campaign Charts</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <link rel="stylesheet" href="/pacing-styles.css"/>
+  <script src="/theme.js"></script>
+  <style>
+    .vc-main { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 1280px; margin: 0 auto; width: 100%; }
+    .vc-controls { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .vc-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 18px; color: var(--text); flex: 1; }
+    .metric-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .metric-btn { background: var(--bg3); color: var(--text2); border: none; padding: 7px 16px; font-size: 13px; cursor: pointer; font-family: 'DM Mono', monospace; }
+    .metric-btn + .metric-btn { border-left: 1px solid var(--border); }
+    .metric-btn.active { background: var(--blue, #3b82f6); color: #fff; }
+    .metric-btn:hover:not(.active) { color: var(--text); }
+
+    .loading-state { text-align: center; padding: 60px 20px; color: var(--text3); }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--blue, #3b82f6); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-msg { text-align: center; padding: 40px; color: var(--red, #f87171); }
+    .empty-msg { text-align: center; padding: 40px; color: var(--text3); }
+
+    .vc-summary { font-size: 12px; color: var(--text3); margin-bottom: 18px; }
+    .vc-summary strong { color: var(--text); font-size: 14px; }
+
+    .vc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .vc-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .vc-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .vc-dealer { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vc-metric-total { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .vc-metric-total b { color: var(--blue, #3b82f6); }
+    .vc-chart { width: 100%; height: 90px; display: block; }
+    .vc-card-foot { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">&#128200;</div>
+    <div>
+      <div class="logo-text">VLA Campaign Charts</div>
+      <div class="logo-sub">Per dealer &middot; Last 30 days</div>
+    </div>
+  </div>
+  <div class="header-right" id="headerRight">
+    <a href="/pacing-overview.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Pacing</a>
+    <a href="/audit.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Auditor</a>
+    <a href="/dealers.html" style="color:#e0e6ed;text-decoration:none;font-size:12px;font-family:monospace;border:1px solid #1e2a3a;border-radius:8px;padding:5px 14px;">Dealers</a>
+    <span class="connect-btn" id="authStatus" style="pointer-events:none;opacity:0.5">Checking...</span>
+    <button class="nav-link" id="themeToggle" onclick="toggleTheme()" style="cursor:pointer;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text2);font-size:12px;">&#127769; Dark</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="vc-main">
+  <div class="vc-controls">
+    <div class="vc-title">VLA Campaigns by Dealer</div>
+    <div class="metric-toggle" id="metricToggle">
+      <button class="metric-btn active" data-metric="clicks" onclick="setMetric('clicks')">Clicks</button>
+      <button class="metric-btn" data-metric="cost" onclick="setMetric('cost')">Spend</button>
+      <button class="metric-btn" data-metric="impressions" onclick="setMetric('impressions')">Impressions</button>
+    </div>
+    <input type="text" id="filterInput" placeholder="Search dealers..." oninput="renderGrid()" style="padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;width:200px;outline:none;"/>
+    <button class="btn-primary" id="refreshBtn" onclick="loadCharts()">Refresh</button>
+  </div>
+
+  <div id="summaryBar" class="vc-summary" style="display:none"></div>
+  <div class="loading-state" id="loadingState" style="display:none">
+    <div class="spinner"></div>
+    <p>Loading VLA campaigns for all dealers... (this can take up to a minute)</p>
+  </div>
+  <div id="content"></div>
+  <div id="failedSection"></div>
+</div>
+
+<script src="/vla-charts-app.js"></script>
+</body>
+</html>

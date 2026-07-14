@@ -27,6 +27,7 @@ const { createAuditRouter }           = require('./routes/audit');
 const { createOptimizationRouter }    = require('./routes/optimization');
 const { createCpcOptimizerRouter }    = require('./routes/cpc-optimizer');
 const { createVlaHealthRouter }       = require('./routes/vla-health');
+const { createVlaChartsRouter }       = require('./routes/vla-charts');
 const { createFreshdeskRouter }       = require('./routes/freshdesk');
 const { createBudgetAdjustmentsRouter } = require('./routes/budget-adjustments');
 const { createCommandCenterRouter }    = require('./routes/command-center');
@@ -136,6 +137,7 @@ function createApp(config) {
   app.use(createOptimizationRouter(config));
   app.use(createCpcOptimizerRouter(config));
   app.use(createVlaHealthRouter(config));
+  app.use(createVlaChartsRouter(config));
   app.use(createFreshdeskRouter(config));
   app.use(createBudgetAdjustmentsRouter(config));
   app.use('/api/cc', createCommandCenterRouter(config));

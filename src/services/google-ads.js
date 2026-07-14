@@ -1672,6 +1672,53 @@ async function getVlaCampaigns(restCtx) {
 }
 
 /**
+ * Daily VLA metrics for the last 30 days, aggregated across the account's
+ * currently-enabled VLA campaigns (as identified by getVlaCampaigns).
+ *
+ * Rows come back per-campaign-per-day; we sum them into one series per day so
+ * the charts show the account's total VLA clicks / impressions / spend.
+ *
+ * @returns {Promise<Array<{date:string, clicks:number, impressions:number, cost:number}>>}
+ *          Sorted ascending by date. Empty array if the account has no VLA campaigns.
+ */
+async function getVlaDailyMetrics(restCtx) {
+  const vla = await getVlaCampaigns(restCtx);
+  const ids = vla.map(c => c.campaignId).filter(Boolean);
+  if (!ids.length) return [];
+
+  const doQuery = restCtx._queryFn || queryViaRest;
+  const rows = await doQuery(
+    restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
+    `SELECT segments.date, metrics.clicks, metrics.impressions, metrics.cost_micros
+       FROM campaign
+      WHERE segments.date DURING LAST_30_DAYS
+        AND campaign.id IN (${ids.join(', ')})`,
+    restCtx.loginCustomerId
+  );
+
+  const byDate = new Map();
+  for (const row of rows) {
+    const date = row.segments?.date;
+    if (!date) continue;
+    const m = row.metrics || {};
+    const cur = byDate.get(date) || { date, clicks: 0, impressions: 0, cost: 0 };
+    cur.clicks += Number(m.clicks ?? 0);
+    cur.impressions += Number(m.impressions ?? 0);
+    cur.cost += (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000;
+    byDate.set(date, cur);
+  }
+
+  return Array.from(byDate.values())
+    .map(d => ({
+      date: d.date,
+      clicks: d.clicks,
+      impressions: d.impressions,
+      cost: Math.round(d.cost * 100) / 100,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * Lists currently disapproved / limited-eligibility products on the account.
  * Source-of-truth for "rejected products" — `shopping_product.status` lives
  * inside the Ads API surface, so no Merchant Center auth scope is needed.
@@ -1910,6 +1957,7 @@ module.exports = {
   getCampaignLocations,
   // VLA Monitor
   getVlaCampaigns,
+  getVlaDailyMetrics,
   getProductIssues,
   getProductTotal,
   getVlaDailyMetrics14Days,
