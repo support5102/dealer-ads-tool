@@ -289,7 +289,9 @@ function renderTable(accounts) {
     const adjValue = isLastDay ? remainingBudget : a.dailyAdjustment;
     const adjClass = adjValue >= 0 ? 'adj-positive' : 'adj-negative';
 
-    return `<tr onclick="window.location.href='/pacing.html?account=${esc(a.customerId)}'">
+    const dealerAttr = esc(a.dealerName).replace(/'/g, "\\'");
+    return `<tr class="dealer-row" onclick="window.location.href='/pacing.html?account=${esc(a.customerId)}'">
+      <td class="expand-col"><button class="expand-btn" title="Show monthly spend history" onclick="event.stopPropagation(); toggleSpendHistory('${dealerAttr}', this)">▸</button></td>
       <td>${esc(a.dealerName)}</td>
       <td>${fmtCurrency(a.mtdSpend)}</td>
       <td>${fmtCurrency(a.monthlyBudget)} <button class="budget-edit-btn" onclick="event.stopPropagation(); openBudgetModal('${esc(a.dealerName).replace(/'/g, "\\'")}', ${a.monthlyBudget})" title="Edit monthly budget">&#9998;</button></td>
@@ -304,7 +306,7 @@ function renderTable(accounts) {
 
   content.innerHTML = `
     <table class="overview-table">
-      <thead><tr>${headerHtml}</tr></thead>
+      <thead><tr><th class="expand-col"></th>${headerHtml}</tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
   `;
@@ -420,7 +422,81 @@ async function saveBudget() {
   }
 }
 
+// ── Monthly spend history (row expand) ──
+
+const spendHistoryCache = new Map(); // dealerName → array | 'loading'
+
+function formatMonthLabel(period) {
+  // period is 'YYYY-MM-01'
+  const [y, m] = period.split('-');
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[Number(m) - 1]} ${y}`;
+}
+
+function formatUpdated(updatedAt) {
+  if (!updatedAt) return '';
+  const d = new Date(updatedAt);
+  if (isNaN(d)) return '';
+  return `updated ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+}
+
+function renderSpendHistoryRows(history) {
+  if (history === 'loading') return '<div class="sh-empty">Loading…</div>';
+  if (!history || history.length === 0) {
+    return '<div class="sh-empty">No months recorded yet — history starts this month.</div>';
+  }
+  return '<div class="sh-list">' + history.map(h => {
+    const pct = (h.monthlyBudget && h.monthlyBudget > 0)
+      ? ` · ${Math.round((h.totalSpend / h.monthlyBudget) * 100)}%`
+      : '';
+    const budget = (h.monthlyBudget != null) ? ` / ${fmtCurrency(h.monthlyBudget)}` : '';
+    return `<div class="sh-entry">
+      <span class="sh-month">${esc(formatMonthLabel(h.period))}</span>
+      <span class="sh-sep">·</span>
+      <span class="sh-spend">${fmtCurrency(h.totalSpend)} spent${budget}${pct}</span>
+      <span class="sh-updated">${esc(formatUpdated(h.updatedAt))}</span>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+async function toggleSpendHistory(dealerName, btn) {
+  const dealerRow = btn.closest('tr');
+  const existing = dealerRow.nextElementSibling;
+  // Collapse if already open
+  if (existing && existing.classList.contains('sh-detail-row')) {
+    existing.remove();
+    btn.textContent = '▸';
+    btn.classList.remove('open');
+    return;
+  }
+
+  btn.textContent = '▾';
+  btn.classList.add('open');
+
+  const detail = document.createElement('tr');
+  detail.className = 'sh-detail-row';
+  const colspan = dealerRow.children.length;
+  const cached = spendHistoryCache.get(dealerName);
+  detail.innerHTML = `<td colspan="${colspan}"><div class="sh-panel">${renderSpendHistoryRows(cached || 'loading')}</div></td>`;
+  dealerRow.after(detail);
+
+  if (cached && cached !== 'loading') return; // already have data
+
+  spendHistoryCache.set(dealerName, 'loading');
+  try {
+    const res = await fetch(`/api/dealers/${encodeURIComponent(dealerName)}/spend-history`, { credentials: 'include' });
+    const data = res.ok ? await res.json() : { history: [] };
+    spendHistoryCache.set(dealerName, data.history || []);
+  } catch (err) {
+    spendHistoryCache.set(dealerName, []);
+  }
+  // Re-render if the panel is still open
+  const panel = detail.querySelector('.sh-panel');
+  if (panel) panel.innerHTML = renderSpendHistoryRows(spendHistoryCache.get(dealerName));
+}
+
 // Expose for inline onclick handlers
 window.openBudgetModal = openBudgetModal;
 window.closeBudgetModal = closeBudgetModal;
 window.saveBudget = saveBudget;
+window.toggleSpendHistory = toggleSpendHistory;
