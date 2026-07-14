@@ -45,6 +45,12 @@ async function discoverAllAccounts(accessToken, developerToken, mccId, rootMccId
     return [];
   }
 
+  // Defensive guard: queryViaRest normally returns an array (empty when there are
+  // no results), but if it ever yields null/undefined (unexpected API shape), the
+  // `for...of rows` below would throw and 500 the ENTIRE /api/accounts listing.
+  // Returning [] keeps account discovery resilient to a single empty/bad sub-MCC.
+  if (!Array.isArray(rows)) return [];
+
   const accounts = [];
   const subMccs = [];
 

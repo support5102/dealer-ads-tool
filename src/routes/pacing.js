@@ -462,11 +462,19 @@ function createPacingRouter(config, deps = {}) {
         .sort((a, b) => a.impressionShare - b.impressionShare);
 
       const response = { customerId: customerId.replace(/-/g, ''), ...recommendation, campaignIS };
-      // Enrich inventory with used count and data source
-      if (response.inventory) {
-        response.inventory.usedCount = usedVehicleCount;
-        response.inventory.source = inventorySource;
-      }
+      // Vehicle inventory block for the dashboard.
+      // Merge over any inventory object the recommender returned (so we keep its
+      // fields, e.g. V2 newVinCount/tier) but ALWAYS fill in the VLA-feed counts.
+      // Bug fix: `count` (new-vehicle count) was never assigned here, so the
+      // pacing screen always showed a blank new-vehicle count even though the
+      // value was fetched (newVehicleCount) and the used count/source displayed.
+      response.inventory = {
+        ...(response.inventory || {}),
+        count: newVehicleCount,
+        usedCount: usedVehicleCount,
+        totalCount: newVehicleCount + usedVehicleCount,
+        source: inventorySource,
+      };
       if (lastChange.changeDate) {
         response.changeDate = lastChange.changeDate;
       }
@@ -621,6 +629,18 @@ function createPacingRouter(config, deps = {}) {
           console.error('[pacing-engine-v2] route-triggered run failed:', err.message);
           engineSummary = { error: err.message };
         }
+      }
+
+      // Persist each dealer's month-to-date total for historical comparison.
+      // Fire-and-forget — must never delay or fail the overview response.
+      try {
+        const spendHistory = require('../services/dealer-spend-history-store');
+        spendHistory.recordManyForCurrentMonth(
+          results.map(r => ({ dealerName: r.dealerName, totalSpend: r.mtdSpend, monthlyBudget: r.monthlyBudget })),
+          'pacing-overview'
+        ).catch(err => console.error('[pacing] spend history capture failed:', err.message));
+      } catch (err) {
+        console.error('[pacing] spend history capture hook error:', err.message);
       }
 
       res.json({

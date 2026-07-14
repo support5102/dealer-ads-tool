@@ -357,6 +357,24 @@ function checkNamingConventions(campaigns) {
  * Check 11: Low impression share on Search campaigns.
  * Strategy target is 75-90% IS. Below 75% = warning, below 50% = critical.
  */
+/**
+ * Check: Low Search impression share, split by CAUSE (budget vs. rank).
+ *
+ * Google reports two distinct reasons impression share is lost:
+ *   - search_budget_lost_impression_share: ads stopped showing because the
+ *     budget ran out  ->  fix is to RAISE THE BUDGET (or narrow targeting).
+ *   - search_rank_lost_impression_share: ads were not eligible often enough
+ *     because Ad Rank (bid x Quality Score) was too low  ->  raising the budget
+ *     will NOT help; fix is better BIDS, QUALITY SCORE, and ad relevance.
+ *
+ * Each low-IS campaign is classified by whichever loss is larger, and a finding
+ * is emitted in the matching category so the recommended action is correct.
+ * If the lost-share metrics are unavailable, it falls back to an 'unknown'
+ * bucket with generic guidance.
+ *
+ * @param {Object[]} campaigns - Campaign performance rows from getCampaignPerformance
+ * @returns {Object[]} Audit findings (one per cause/severity bucket that has campaigns)
+ */
 function checkLowImpressionShare(campaigns) {
   const findings = [];
   const IS_WARNING = 0.75;
@@ -367,39 +385,156 @@ function checkLowImpressionShare(campaigns) {
          c.searchImpressionShare != null && c.impressions > 100 &&
          c.searchImpressionShare < IS_WARNING
   );
-
   if (lowIS.length === 0) return findings;
 
-  const critical = lowIS.filter(c => c.searchImpressionShare < IS_CRITICAL);
-  const warning = lowIS.filter(c => c.searchImpressionShare >= IS_CRITICAL);
+  const asPct = x => Math.round(x * 100) + '%';
 
-  if (critical.length > 0) {
-    findings.push(finding(
-      'low_impression_share_critical',
-      SEVERITY.CRITICAL,
-      'budget',
-      `${critical.length} campaign(s) below 50% impression share`,
-      'These campaigns are missing more than half of available impressions. Increase budgets or reduce targeting.',
-      { count: critical.length, campaigns: critical.map(c => ({
-        campaignName: c.campaignName, impressionShare: Math.round(c.searchImpressionShare * 100) + '%'
-      }))}
-    ));
+  // Dominant cause of lost IS for one campaign: 'budget', 'rank', or 'unknown'.
+  function lossCause(c) {
+    const b = c.searchBudgetLostShare;
+    const r = c.searchRankLostShare;
+    if (b == null && r == null) return 'unknown';
+    return (b ?? 0) >= (r ?? 0) ? 'budget' : 'rank';
   }
 
-  if (warning.length > 0) {
-    findings.push(finding(
-      'low_impression_share_warning',
-      SEVERITY.WARNING,
-      'budget',
-      `${warning.length} campaign(s) below 75% impression share target`,
-      'Strategy target is 75-90% IS. Consider budget increases for these campaigns.',
-      { count: warning.length, campaigns: warning.map(c => ({
-        campaignName: c.campaignName, impressionShare: Math.round(c.searchImpressionShare * 100) + '%'
-      }))}
-    ));
+  function campaignRow(c) {
+    return {
+      campaignName: c.campaignName,
+      impressionShare: asPct(c.searchImpressionShare),
+      budgetLost: c.searchBudgetLostShare != null ? asPct(c.searchBudgetLostShare) : null,
+      rankLost: c.searchRankLostShare != null ? asPct(c.searchRankLostShare) : null,
+    };
+  }
+
+  // Bucket campaigns by (cause, severity). Severity = how far below target.
+  const buckets = {
+    budget:  { critical: [], warning: [] },
+    rank:    { critical: [], warning: [] },
+    unknown: { critical: [], warning: [] },
+  };
+  for (const c of lowIS) {
+    const cause = lossCause(c);
+    const level = c.searchImpressionShare < IS_CRITICAL ? 'critical' : 'warning';
+    buckets[cause][level].push(c);
+  }
+
+  const MESSAGES = {
+    budget:  'Impression share is lost mainly to BUDGET. Increase the daily budget (or narrow targeting) so the ads can show more often.',
+    rank:    'Impression share is lost mainly to AD RANK, not budget. Raising the budget will not help - improve bids, Quality Score, and ad relevance.',
+    unknown: 'Below the 75-90% impression-share target. Review budget and bids (the budget-vs-rank breakdown was unavailable).',
+  };
+  const CATEGORY = { budget: 'budget', rank: 'bidding', unknown: 'budget' };
+  const CAUSE_LABEL = { budget: 'budget-limited', rank: 'rank-limited', unknown: 'cause unknown' };
+
+  for (const cause of ['budget', 'rank', 'unknown']) {
+    for (const level of ['critical', 'warning']) {
+      const list = buckets[cause][level];
+      if (list.length === 0) continue;
+      const isCritical = level === 'critical';
+      findings.push(finding(
+        `low_impression_share_${cause}_${level}`,
+        isCritical ? SEVERITY.CRITICAL : SEVERITY.WARNING,
+        CATEGORY[cause],
+        `${list.length} campaign(s) ${isCritical ? 'below 50%' : 'below 75%'} impression share (${CAUSE_LABEL[cause]})`,
+        MESSAGES[cause],
+        { count: list.length, cause, campaigns: list.map(campaignRow) }
+      ));
+    }
   }
 
   return findings;
+}
+
+/**
+ * Check: Zero-conversion campaigns burning budget.
+ *
+ * Flags ENABLED Search/PMax campaigns that spent a meaningful amount over the
+ * audit window (LAST_7_DAYS) but recorded ZERO conversions. This is the most
+ * direct "wasted spend" signal — money going out with no leads/calls/forms in.
+ * The conversion data is already fetched by getCampaignPerformance.
+ *
+ * NOTE: brand-new campaigns may legitimately have no conversions yet; the spend
+ * floor (MIN_SPEND) reduces false positives, but review before pausing.
+ *
+ * @param {Object[]} campaigns - Campaign performance rows from getCampaignPerformance
+ * @returns {Object[]} Audit findings
+ */
+function checkZeroConversionCampaigns(campaigns) {
+  const MIN_SPEND = 50;    // $ spent over the window before we care
+  const HIGH_SPEND = 250;  // $ spent => escalate to critical
+
+  const flagged = (campaigns || []).filter(c =>
+    c.status === 'ENABLED' &&
+    (c.channelType === 'SEARCH' || c.channelType === 'PERFORMANCE_MAX') &&
+    (c.cost ?? 0) >= MIN_SPEND &&
+    (c.conversions ?? 0) === 0
+  );
+  if (flagged.length === 0) return [];
+
+  const row = c => ({ campaignName: c.campaignName, spend: '$' + Math.round(c.cost) });
+  const critical = flagged.filter(c => c.cost >= HIGH_SPEND);
+  const warning = flagged.filter(c => c.cost < HIGH_SPEND);
+  const findings = [];
+
+  if (critical.length > 0) {
+    findings.push(finding(
+      'zero_conversions_critical',
+      SEVERITY.CRITICAL,
+      'conversions',
+      `${critical.length} campaign(s) spent $${HIGH_SPEND}+ with zero conversions`,
+      'These campaigns are spending real money with no conversions. Check conversion tracking first (a tracking outage looks identical), then review keywords, landing pages, and offers.',
+      { count: critical.length, campaigns: critical.map(row) }
+    ));
+  }
+  if (warning.length > 0) {
+    findings.push(finding(
+      'zero_conversions_warning',
+      SEVERITY.WARNING,
+      'conversions',
+      `${warning.length} campaign(s) with spend but zero conversions`,
+      'Spending with no conversions over the last 7 days. Verify conversion tracking, then review targeting and landing pages.',
+      { count: warning.length, campaigns: warning.map(row) }
+    ));
+  }
+  return findings;
+}
+
+/**
+ * Check: High cost-per-acquisition (CPA) campaigns.
+ *
+ * Flags ENABLED campaigns whose cost-per-conversion (cost / conversions) exceeds
+ * a concern threshold. The default CPA_CONCERN is a tunable starting point —
+ * dealers with a known target CPA should adjust it (or pass a per-dealer goal in
+ * a future iteration).
+ *
+ * @param {Object[]} campaigns - Campaign performance rows from getCampaignPerformance
+ * @returns {Object[]} Audit findings
+ */
+function checkHighCpa(campaigns) {
+  const CPA_CONCERN = 150;  // cost-per-conversion ($) above which we flag for review
+
+  const flagged = (campaigns || []).filter(c =>
+    c.status === 'ENABLED' &&
+    (c.conversions ?? 0) >= 1 &&
+    (c.cost ?? 0) > 0 &&
+    (c.cost / c.conversions) > CPA_CONCERN
+  );
+  if (flagged.length === 0) return [];
+
+  const row = c => ({
+    campaignName: c.campaignName,
+    cpa: '$' + Math.round(c.cost / c.conversions),
+    conversions: Math.round(c.conversions * 10) / 10,
+  });
+
+  return [finding(
+    'high_cpa',
+    SEVERITY.WARNING,
+    'conversions',
+    `${flagged.length} campaign(s) above $${CPA_CONCERN} cost per conversion`,
+    `Cost per conversion is above the $${CPA_CONCERN} review threshold. Tighten targeting/negatives, improve Quality Score, or revisit bids. Adjust the threshold to your dealer's target CPA.`,
+    { count: flagged.length, threshold: CPA_CONCERN, campaigns: flagged.map(row) }
+  )];
 }
 
 /**
@@ -482,6 +617,7 @@ async function runAudit(restCtx, options = {}) {
     'bidding_strategy', 'broad_match', 'zero_impressions', 'disapproved_ads',
     'high_cpc', 'low_ctr', 'recommendations', 'ad_schedules', 'zero_spend',
     'low_impression_share',
+    'zero_conversions', 'high_cpa',
     'stale_years', 'missing_rsas', 'headline_quality', 'pinning',
     'neg_conflicts', 'neg_cannibalization', 'traffic_sculpting',
     'irrelevant_search_terms', 'blocked_converting_terms',
@@ -535,6 +671,8 @@ async function runAudit(restCtx, options = {}) {
     ad_schedules:         () => checkMissingAdSchedules(campaignData, adSchedules),
     zero_spend:           () => checkZeroSpendCampaigns(campaignData),
     low_impression_share: () => checkLowImpressionShare(campaignData),
+    zero_conversions:     () => checkZeroConversionCampaigns(campaignData),
+    high_cpa:             () => checkHighCpa(campaignData),
     // Ad copy quality checks
     stale_years:          () => checkStaleYearReferences(ads),
     missing_rsas:         () => {
@@ -606,5 +744,7 @@ module.exports = {
   checkZeroSpendCampaigns,
   checkNamingConventions,
   checkLowImpressionShare,
+  checkZeroConversionCampaigns,
+  checkHighCpa,
   SEVERITY,
 };

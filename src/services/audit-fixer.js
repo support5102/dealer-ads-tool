@@ -75,11 +75,22 @@ async function diagnose(finding, diagnostics = {}, claudeConfig = null) {
     case 'bidding_not_manual_cpc':
     case 'ecpc_enabled':
       return { fixable: false, fixes: [], manualNotes: ['Changing bidding strategy mid-flight can disrupt campaign learning. Review manually and change during a low-traffic period.'] };
-    case 'low_impression_share_critical':
-    case 'low_impression_share_warning':
-      return { fixable: false, fixes: [], manualNotes: ['Low impression share is handled by the Budget Auto-Adjuster. Go to Pacing → Auto-Adjuster to review budget recommendations.'] };
+    case 'low_impression_share_budget_critical':
+    case 'low_impression_share_budget_warning':
+      return { fixable: false, fixes: [], manualNotes: ['Impression share is lost to BUDGET. The Budget Auto-Adjuster handles this — go to Pacing → Auto-Adjuster to review budget recommendations.'] };
+    case 'low_impression_share_rank_critical':
+    case 'low_impression_share_rank_warning':
+      return { fixable: false, fixes: [], manualNotes: ['Impression share is lost to AD RANK, not budget. Raising budget will not help — improve bids, Quality Score, and ad relevance.'] };
+    case 'low_impression_share_unknown_critical':
+    case 'low_impression_share_unknown_warning':
+      return { fixable: false, fixes: [], manualNotes: ['Low impression share — review budget and bids (the budget-vs-rank breakdown was unavailable).'] };
     case 'missing_ad_schedule':
       return { fixable: false, fixes: [], manualNotes: ['Ad schedules should be set based on dealer business hours. Set Mon-Fri 8:30am-7pm, Sat 8:30am-8:30pm, Sun off per strategy guide.'] };
+    case 'zero_conversions_critical':
+    case 'zero_conversions_warning':
+      return { fixable: false, fixes: [], manualNotes: ['Spend with no conversions. First confirm conversion tracking is firing (a tracking outage looks identical), then review search terms/negatives, the landing page, and the offer before pausing.'] };
+    case 'high_cpa':
+      return { fixable: false, fixes: [], manualNotes: ['Cost per conversion is above target. Tighten targeting and negatives, improve Quality Score / ad relevance, and revisit bids. Tune the threshold to the dealer\'s target CPA.'] };
     default:
       return { fixable: false, fixes: [], manualNotes: ['No automated fix available for this finding.'] };
   }

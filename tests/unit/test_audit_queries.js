@@ -161,6 +161,7 @@ describe('getCampaignPerformance', () => {
       metrics: {
         clicks: 250, impressions: 4800, conversions: 35, conversionsValue: 12500,
         costMicros: 85000000, ctr: 0.052, averageCpc: 3400000, searchImpressionShare: 0.78,
+        searchBudgetLostImpressionShare: 0.12, searchRankLostImpressionShare: 0.10,
       },
     },
     {
@@ -190,6 +191,8 @@ describe('getCampaignPerformance', () => {
       ctr: 0.052,
       averageCpc: 3.40,
       searchImpressionShare: 0.78,
+      searchBudgetLostShare: 0.12,
+      searchRankLostShare: 0.10,
     });
   });
 
