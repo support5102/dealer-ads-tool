@@ -1672,50 +1672,63 @@ async function getVlaCampaigns(restCtx) {
 }
 
 /**
- * Daily VLA metrics for the last 30 days, aggregated across the account's
- * currently-enabled VLA campaigns (as identified by getVlaCampaigns).
+ * Daily VLA metrics for the last 30 days, broken out PER CAMPAIGN, for the
+ * account's currently-enabled VLA campaigns (as identified by getVlaCampaigns).
  *
- * Rows come back per-campaign-per-day; we sum them into one series per day so
- * the charts show the account's total VLA clicks / impressions / spend.
+ * Each campaign gets its own daily series so the charts can draw one line per
+ * campaign. Rows come back per-campaign-per-day; we group by campaign, then day.
  *
- * @returns {Promise<Array<{date:string, clicks:number, impressions:number, cost:number}>>}
- *          Sorted ascending by date. Empty array if the account has no VLA campaigns.
+ * @returns {Promise<Array<{campaignId:string, name:string,
+ *          days:Array<{date:string, clicks:number, impressions:number, cost:number}>}>>}
+ *          One entry per VLA campaign (each days[] sorted ascending). Empty array
+ *          if the account has no VLA campaigns.
  */
 async function getVlaDailyMetrics(restCtx) {
   const vla = await getVlaCampaigns(restCtx);
-  const ids = vla.map(c => c.campaignId).filter(Boolean);
+  const idToName = new Map(vla.map(c => [String(c.campaignId), c.name]));
+  const ids = [...idToName.keys()].filter(Boolean);
   if (!ids.length) return [];
 
   const doQuery = restCtx._queryFn || queryViaRest;
   const rows = await doQuery(
     restCtx.accessToken, restCtx.developerToken, restCtx.customerId,
-    `SELECT segments.date, metrics.clicks, metrics.impressions, metrics.cost_micros
+    `SELECT campaign.id, campaign.name, segments.date,
+            metrics.clicks, metrics.impressions, metrics.cost_micros
        FROM campaign
       WHERE segments.date DURING LAST_30_DAYS
         AND campaign.id IN (${ids.join(', ')})`,
     restCtx.loginCustomerId
   );
 
-  const byDate = new Map();
+  // Group by campaign, then by day.
+  const byCampaign = new Map(); // id → { campaignId, name, byDate: Map<date, agg> }
   for (const row of rows) {
+    const c = row.campaign || {};
+    const id = String(c.id ?? '');
     const date = row.segments?.date;
-    if (!date) continue;
+    if (!id || !date) continue;
+    let entry = byCampaign.get(id);
+    if (!entry) {
+      entry = { campaignId: id, name: c.name ?? idToName.get(id) ?? id, byDate: new Map() };
+      byCampaign.set(id, entry);
+    }
     const m = row.metrics || {};
-    const cur = byDate.get(date) || { date, clicks: 0, impressions: 0, cost: 0 };
+    const cur = entry.byDate.get(date) || { date, clicks: 0, impressions: 0, cost: 0 };
     cur.clicks += Number(m.clicks ?? 0);
     cur.impressions += Number(m.impressions ?? 0);
     cur.cost += (m.costMicros ?? m.cost_micros ?? 0) / 1_000_000;
-    byDate.set(date, cur);
+    entry.byDate.set(date, cur);
   }
 
-  return Array.from(byDate.values())
-    .map(d => ({
-      date: d.date,
-      clicks: d.clicks,
-      impressions: d.impressions,
-      cost: Math.round(d.cost * 100) / 100,
+  return [...byCampaign.values()]
+    .map(e => ({
+      campaignId: e.campaignId,
+      name: e.name,
+      days: [...e.byDate.values()]
+        .map(d => ({ date: d.date, clicks: d.clicks, impressions: d.impressions, cost: Math.round(d.cost * 100) / 100 }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
     }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**

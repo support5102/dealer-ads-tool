@@ -4,12 +4,13 @@
  * Mounted by src/server.js.
  *
  * Routes:
- *   GET /api/vla-charts/all → { dealers: [{ dealerName, customerId, days: [...] }], failed, totalAccounts }
+ *   GET /api/vla-charts/all → { dealers: [{ dealerName, customerId, campaigns: [...] }], failed, totalAccounts }
  *
- * Each dealer's `days` is [{ date, clicks, impressions, cost }] for the last 30
- * days, aggregated across that account's VLA campaigns. Only dealers that
- * actually have VLA campaigns (non-empty series) are returned. Accounts are
- * fetched in batches, mirroring GET /api/pacing/all.
+ * Each dealer's `campaigns` is [{ campaignId, name, days: [{ date, clicks,
+ * impressions, cost }] }] for the last 30 days — one entry per VLA campaign, so
+ * the UI can draw a separate colored line per campaign. Only dealers that
+ * actually have VLA campaigns are returned. Accounts are fetched in batches,
+ * mirroring GET /api/pacing/all.
  */
 
 const express = require('express');
@@ -57,15 +58,15 @@ function createVlaChartsRouter(config) {
             customerId: String(acct.id).replace(/-/g, ''),
             loginCustomerId,
           };
-          const days = await googleAds.getVlaDailyMetrics(restCtx);
-          return { dealerName: acct.name, customerId: acct.id, days };
+          const campaigns = await googleAds.getVlaDailyMetrics(restCtx);
+          return { dealerName: acct.name, customerId: acct.id, campaigns };
         }));
 
         for (let k = 0; k < settled.length; k++) {
           const r = settled[k];
           if (r.status === 'fulfilled') {
             // Only include dealers that actually run VLA campaigns.
-            if (r.value.days.length > 0) dealers.push(r.value);
+            if (r.value.campaigns.length > 0) dealers.push(r.value);
           } else {
             failed.push({ dealerName: batch[k].name, error: r.reason?.message || 'Unknown error' });
           }

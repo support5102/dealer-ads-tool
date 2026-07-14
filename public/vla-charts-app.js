@@ -10,10 +10,14 @@ let vcData = null;          // { dealers: [{dealerName, customerId, days:[{date,
 let currentMetric = 'clicks';
 
 const METRICS = {
-  clicks:      { label: 'Clicks',      fmt: fmtInt,      stroke: '#3b82f6', fill: 'rgba(59,130,246,0.14)' },
-  cost:        { label: 'Spend',       fmt: fmtCurrency, stroke: '#22c55e', fill: 'rgba(34,197,94,0.14)' },
-  impressions: { label: 'Impressions', fmt: fmtInt,      stroke: '#a78bfa', fill: 'rgba(167,139,250,0.16)' },
+  clicks:      { label: 'Clicks',      fmt: fmtInt },
+  cost:        { label: 'Spend',       fmt: fmtCurrency },
+  impressions: { label: 'Impressions', fmt: fmtInt },
 };
+
+// Distinct colors, one per VLA campaign within a dealer card (cycles if needed).
+const CAMPAIGN_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#a78bfa', '#ef4444', '#14b8a6', '#ec4899', '#84cc16', '#eab308', '#06b6d4'];
+const colorFor = i => CAMPAIGN_COLORS[i % CAMPAIGN_COLORS.length];
 
 // ── Formatting helpers ──
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
@@ -107,7 +111,7 @@ function renderGrid() {
   const dealers = vcData.dealers.filter(d => !search || d.dealerName.toLowerCase().includes(search));
 
   // Summary: dealer count + total of the current metric across all shown dealers.
-  const grandTotal = dealers.reduce((sum, d) => sum + d.days.reduce((s, x) => s + (Number(x[currentMetric]) || 0), 0), 0);
+  const grandTotal = dealers.reduce((sum, d) => sum + dealerTotal(d), 0);
   summary.innerHTML =
     `<strong>${dealers.length}</strong> dealer${dealers.length === 1 ? '' : 's'} with VLA · ` +
     `30-day ${cfg.label.toLowerCase()}: <strong>${cfg.fmt(grandTotal)}</strong>`;
@@ -121,51 +125,75 @@ function renderGrid() {
   content.innerHTML = `<div class="vc-grid">${dealers.map(d => renderCard(d, cfg)).join('')}</div>`;
 }
 
+// Total of the current metric across one campaign's days.
+function campaignTotal(campaign) {
+  return campaign.days.reduce((s, x) => s + (Number(x[currentMetric]) || 0), 0);
+}
+// Total of the current metric across all of a dealer's VLA campaigns.
+function dealerTotal(dealer) {
+  return (dealer.campaigns || []).reduce((s, c) => s + campaignTotal(c), 0);
+}
+
 function renderCard(dealer, cfg) {
-  const days = dealer.days;
-  const total = days.reduce((s, x) => s + (Number(x[currentMetric]) || 0), 0);
-  const first = days.length ? fmtDateShort(days[0].date) : '';
-  const last = days.length ? fmtDateShort(days[days.length - 1].date) : '';
-  const peak = days.reduce((mx, x) => Math.max(mx, Number(x[currentMetric]) || 0), 0);
+  const campaigns = dealer.campaigns || [];
+
+  // Shared date axis: union of every campaign's dates, ascending.
+  const dateSet = new Set();
+  campaigns.forEach(c => c.days.forEach(d => dateSet.add(d.date)));
+  const dates = [...dateSet].sort();
+  const first = dates.length ? fmtDateShort(dates[0]) : '';
+  const last = dates.length ? fmtDateShort(dates[dates.length - 1]) : '';
+
+  const legend = campaigns.map((c, i) => `
+    <span class="vc-legend-item">
+      <span class="vc-swatch" style="background:${colorFor(i)}"></span>
+      <span class="vc-legend-name" title="${esc(c.name)}">${esc(c.name)}</span>
+      <span class="vc-legend-val">${cfg.fmt(campaignTotal(c))}</span>
+    </span>`).join('');
 
   return `<div class="vc-card">
     <div class="vc-card-head">
       <span class="vc-dealer" title="${esc(dealer.dealerName)}">${esc(dealer.dealerName)}</span>
-      <span class="vc-metric-total">${cfg.label}: <b>${cfg.fmt(total)}</b></span>
+      <span class="vc-metric-total">${cfg.label}: <b>${cfg.fmt(dealerTotal(dealer))}</b></span>
     </div>
-    ${buildLineChart(days, currentMetric, cfg)}
+    ${buildMultiLineChart(campaigns, dates, currentMetric)}
+    <div class="vc-legend">${legend}</div>
     <div class="vc-card-foot">
       <span>${esc(first)}</span>
-      <span>peak ${cfg.fmt(peak)}</span>
+      <span>${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'}</span>
       <span>${esc(last)}</span>
     </div>
   </div>`;
 }
 
 /**
- * Builds an inline SVG line chart (area + line + last-point dot) for a metric
- * series. No external charting library — pure SVG scaled into a 300x90 viewBox.
+ * Builds an inline SVG chart with one line per VLA campaign, each in its own
+ * color, over a shared date axis. No external charting library — pure SVG
+ * scaled into a 300x90 viewBox. y-scale is shared across campaigns so line
+ * heights are comparable within the card.
  */
-function buildLineChart(days, metricKey, cfg) {
+function buildMultiLineChart(campaigns, dates, metricKey) {
   const W = 300, H = 90, P = 6;
-  const vals = days.map(d => Number(d[metricKey]) || 0);
-  const n = vals.length;
-  if (n === 0) return `<svg class="vc-chart" viewBox="0 0 ${W} ${H}"></svg>`;
+  if (!dates.length || !campaigns.length) return `<svg class="vc-chart" viewBox="0 0 ${W} ${H}"></svg>`;
 
-  const max = Math.max(1, ...vals);
+  const idx = new Map(dates.map((d, i) => [d, i]));
+  const n = dates.length;
+  let max = 1;
+  campaigns.forEach(c => c.days.forEach(d => { const v = Number(d[metricKey]) || 0; if (v > max) max = v; }));
+
   const x = i => P + (n <= 1 ? (W - 2 * P) / 2 : (i * (W - 2 * P) / (n - 1)));
   const y = v => (H - P) - (v / max) * (H - 2 * P);
 
-  const linePts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const areaPts = `${x(0).toFixed(1)},${(H - P).toFixed(1)} ${linePts} ${x(n - 1).toFixed(1)},${(H - P).toFixed(1)}`;
-  const lastX = x(n - 1).toFixed(1);
-  const lastY = y(vals[n - 1]).toFixed(1);
+  const lines = campaigns.map((c, ci) => {
+    const pts = c.days
+      .filter(d => idx.has(d.date))
+      .map(d => `${x(idx.get(d.date)).toFixed(1)},${y(Number(d[metricKey]) || 0).toFixed(1)}`)
+      .join(' ');
+    if (!pts) return '';
+    return `<polyline points="${pts}" fill="none" stroke="${colorFor(ci)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  }).join('');
 
-  return `<svg class="vc-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <polygon points="${areaPts}" fill="${cfg.fill}" stroke="none"/>
-    <polyline points="${linePts}" fill="none" stroke="${cfg.stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-    <circle cx="${lastX}" cy="${lastY}" r="3" fill="${cfg.stroke}"/>
-  </svg>`;
+  return `<svg class="vc-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${lines}</svg>`;
 }
 
 // ── Failed accounts ──
