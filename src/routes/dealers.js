@@ -10,6 +10,7 @@
  *   PUT    /api/dealers/:dealerName/budget        → update monthly budget (requires note)
  *   DELETE /api/dealers/:dealerName              → delete dealer
  *   GET    /api/dealers/:dealerName/history      → budget change history
+ *   GET    /api/dealers/:dealerName/spend-history → monthly spend history
  *   POST   /api/dealers/import-from-sheet        → one-time sheet-to-DB import
  */
 
@@ -17,6 +18,7 @@ const express = require('express');
 const axios = require('axios');
 const { requireAuth } = require('../middleware/auth');
 const store = require('../services/dealer-goals-store');
+const spendHistoryStore = require('../services/dealer-spend-history-store');
 const googleAds = require('../services/google-ads');
 
 /**
@@ -231,6 +233,17 @@ function createDealersRouter(config) {
     try {
       const dealerName = decodeURIComponent(req.params.dealerName);
       const history = await store.getBudgetHistory(dealerName);
+      res.json({ history });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── GET /api/dealers/:dealerName/spend-history ────────────────────────────────
+  router.get('/api/dealers/:dealerName/spend-history', requireAuth, async (req, res, next) => {
+    try {
+      const dealerName = decodeURIComponent(req.params.dealerName);
+      const history = await spendHistoryStore.getSpendHistory(dealerName);
       res.json({ history });
     } catch (err) {
       next(err);
