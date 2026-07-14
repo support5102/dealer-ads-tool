@@ -40,6 +40,13 @@
     .vc-legend-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
     .vc-legend-val { color: var(--text); font-variant-numeric: tabular-nums; }
     .vc-card-foot { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+    /* Hover crosshair + tooltip */
+    .vc-tooltip { position: fixed; z-index: 60; background: var(--bg3, #16233d); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 11px; color: var(--text); pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,0.45); max-width: 240px; }
+    .vc-tt-date { color: var(--text3); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+    .vc-tt-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; line-height: 1.5; }
+    .vc-tt-name { overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+    .vc-tt-val { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
