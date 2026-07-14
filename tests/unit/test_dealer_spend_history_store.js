@@ -59,6 +59,17 @@ describe('recordSpend() + getSpendHistory()', () => {
   test('unknown dealer returns empty array', async () => {
     expect(await store.getSpendHistory('Nobody')).toEqual([]);
   });
+
+  test('a later budget-less write (e.g. spend-sync) preserves the captured budget', async () => {
+    await store.recordSpend({ dealerName: 'Brighton Ford', period: '2026-07-01', totalSpend: 21515.50, monthlyBudget: 45700, source: 'pacing-overview' });
+    // spend-sync feed: updates spend, carries no budget
+    await store.recordSpend({ dealerName: 'Brighton Ford', period: '2026-07-01', totalSpend: 21999.99, source: 'spend-sync' });
+    const hist = await store.getSpendHistory('Brighton Ford');
+    expect(hist).toHaveLength(1);
+    expect(hist[0].totalSpend).toBe(21999.99);   // latest spend wins
+    expect(hist[0].monthlyBudget).toBe(45700);    // budget preserved, not nulled
+    expect(hist[0].source).toBe('spend-sync');
+  });
 });
 
 describe('recordManyForCurrentMonth()', () => {

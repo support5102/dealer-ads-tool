@@ -84,7 +84,7 @@ async function recordSpend({ dealerName, period, totalSpend, monthlyBudget = nul
       VALUES ($1, $2, $3, $4, $5, NOW())
       ON CONFLICT (dealer_name, period) DO UPDATE SET
         total_spend    = EXCLUDED.total_spend,
-        monthly_budget = EXCLUDED.monthly_budget,
+        monthly_budget = COALESCE(EXCLUDED.monthly_budget, dealer_monthly_spend.monthly_budget),
         source         = EXCLUDED.source,
         updated_at     = NOW()
     `, [dealerName, p, spend, budget, source]);
@@ -92,11 +92,13 @@ async function recordSpend({ dealerName, period, totalSpend, monthlyBudget = nul
   }
 
   // In-memory fallback
-  inMemory.set(`${dealerName}::${p}`, {
+  const key = `${dealerName}::${p}`;
+  const prev = inMemory.get(key);
+  inMemory.set(key, {
     dealerName,
     period: p,
     totalSpend: spend,
-    monthlyBudget: budget,
+    monthlyBudget: budget != null ? budget : (prev ? prev.monthlyBudget : null),
     source: source ?? null,
     updatedAt: new Date(),
   });
