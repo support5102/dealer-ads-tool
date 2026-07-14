@@ -631,6 +631,18 @@ function createPacingRouter(config, deps = {}) {
         }
       }
 
+      // Persist each dealer's month-to-date total for historical comparison.
+      // Fire-and-forget — must never delay or fail the overview response.
+      try {
+        const spendHistory = require('../services/dealer-spend-history-store');
+        spendHistory.recordManyForCurrentMonth(
+          results.map(r => ({ dealerName: r.dealerName, totalSpend: r.mtdSpend, monthlyBudget: r.monthlyBudget })),
+          'pacing-overview'
+        ).catch(err => console.error('[pacing] spend history capture failed:', err.message));
+      } catch (err) {
+        console.error('[pacing] spend history capture hook error:', err.message);
+      }
+
       res.json({
         accounts: results,
         failed,
