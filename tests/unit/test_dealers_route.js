@@ -16,6 +16,7 @@ beforeAll(() => {
 });
 
 const store = require('../../src/services/dealer-goals-store');
+const spendHistoryStore = require('../../src/services/dealer-spend-history-store');
 const { createDealersRouter } = require('../../src/routes/dealers');
 
 // ── Build a minimal test app ──────────────────────────────────────────────────
@@ -452,5 +453,35 @@ describe('POST /api/dealers/import-from-sheet', () => {
   test('returns 401 when not authenticated', async () => {
     const app = buildApp();
     await supertest(app).post('/api/dealers/import-from-sheet').expect(401);
+  });
+});
+
+describe('GET /api/dealers/:dealerName/spend-history', () => {
+  beforeEach(() => { spendHistoryStore._resetForTesting(); });
+
+  test('returns recorded months newest first', async () => {
+    await spendHistoryStore.recordSpend({ dealerName: 'Thayer Chevrolet', period: '2026-05-01', totalSpend: 1900, monthlyBudget: 2000, source: 'pacing-overview' });
+    await spendHistoryStore.recordSpend({ dealerName: 'Thayer Chevrolet', period: '2026-06-01', totalSpend: 1850, monthlyBudget: 2000, source: 'pacing-overview' });
+
+    const app = buildApp();
+    const agent = await authAgent(app);
+    const res = await agent.get(`/api/dealers/${encodeURIComponent('Thayer Chevrolet')}/spend-history`).expect(200);
+
+    expect(res.body.history).toHaveLength(2);
+    expect(res.body.history[0].period).toBe('2026-06-01');
+    expect(res.body.history[0].totalSpend).toBe(1850);
+    expect(res.body.history[1].period).toBe('2026-05-01');
+  });
+
+  test('returns empty history for a dealer with no records', async () => {
+    const app = buildApp();
+    const agent = await authAgent(app);
+    const res = await agent.get(`/api/dealers/${encodeURIComponent('Nobody Motors')}/spend-history`).expect(200);
+    expect(res.body.history).toEqual([]);
+  });
+
+  test('requires auth', async () => {
+    const app = buildApp();
+    await supertest(app).get('/api/dealers/Whoever/spend-history').expect(401);
   });
 });
