@@ -16,6 +16,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const googleAds = require('../services/google-ads');
+const { buildDateWindow, densifyCampaigns, latestDate, WINDOW_DAYS } = require('../services/vla-chart-window');
 
 function createVlaChartsRouter(config) {
   const router = express.Router();
@@ -75,6 +76,19 @@ function createVlaChartsRouter(config) {
         if (i + BATCH_SIZE < accounts.length) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
+      }
+
+      // GAQL omits zero-activity days, so campaigns come back with ragged date
+      // coverage (a campaign that started mid-window returns a short series, and
+      // a day where every campaign was dark is missing entirely). Project every
+      // campaign onto one continuous 30-day window ending yesterday so all
+      // charts share an identical axis. Anchor on the max date in the data —
+      // LAST_30_DAYS resolves in each account's own timezone, so deriving
+      // "yesterday" from the response beats guessing timezones server-side.
+      const anchor = latestDate(dealers);
+      if (anchor) {
+        const dates = buildDateWindow(anchor, WINDOW_DAYS);
+        for (const d of dealers) d.campaigns = densifyCampaigns(d.campaigns, dates);
       }
 
       dealers.sort((a, b) => a.dealerName.localeCompare(b.dealerName));
