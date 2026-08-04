@@ -17,73 +17,58 @@ const CUSTOMER_CLIENT_QUERY = `SELECT customer_client.id, customer_client.descri
   customer_client.currency_code, customer_client.manager, customer_client.level
   FROM customer_client WHERE customer_client.status = 'ENABLED'`;
 
+// How long a session may serve its cached account list before re-discovering.
+const ACCOUNTS_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
 /**
- * Recursively discovers all non-manager accounts under an MCC hierarchy.
- * Handles nested MCCs (e.g. PPC Account MCC → Savvy Ford MCC → dealer accounts).
+ * Discovers all non-manager accounts under an MCC hierarchy in a SINGLE query.
+ *
+ * A `customer_client` query from the root MCC already returns every descendant at
+ * ALL levels (verified: level-1 accounts and level-2 accounts under sub-MCCs both
+ * come back in the one result). The previous implementation recursed into each
+ * sub-MCC and re-queried it — one extra sequential round-trip per sub-MCC, all
+ * re-fetching rows the root query already returned. This collapses discovery to a
+ * single round-trip, which is the dominant cost of loading the pacing/accounts UI.
  *
  * @param {string} accessToken
  * @param {string} developerToken
- * @param {string} mccId - Current MCC to query
- * @param {string} rootMccId - Top-level MCC for login-customer-id header
- * @param {Set} visited - Prevents infinite loops on circular links
+ * @param {string} mccId - MCC to enumerate (the root MCC)
+ * @param {string} [rootMccId=mccId] - login-customer-id header value
  * @returns {Promise<Object[]>} Flat array of { id, name, currency, isManager, mccId }
  */
-async function discoverAllAccounts(accessToken, developerToken, mccId, rootMccId, visited = new Set()) {
+async function discoverAllAccounts(accessToken, developerToken, mccId, rootMccId = mccId) {
   const cleanMcc = String(mccId).replace(/-/g, '');
-  if (visited.has(cleanMcc)) return [];
-  visited.add(cleanMcc);
+  const loginMcc = String(rootMccId || mccId).replace(/-/g, '');
 
   let rows;
   try {
     rows = await googleAds.queryViaRest(
-      accessToken, developerToken, cleanMcc,
-      CUSTOMER_CLIENT_QUERY,
-      rootMccId
+      accessToken, developerToken, cleanMcc, CUSTOMER_CLIENT_QUERY, loginMcc
     );
   } catch (err) {
     console.error(`[discoverAllAccounts] Failed to query MCC ${cleanMcc}:`, err.message);
     return [];
   }
 
-  // Defensive guard: queryViaRest normally returns an array (empty when there are
-  // no results), but if it ever yields null/undefined (unexpected API shape), the
-  // `for...of rows` below would throw and 500 the ENTIRE /api/accounts listing.
-  // Returning [] keeps account discovery resilient to a single empty/bad sub-MCC.
+  // queryViaRest normally returns an array; guard against an unexpected null/shape
+  // so one odd response can't 500 the entire listing.
   if (!Array.isArray(rows)) return [];
 
   const accounts = [];
-  const subMccs = [];
-
   for (const row of rows) {
     const c = row.customerClient;
     if (!c || !c.id) continue;
     const id = String(c.id);
-
-    // Skip the MCC itself
-    if (id === cleanMcc) continue;
-
-    if (c.manager) {
-      // Sub-MCC — queue for recursive discovery
-      subMccs.push(id);
-    } else {
-      accounts.push({
-        id,
-        name: c.descriptiveName || 'Account ' + id,
-        currency: c.currencyCode || '',
-        isManager: false,
-        mccId: cleanMcc, // Track which MCC directly manages this account
-      });
-    }
+    if (id === cleanMcc) continue;   // skip the MCC itself
+    if (c.manager) continue;         // skip sub-MCCs — their child accounts are already in this result
+    accounts.push({
+      id,
+      name: c.descriptiveName || 'Account ' + id,
+      currency: c.currencyCode || '',
+      isManager: false,
+      mccId: cleanMcc,
+    });
   }
-
-  // Recursively discover accounts under each sub-MCC
-  for (const subMcc of subMccs) {
-    const subAccounts = await discoverAllAccounts(
-      accessToken, developerToken, subMcc, rootMccId, visited
-    );
-    accounts.push(...subAccounts);
-  }
-
   return accounts;
 }
 
@@ -99,6 +84,15 @@ function createAccountsRouter(config) {
   // List all accessible accounts via MCC (including nested sub-MCCs)
   router.get('/api/accounts', requireAuth, async (req, res, next) => {
     try {
+      // Cache: the MCC hierarchy rarely changes, so serve the already-discovered
+      // list for this session instead of re-hitting the Ads API on every tab load.
+      // `?refresh=1` forces a fresh discovery.
+      if (!req.query.refresh
+          && Array.isArray(req.session.accounts) && req.session.accounts.length
+          && req.session.accountsAt && (Date.now() - req.session.accountsAt) < ACCOUNTS_TTL_MS) {
+        return res.json({ accounts: req.session.accounts, cached: true });
+      }
+
       const refreshToken = req.session.tokens.refresh_token;
       const accessToken  = await googleAds.refreshAccessToken(config.googleAds, refreshToken);
       req.session.tokens.access_token = accessToken;
@@ -128,8 +122,9 @@ function createAccountsRouter(config) {
       const unique = Array.from(seen.values());
       unique.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-      console.log(`[accounts] Discovered ${unique.length} accounts (from ${accounts.length} total incl. dupes)`);
+      console.log(`[accounts] Discovered ${unique.length} accounts (single query)`);
       req.session.accounts = unique;
+      req.session.accountsAt = Date.now();
       res.json({ accounts: unique });
 
     } catch (err) {
