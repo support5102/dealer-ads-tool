@@ -548,27 +548,37 @@ function createPacingRouter(config, deps = {}) {
         return res.json({
           accounts: [], failed: [],
           totalAccounts: 0, loadedAccounts: 0,
+          nextOffset: null,
         });
       }
+
+      // Step 3.5: Optional chunking — ?offset=N&limit=M fetches only a slice,
+      // so the frontend can load dealers progressively across several short
+      // requests instead of one long request that trips the 60s deadline.
+      const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+      const limitRaw = parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : null;
+      const chunk = limit === null ? matched.slice(offset) : matched.slice(offset, offset + limit);
+      const nextOffset = offset + chunk.length < matched.length ? offset + chunk.length : null;
 
       // Step 4: Fetch spend data in batches
       const results = [];
       const failed = [];
 
-      for (let i = 0; i < matched.length; i += BATCH_SIZE) {
+      for (let i = 0; i < chunk.length; i += BATCH_SIZE) {
         if (Date.now() - startTime > TIMEOUT_MS) {
           // Timeout — add remaining to failed
-          for (let j = i; j < matched.length; j++) {
+          for (let j = i; j < chunk.length; j++) {
             failed.push({
-              customerId: matched[j].account.id,
-              dealerName: matched[j].account.name,
+              customerId: chunk[j].account.id,
+              dealerName: chunk[j].account.name,
               error: 'Request timeout',
             });
           }
           break;
         }
 
-        const batch = matched.slice(i, i + BATCH_SIZE);
+        const batch = chunk.slice(i, i + BATCH_SIZE);
 
         const batchResults = await Promise.allSettled(batch.map(({ account, goal }) =>
           fetchAccountPacing({
@@ -651,6 +661,7 @@ function createPacingRouter(config, deps = {}) {
         failed,
         totalAccounts: matched.length,
         loadedAccounts: results.length,
+        nextOffset,
         ...(engineSummary ? { engineSummary } : {}),
       });
     } catch (err) {

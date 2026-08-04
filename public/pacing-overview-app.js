@@ -148,30 +148,72 @@ async function loadOverview() {
   failedSection.innerHTML = '';
   document.getElementById('refreshBtn').disabled = true;
 
+  const loadingText = loading.querySelector('p');
+  if (loadingText) loadingText.textContent = 'Loading all accounts...';
+
+  // Accumulators live outside the try so a mid-sequence network error keeps
+  // the rows that already rendered instead of wiping the table.
+  const CHUNK_SIZE = 6;
+  const allAccounts = [];
+  const allFailed = [];
+
   try {
     // Ensure accounts are loaded into session before fetching pacing
     await fetch('/api/accounts');
-    const res = await fetch('/api/pacing/all');
-    const data = await res.json();
 
-    if (!res.ok) {
-      content.innerHTML = `<div class="error-msg">${esc(data.error || 'Failed to load pacing data.')}</div>`;
-      return;
+    // Load dealers in small chunks so each request stays fast. One big request
+    // used to trip the server's 60s deadline and mark half the dealers as
+    // "Request timeout" without ever fetching them.
+    let offset = 0;
+    let totalAccounts = 0;
+
+    while (true) {
+      const res = await fetch(`/api/pacing/all?offset=${offset}&limit=${CHUNK_SIZE}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (allAccounts.length === 0) {
+          content.innerHTML = `<div class="error-msg">${esc(data.error || 'Failed to load pacing data.')}</div>`;
+          return;
+        }
+        // Partial load: keep what we have, surface the rest as failed
+        allFailed.push({ customerId: '-', dealerName: `Remaining dealers (from #${offset + 1})`, error: data.error || 'Request failed' });
+        renderFailed(allFailed);
+        break;
+      }
+
+      allAccounts.push(...data.accounts);
+      allFailed.push(...data.failed);
+      totalAccounts = data.totalAccounts;
+
+      if (totalAccounts === 0) break;
+
+      // Progressive render — show rows as each chunk lands
+      currentData = { accounts: allAccounts, failed: allFailed, totalAccounts, loadedAccounts: allAccounts.length };
+      renderSummary(currentData);
+      const groupFilterEl = document.getElementById('group-filter-container');
+      if (groupFilterEl) groupFilterEl.innerHTML = renderGroupFilter(allAccounts);
+      renderTable(getFilteredAccounts());
+      renderFailed(allFailed);
+      if (loadingText) {
+        loadingText.textContent = `Loading dealers... ${Math.min(offset + CHUNK_SIZE, totalAccounts)} of ${totalAccounts}`;
+      }
+
+      if (data.nextOffset === null || data.nextOffset === undefined) break;
+      offset = data.nextOffset;
     }
 
-    if (data.accounts.length === 0 && data.failed.length === 0) {
+    if (allAccounts.length === 0 && allFailed.length === 0) {
       content.innerHTML = '<div class="empty-msg">No accounts found with monthly budgets set in Google Sheets.</div>';
       return;
     }
-
-    currentData = data;
-    renderSummary(data);
-    const groupFilterEl = document.getElementById('group-filter-container');
-    if (groupFilterEl) groupFilterEl.innerHTML = renderGroupFilter(data.accounts);
-    renderTable(getFilteredAccounts());
-    renderFailed(data.failed);
   } catch (err) {
-    content.innerHTML = `<div class="error-msg">Network error: ${esc(err.message)}</div>`;
+    if (allAccounts.length === 0) {
+      content.innerHTML = `<div class="error-msg">Network error: ${esc(err.message)}</div>`;
+    } else {
+      allFailed.push({ customerId: '-', dealerName: 'Remaining dealers', error: `Network error: ${err.message}` });
+      renderFailed(allFailed);
+    }
   } finally {
     loading.style.display = 'none';
     document.getElementById('refreshBtn').disabled = false;

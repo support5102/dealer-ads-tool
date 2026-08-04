@@ -11,6 +11,11 @@ const { createTestApp, authenticatedAgent } = require('./test-helpers');
 
 jest.mock('../../src/services/google-ads');
 jest.mock('../../src/services/goal-reader');
+jest.mock('../../src/services/change-history', () => ({
+  getLastBudgetChangeForDealer: jest.fn(),
+  addEntry: jest.fn(),
+}));
+const changeHistory = require('../../src/services/change-history');
 
 const SAMPLE_ACCOUNTS = [
   { id: '1111111111', name: 'Honda of Springfield', currency: 'USD', isManager: false },
@@ -49,7 +54,9 @@ function setupMocks() {
   googleAds.refreshAccessToken.mockResolvedValue('fresh-token');
   googleAds.getMonthSpend.mockResolvedValue(SAMPLE_SPEND);
   googleAds.getDailySpendLast14Days.mockResolvedValue(SAMPLE_DAILY_14);
+  googleAds.getTodaySpend.mockResolvedValue(0);
   googleAds.getLastBudgetChange.mockResolvedValue({ changeDate: null });
+  changeHistory.getLastBudgetChangeForDealer.mockResolvedValue(null);
   goalReader.readGoals.mockResolvedValue(SAMPLE_GOALS);
 }
 
@@ -148,6 +155,38 @@ describe('GET /api/pacing/all', () => {
     expect(res.body.loadedAccounts).toBe(1);
     expect(res.body.failed).toHaveLength(1);
     expect(res.body.failed[0].error).toMatch(/API failure/);
+  });
+
+  test('supports chunked loading via offset/limit', async () => {
+    const agent = await authenticatedAgent(app, { accounts: SAMPLE_ACCOUNTS });
+
+    const res1 = await agent.get('/api/pacing/all?offset=0&limit=1').expect(200);
+    expect(res1.body.totalAccounts).toBe(2);
+    expect(res1.body.accounts).toHaveLength(1);
+    expect(res1.body.accounts[0].dealerName).toBe('Honda of Springfield');
+    expect(res1.body.nextOffset).toBe(1);
+
+    const res2 = await agent.get('/api/pacing/all?offset=1&limit=1').expect(200);
+    expect(res2.body.totalAccounts).toBe(2);
+    expect(res2.body.accounts).toHaveLength(1);
+    expect(res2.body.accounts[0].dealerName).toBe('Toyota of Shelbyville');
+    expect(res2.body.nextOffset).toBe(null);
+  });
+
+  test('offset past the end returns empty chunk with null nextOffset', async () => {
+    const agent = await authenticatedAgent(app, { accounts: SAMPLE_ACCOUNTS });
+    const res = await agent.get('/api/pacing/all?offset=10&limit=5').expect(200);
+    expect(res.body.accounts).toHaveLength(0);
+    expect(res.body.failed).toHaveLength(0);
+    expect(res.body.totalAccounts).toBe(2);
+    expect(res.body.nextOffset).toBe(null);
+  });
+
+  test('without offset/limit params returns all accounts (backward compatible)', async () => {
+    const agent = await authenticatedAgent(app, { accounts: SAMPLE_ACCOUNTS });
+    const res = await agent.get('/api/pacing/all').expect(200);
+    expect(res.body.accounts).toHaveLength(2);
+    expect(res.body.nextOffset).toBe(null);
   });
 
   test('name matching is case-insensitive', async () => {
